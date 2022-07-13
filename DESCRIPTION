@@ -1,11 +1,24 @@
 Package: openeogdalcubes
 Type: Package
-Title: What the Package Does (Title Case)
+Title: OpenEO Compliant R Backend
 Version: 0.1.0
-Author: Who wrote it
-Maintainer: The package maintainer <yourself@somewhere.net>
-Description: More about what it does (maybe more than one line)
-    Use four spaces when indenting paragraphs within the Description.
-License: What license is it under?
+Author: Brian Pondi
+Maintainer: Brian Pondi <pondibrian@gmail.com>
+Description: openeogdalcubes operates as an openEo-compliant back-end interfacing gdalcubes as the main data cube.
+License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
+Imports:
+    plumber,
+    R6,
+    dplyr,
+    base64enc,
+    jsonlite,
+    tibble,
+    rlang,
+    ids,
+    tools,
+    sf,
+    useful,
+    gdalcubes,
+    rstac
