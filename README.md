@@ -19,13 +19,13 @@ Assuming you have Docker installed in your computing environment.
 You first need to clone the repository via this command:
 
 ```bash
-$ git clone https://github.com/PondiB/openeogdalcubes.git
+git clone https://github.com/PondiB/openeogdalcubes.git
 ```
 
 then you can change to that directory
 
 ```bash
-$ cd eo-datacube-platform
+cd openeogdalcubes
 ```
 
 
