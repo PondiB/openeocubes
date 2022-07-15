@@ -2,15 +2,18 @@ Package: openeogdalcubes
 Type: Package
 Title: OpenEO Compliant R Backend
 Version: 0.1.0
-Author: Brian Pondi
-Maintainer: Brian Pondi <pondibrian@gmail.com>
+Authors@R:
+    person(given = "Brian",
+           family = "Pondi",
+           role = c("aut", "cre"),
+           email = "brianpondi.geogeek@gmail.com")
 Description: openeogdalcubes operates as an openEo-compliant back-end interfacing gdalcubes as the main data cube.
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
 Imports:
-    plumber,
     R6,
+    plumber,
     dplyr,
     base64enc,
     jsonlite,
@@ -22,3 +25,22 @@ Imports:
     useful,
     gdalcubes,
     rstac
+RoxygenNote: 7.1.2
+Collate: 
+    'api_process_graphs.R'
+    'api_job.R'
+    'Parameter-class.R'
+    'Process-class.R'
+    'processes.R'
+    'math-processes.R'
+    'Router.R'
+    'api.R'
+    'Session-Class.R'
+    'Collection-class.R'
+    'ExecutableProcess-class.R'
+    'Job-class.R'
+    'ProcessGraph-class.R'
+    'SessionConfig-Class.R'
+    'error.R'
+Depends:
+    R (>= 4.0.0)
