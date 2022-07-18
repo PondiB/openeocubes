@@ -25,7 +25,7 @@ Imports:
     useful,
     gdalcubes,
     rstac
-RoxygenNote: 7.1.2
+RoxygenNote: 7.2.0
 Collate: 
     'api_process_graphs.R'
     'api_job.R'

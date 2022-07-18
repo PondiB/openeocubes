@@ -21,7 +21,7 @@ Parameter <- R6Class(
     value = NULL,
     parameters = NULL,
 
-    #' @description
+    #' @description parameter
     #'
     #' @param name Name of the parameter
     #' @param description Short description of the parameter
