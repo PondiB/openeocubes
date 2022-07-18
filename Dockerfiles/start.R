@@ -1,3 +1,8 @@
+# For test
+library(devtools)
+install_github("PondiB/openeogdalcubes")
+
+# Start service
 library(openeogdalcubes)
 
 config = SessionConfig(api.port = 8000, host = "0.0.0.0")

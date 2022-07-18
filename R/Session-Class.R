@@ -99,17 +99,9 @@ SessionInstance <- R6Class(
       if (is.null(private$config$workspace.path)) {
         private$config$workspace.path <- getwd()
       }
-
-      if (! dir.exists(paste(private$config$workspace.path, "Demofiles", sep = "/"))) {
-        dir.create(paste(private$config$workspace.path, "Demofiles", sep = "/"))
-      }
-
-      if (is.null(private$config$demo.path)) {
-        private$config$demo.path <- paste(private$config$workspace.path,"Demofiles",sep="/")
-      }
     },
 
-    #' @description biuld a df to add the endpoints later on
+    #' @description build a df to add the endpoints later on
     #'
     initEndpoints = function() {
       private$endpoints = tibble(path=character(0), method = character(0))

@@ -171,7 +171,7 @@ initializes workspace and data paths
 \if{html}{\out{<a id="method-SessionInstance-initEndpoints"></a>}}
 \if{latex}{\out{\hypertarget{method-SessionInstance-initEndpoints}{}}}
 \subsection{Method \code{initEndpoints()}}{
-biuld a df to add the endpoints later on
+build a df to add the endpoints later on
 \subsection{Usage}{
 \if{html}{\out{<div class="r">}}\preformatted{SessionInstance$initEndpoints()}\if{html}{\out{</div>}}
 }
