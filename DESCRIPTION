@@ -6,7 +6,7 @@ Authors@R:
     person(given = "Brian",
            family = "Pondi",
            role = c("aut", "cre"),
-           email = "brianpondi.geogeek@gmail.com")
+           email = "brian.pondi@uni-muenster.de")
 Description: openeogdalcubes operates as an openEo-compliant back-end interfacing gdalcubes as the main data cube.
 License: MIT + file LICENSE
 Encoding: UTF-8
@@ -25,6 +25,7 @@ Imports:
     useful,
     gdalcubes,
     rstac
+Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.2.0
 Collate: 
     'api_process_graphs.R'

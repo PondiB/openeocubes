@@ -72,10 +72,10 @@ stacCall = function(id, spatial_extent, temporal_extent){
   time_range <- paste(duration, collapse="/")
 
   # Spatial extent preprocess
-  xmin <- spatial_extent$north
-  ymin <- spatial_extent$west
-  xmax <- spatial_extent$south
-  ymax <- spatial_extent$east
+  xmin <- spatial_extent$west
+  ymin <- spatial_extent$south
+  xmax <- spatial_extent$east
+  ymax <- spatial_extent$north
 
   # Connect to STAC API and get Satellite data
   stac_object <- stac("https://earth-search.aws.element84.com/v0")

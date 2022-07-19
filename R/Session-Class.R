@@ -73,7 +73,6 @@ SessionInstance <- R6Class(
       self$initDirectory()
 
       addEndpoint()
-      #loadDemoData()
 
       private$router$run(port = port, host = host)
     },
