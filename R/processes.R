@@ -595,3 +595,69 @@ rename_labels = Process$new(
     }
   }
 )
+
+
+#' run_udf
+run_udf = Process$new(
+  id = "run_udf",
+  description = "Runs a UDF . Run the source code specified inline as string.",
+  categories = as.array("cubes"),
+  summary = "Run a user-defined function(UDF)",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A data cube.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube")
+    ),
+    Parameter$new(
+      name = "udf",
+      description = "The multi-line source code of a UDF.",
+      schema = list(
+        type = "string",
+        subtype = "string")
+    ),
+    Parameter$new(
+      name = "runtime",
+      description = "A UDF runtime identifier available at the back-end.",
+      schema = list(
+        type = "string",
+        subtype = "string")
+    ),
+    Parameter$new(
+      name = "context",
+      description = "Additional data passed by the user.",
+      schema = list(description = "Any data type."),
+      optional = TRUE
+    )
+  ),
+  returns = list(
+    description = "The computed result.",
+    schema = list(type = c("number", "null"))),
+  operation = function(data, udf, context, runtime, version = NULL) {
+
+    if("cube" %in% class(data)) {
+      if(grepl("min", udf, fixed = TRUE)||grepl("mean", udf, fixed = TRUE)||grepl("bfast", udf, fixed = TRUE)
+         ||grepl("max", udf, fixed = TRUE)||grepl("sum", udf, fixed = TRUE)){
+        # convert parsed string function to class function
+        func_parse <- parse(text = udf)
+        user_function <- eval(func_parse)
+        # reducer udf
+        data <- reduce_time(data, FUN = user_function)
+        return (data)
+      }else{
+        # convert parsed string function to class function
+        func_parse <- parse(text = udf)
+        user_function <- eval(func_parse)
+        # apply per pixel udf
+        data <- apply_pixel(data, FUN = user_function)
+        return (data)
+      }
+
+    }
+    else {
+      stop('Provided cube is not of class "cube"')
+    }
+  }
+)

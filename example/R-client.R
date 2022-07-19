@@ -23,5 +23,15 @@ data.cube = p$load_collection(id = "sentinel-s2-l2a-cogs",
 data.cube= p$filter_bands(data = data.cube, bands = c("B04", "B08"))
 
 
+# reducer UDF -> NDVI Trend
+ndvi.trend = "function(x) {
+  z = data.frame(t=1:ncol(x), ndvi=x[\"NDVI\",])
+  result = NA
+  if (sum(!is.na(z$ndvi)) > 3) {
+    result = coef(lm(ndvi ~ t, z, na.action = na.exclude))[2]
+  }
+  return(result)}"
 
-## TO Do  -> reducer UDF vs apply per pixel UDF
+# apply per pixel UDF -> Change Detection
+
+## TODO -> Test
