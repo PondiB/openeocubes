@@ -281,6 +281,7 @@ addEndpoint = function() {
   Session$assignProcess(merge_cubes)
   Session$assignProcess(array_element)
   Session$assignProcess(rename_labels)
+  Session$assignProcess(run_udf)
   Session$assignProcess(min)
   Session$assignProcess(max)
   Session$assignProcess(median)
