@@ -9,13 +9,17 @@ This service integrates STAC API, OpenEO standards and gdalcubes(Data Cubes) to 
 
 After processing the data , one can zip and export the final output to AWS S3 bucket where they can download and explore on open source tools like QGIS.
 
-## TO DO
+## Easy Deployment from DockerHub
+Assuming you have Docker installed. This is the easiest approach.
+You can get a hosted Docker image of the platform on DockerHub
+https://hub.docker.com/r/brianpondi/openeocubes
 
-Provide a Docker image hosted on DockerHub
+```bash
+docker run -p 8000:8000  brianpondi/openeocubes
+```
 
 ## Easy Deployment with Docker
-
-Assuming you have Docker installed in your computing environment.
+If you want to change the source code then this approach is recommended.
 You first need to clone the repository via this command:
 
 ```bash
