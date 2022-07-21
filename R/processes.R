@@ -705,20 +705,21 @@ run_udf = Process$new(
   operation = function(data, udf, context, runtime, version = NULL) {
 
     if("cube" %in% class(data)) {
-      if(grepl("min", udf, fixed = TRUE)||grepl("mean", udf, fixed = TRUE)||grepl("bfast", udf, fixed = TRUE)
-         ||grepl("max", udf, fixed = TRUE)||grepl("sum", udf, fixed = TRUE)){
+      # NB : more reducer keywords can be added
+      reducer.keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","poduct", "max")
+      if(all(sapply(reducer.keywords, grepl, udf))){
         # convert parsed string function to class function
-        func_parse <- parse(text = udf)
-        user_function <- eval(func_parse)
+        func.parse = parse(text = udf)
+        user.function = eval(func.parse)
         # reducer udf
-        data <- reduce_time(data, FUN = user_function)
+        data = reduce_time(data, FUN = user.function)
         return (data)
       }else{
         # convert parsed string function to class function
-        func_parse <- parse(text = udf)
-        user_function <- eval(func_parse)
+        func.parse = parse(text = udf)
+        user.function = eval(func.parse)
         # apply per pixel udf
-        data <- apply_pixel(data, FUN = user_function)
+        data = apply_pixel(data, FUN = user.function)
         return (data)
       }
 
