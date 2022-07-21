@@ -277,6 +277,7 @@ addEndpoint = function() {
   Session$assignProcess(save_result)
   Session$assignProcess(filter_bands)
   Session$assignProcess(filter_bbox)
+  Session$assignProcess(filter_spatial)
   Session$assignProcess(filter_temporal)
   Session$assignProcess(reduce_dimension)
   Session$assignProcess(merge_cubes)

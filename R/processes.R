@@ -309,6 +309,41 @@ filter_bbox = Process$new(
   }
 )
 
+#' filter_spatial
+filter_spatial = Process$new(
+  id = "filter_spatial",
+  description = "Limits the data cube over the spatial dimensions to the specified geometries.",
+  categories = as.array("cubes"),
+  summary = "Spatial filter using geometries",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A data cube.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube")
+    ),
+    Parameter$new(
+      name = "geometries",
+      description = "One or more geometries used for filtering, specified as GeoJSON. NB: pass on a url e.g.. \"http....geojson\".",
+      schema = list(
+        type = "object"),
+      optional = FALSE
+    )
+  ),
+  returns = eo_datacube,
+  operation = function(data, geometries, job) {
+    #read geojson url and convert to geometry
+    geo.data = read_sf(geometries)
+    geo.data = geo.data$geometry
+    geo.data = st_transform(geo.data, 3857)
+    #filter
+    cube = filter_geom(data_cube, geo.data)
+    return (cube)
+  }
+)
+
+
 
 #' filter temporal
 filter_temporal = Process$new(
@@ -467,14 +502,14 @@ merge_cubes = Process$new(
   summary = "Merging two data cubes",
   parameters = list(
     Parameter$new(
-      name = "cube1",
+      name = "data1",
       description = "A data cube.",
       schema = list(
         type = "object",
         subtype = "raster-cube")
     ),
     Parameter$new(
-      name = "cube2",
+      name = "data2",
       description = "A data cube.",
       schema = list(
         type = "object",
@@ -488,17 +523,17 @@ merge_cubes = Process$new(
     )
   ),
   returns = eo_datacube,
-  operation = function(cube1, cube2, context, job) {
+  operation = function(data1, data2, context, job) {
 
-    if("cube" %in% class(cube1) && "cube" %in% class(cube2)) {
+    if("cube" %in% class(data1) && "cube" %in% class(data2)) {
 
-      compare = compare.list(dimensions(cube1), dimensions(cube2))
+      compare = compare.list(dimensions(data1), dimensions(data2))
 
       if(FALSE %in% compare) {
         stop("Dimensions of datacubes are not equal")
       }
       else {
-        cube = join_bands(c(cube1, cube2))
+        cube = join_bands(c(data1, data2))
         return(cube)
       }
     }
