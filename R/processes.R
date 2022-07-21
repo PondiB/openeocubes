@@ -157,12 +157,28 @@ load_collection = Process$new(
       schema = list(
         type = "array"),
       optional = TRUE
+    ),
+    ### Additional variables for flexibility due to gdalcubes
+    Parameter$new(
+      name = "pixels_size",
+      description = "size of pixels in x-direction(longitude / easting) and y-direction (latitude / northing). Default is 300",
+      schema = list(
+        type = "number"),
+      optional = TRUE
+    ),
+    Parameter$new(
+      name = "time_aggregation",
+      description = "size of pixels in time-direction, expressed as ISO8601 period string (only 1 number and unit is allowed) such as \"P16D\".Default is monthly i.e. \"P1M\".",
+      schema = list(
+        type = "string"),
+      optional = TRUE
     )
 
   ),
   returns = eo_datacube,
-  operation = function(id, spatial_extent, temporal_extent, bands = NULL, job) {
+  operation = function(id, spatial_extent, temporal_extent, bands = NULL, pixels_size = 300,time_aggregation = "P1M", job) {
 
+    # get image collection from stac call
     ic = stacCall(id, spatial_extent, temporal_extent)
 
     if (! is.null(spatial_extent$crs)) {
@@ -199,9 +215,12 @@ load_collection = Process$new(
       }
     }
 
+   # create cube view
     view = cube_view(srs = crs, extent = extent,
-                     dx=300, dy=300, dt = "P1M", resampling="average", aggregation="median")
+                     dx=pixels_size, dy=pixels_size, dt = time_aggregation,
+                     resampling="bilinear", aggregation="median")
 
+    # create gdalcube using image collection and cube view
     cube = raster_cube(ic, view)
 
     if(! is.null(bands)) {
@@ -333,11 +352,11 @@ filter_spatial = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, geometries, job) {
-    #read geojson url and convert to geometry
+    # read geojson url and convert to geometry
     geo.data = read_sf(geometries)
     geo.data = geo.data$geometry
     geo.data = st_transform(geo.data, 3857)
-    #filter
+    # filter using geom
     cube = filter_geom(data_cube, geo.data)
     return (cube)
   }
