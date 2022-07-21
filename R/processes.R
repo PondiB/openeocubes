@@ -319,7 +319,7 @@ filter_temporal = Process$new(
   parameters = list(
     Parameter$new(
       name = "data",
-      description = "A data cube with bands.",
+      description = "A data cube with temporal dimensions.",
       schema = list(
         type = "object",
         subtype = "raster-cube")
@@ -338,6 +338,43 @@ filter_temporal = Process$new(
     if(! is.null(extent)) {
       cube = select_time(data, c(extent[1], extent[2]))
     }
+    return(cube)
+  }
+)
+
+#' rename_dimension
+rename_dimension = Process$new(
+  id = "rename_dimension",
+  description = "Renames a dimension in the data cube while preserving all other properties.",
+  categories = as.array("cubes"),
+  summary = "Rename a dimension",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A data cube with bands.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube")
+    ),
+    Parameter$new(
+      name = "source",
+      description = "The current name of the dimension.",
+      schema = list(
+        type = "string"),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "target",
+      description = "A new Name for the dimension.",
+      schema = list(
+        type = "string"),
+      optional = FALSE
+    )
+  ),
+  returns = eo_datacube,
+  operation = function(data, source, target, job) {
+
+    cube = rename_bands(data, source = target)
     return(cube)
   }
 )
