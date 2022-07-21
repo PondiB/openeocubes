@@ -1,3 +1,5 @@
+#' cube processes openEO standards mapped to gdalcubes processes
+#'
 #' @include Process-class.R
 #' @import gdalcubes
 #' @import rstac
@@ -209,46 +211,6 @@ load_collection = Process$new(
   }
 )
 
-#' save result
-save_result = Process$new(
-  id = "save_result",
-  description = "Saves processed data to the local user workspace / data store of the authenticated user.",
-  categories = as.array("cubes", "export"),
-  summary = "Save processed data to storage",
-  parameters = list(
-    Parameter$new(
-      name = "data",
-      description = "The data to save.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube")
-    ),
-    Parameter$new(
-      name = "format",
-      description = "The file format to save to.",
-      schema = list(
-        type = "string",
-        subtype = "output-format")
-    ),
-    Parameter$new(
-      name = "options",
-      description = "The file format parameters to be used to create the file(s).",
-      schema = list(
-        type = "object",
-        subtype = "output-format-options"),
-      optional = TRUE
-    )
-  ),
-  returns = list(
-    description = "false if saving failed, true otherwise.",
-    schema = list(type = "boolean")
-  ),
-  operation = function(data, format, options = NULL, job) {
-
-    job$setOutput(format)
-    return(data)
-  }
-)
 
 #' filter bands
 filter_bands = Process$new(
@@ -343,6 +305,39 @@ filter_bbox = Process$new(
 
     cube = filter_geom(data, pol, srs = crs)
 
+    return(cube)
+  }
+)
+
+
+#' filter temporal
+filter_temporal = Process$new(
+  id = "filter_temporal",
+  description = "Limits the data cube to the specified interval of dates and/or times.",
+  categories = as.array("cubes", "filter"),
+  summary = "Temporal filter based on temporal intervals",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A data cube with bands.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube")
+    ),
+    Parameter$new(
+      name = "extent",
+      description = "Left-closed temporal interval, i.e. an array with exactly two elements. e.g. c(\"2015-01-01\", \"2016-01-01\")",
+      schema = list(
+        type = "array"),
+      optional = FALSE
+    )
+  ),
+  returns = eo_datacube,
+  operation = function(data, extent, dimension = NULL, job) {
+
+    if(! is.null(extent)) {
+      cube = select_time(data, c(extent[1], extent[2]))
+    }
     return(cube)
   }
 )
@@ -659,5 +654,48 @@ run_udf = Process$new(
     else {
       stop('Provided cube is not of class "cube"')
     }
+  }
+)
+
+
+
+#' save result
+save_result = Process$new(
+  id = "save_result",
+  description = "Saves processed data to the local user workspace / data store of the authenticated user.",
+  categories = as.array("cubes", "export"),
+  summary = "Save processed data to storage",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "The data to save.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube")
+    ),
+    Parameter$new(
+      name = "format",
+      description = "The file format to save to.",
+      schema = list(
+        type = "string",
+        subtype = "output-format")
+    ),
+    Parameter$new(
+      name = "options",
+      description = "The file format parameters to be used to create the file(s).",
+      schema = list(
+        type = "object",
+        subtype = "output-format-options"),
+      optional = TRUE
+    )
+  ),
+  returns = list(
+    description = "false if saving failed, true otherwise.",
+    schema = list(type = "boolean")
+  ),
+  operation = function(data, format, options = NULL, job) {
+
+    job$setOutput(format)
+    return(data)
   }
 )
