@@ -6,6 +6,8 @@
 #'
 #' @include Session-Class.R
 #' @importFrom R6 R6Class
+#'
+#' @export
 Collection <- R6Class(
   "Collection",
   public = list(
