@@ -282,6 +282,7 @@ addEndpoint = function() {
   Session$assignProcess(reduce_dimension)
   Session$assignProcess(merge_cubes)
   Session$assignProcess(array_element)
+  Session$assignProcess(ndvi)
   Session$assignProcess(rename_dimension)
   Session$assignProcess(rename_labels)
   Session$assignProcess(run_udf)

@@ -85,7 +85,8 @@ stacCall = function(id, spatial_extent, temporal_extent){
     stac_search(
       collections = id,
       bbox = c(xmin, ymin, xmax, ymax),
-      datetime = time_range
+      datetime = time_range,
+      limit = 10000
     ) %>%
     post_request() %>%
     items_fetch()
@@ -395,6 +396,52 @@ filter_temporal = Process$new(
     return(cube)
   }
 )
+
+#' ndvi
+ndvi = Process$new(
+  id = "ndvi",
+  description = "Computes the Normalized Difference Vegetation Index (NDVI). The NDVI is computed as (nir - red) / (nir + red).",
+  categories = as.array("cubes"),
+  summary = "Normalized Difference Vegetation Index",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A data cube with bands.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube")
+    ),
+    Parameter$new(
+      name = "nir",
+      description = "The name of the NIR band. Defaults to the band that has the common name nir assigned..",
+      schema = list(
+        type = "string"),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "red",
+      description = "The name of the red band. Defaults to the band that has the common name red assigned.",
+      schema = list(
+        type = "string"),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "target_band",
+      description = "By default, the dimension of type bands is dropped. To keep the dimension specify a new band name in this parameter so that a new dimension label with the specified name will be added for the computed values.",
+      schema = list(
+        type = "string"),
+      optional = TRUE
+    )
+
+  ),
+  returns = eo_datacube,
+  operation = function(data, nir= "nir", red = "red",target_band = NULL, job) {
+
+    cube = data %>% apply_pixel("(nir-red)/(nir+red)", names = "NDVI", keep_bands=FALSE)
+    return(cube)
+  }
+)
+
 
 #' rename_dimension
 rename_dimension = Process$new(
@@ -725,7 +772,7 @@ run_udf = Process$new(
 
     if("cube" %in% class(data)) {
       # NB : more reducer keywords can be added
-      reducer.keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","poduct", "max")
+      reducer.keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","product", "max", "count", "variance")
       if(all(sapply(reducer.keywords, grepl, udf))){
         # convert parsed string function to class function
         func.parse = parse(text = udf)
