@@ -12,12 +12,13 @@ login(user = "user",
 p = processes()
 
 # load the initial data collection and limit the amount of data loaded
-data.cube = p$load_collection(id = "sentinel-s2-l2a-cogs",
+# global data options :  LANDSAT-8-L1-C1, SENTINEL-2-L2A-COGS, SENTINEL-2-L2A, SENTINEL-2-L1C
+data.cube = p$load_collection(id = "SENTINEL-2-L2A-COGS",
                          spatial_extent = list(west=16.06,
                                                south=48.06,
                                                east=16.65,
                                                north=48.35),
-                         temporal_extent = c("2021-01-01", "2021-06-30"),
+                         temporal_extent = c("2021-01-01", "2021-12-30"),
                          # extra optional args -> courtesy of gdalcubes
                          pixels_size = 500,
                          time_aggregation = "P1M"
@@ -25,6 +26,10 @@ data.cube = p$load_collection(id = "sentinel-s2-l2a-cogs",
 
 # filter the data cube for the desired bands
 data.cube= p$filter_bands(data = data.cube, bands = c("B04", "B08"))
+
+# rename bands
+
+# ndvi calculation
 
 
 # reducer UDF -> NDVI Trend
@@ -39,3 +44,5 @@ ndvi.trend = "function(x) {
 # apply per pixel UDF -> Change Detection
 
 ## TODO -> Test
+
+# save locally and to s3 bucket

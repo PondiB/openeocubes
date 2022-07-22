@@ -65,23 +65,26 @@ changeProjection = function(extent) {
 #' @param spatial_extent bbox of the region of interest
 #' @param temporal_extent Time range
 #'
-stacCall = function(id, spatial_extent, temporal_extent){
+stac_call = function(id, spatial_extent, temporal_extent){
 
   # Temporal extent preprocess
-  t0 <- temporal_extent[[1]]
-  t1 <- temporal_extent[[2]]
-  duration <- c(t0, t1)
-  time_range <- paste(duration, collapse="/")
+  t0 = temporal_extent[[1]]
+  t1 = temporal_extent[[2]]
+  duration = c(t0, t1)
+  time_range = paste(duration, collapse="/")
 
   # Spatial extent preprocess
-  xmin <- spatial_extent$west
-  ymin <- spatial_extent$south
-  xmax <- spatial_extent$east
-  ymax <- spatial_extent$north
+  xmin = spatial_extent$west
+  ymin = spatial_extent$south
+  xmax = spatial_extent$east
+  ymax = spatial_extent$north
+
+  #id to lower case
+  id = tolower(id)
 
   # Connect to STAC API and get Satellite data
-  stac_object <- stac("https://earth-search.aws.element84.com/v0")
-  items <- stac_object %>%
+  stac_object = stac("https://earth-search.aws.element84.com/v0")
+  items = stac_object %>%
     stac_search(
       collections = id,
       bbox = c(xmin, ymin, xmax, ymax),
@@ -91,7 +94,7 @@ stacCall = function(id, spatial_extent, temporal_extent){
     post_request() %>%
     items_fetch()
   # create image collection from stac items features
-  img.col <- stac_image_collection(items$features)
+  img.col = stac_image_collection(items$features)
   return (img.col)
 }
 
@@ -180,7 +183,7 @@ load_collection = Process$new(
   operation = function(id, spatial_extent, temporal_extent, bands = NULL, pixels_size = 300,time_aggregation = "P1M", job) {
 
     # get image collection from stac call
-    ic = stacCall(id, spatial_extent, temporal_extent)
+    ic = stac_call(id, spatial_extent, temporal_extent)
 
     if (! is.null(spatial_extent$crs)) {
       crsString = toString(spatial_extent$crs)
