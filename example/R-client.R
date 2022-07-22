@@ -3,7 +3,7 @@ library(openeo)
 # connect  to the back-end
 con = connect("http://127.0.0.1:8000")
 
-# basic login
+# basic login with default params
 login(user = "user",
       password = "password",
       login_type = "basic")
@@ -28,9 +28,11 @@ data.cube = p$load_collection(id = "SENTINEL-2-L2A-COGS",
 data.cube= p$filter_bands(data = data.cube, bands = c("B04", "B08"))
 
 # rename bands
+data.cube= p$rename_dimension(data = data.cube,"B04", "red")
+data.cube= p$rename_dimension(data = data.cube,"B08", "nir")
 
 # ndvi calculation
-
+data.cube= p$ndvi(data = data.cube)
 
 # reducer UDF -> NDVI Trend
 ndvi.trend = "function(x) {
@@ -41,7 +43,8 @@ ndvi.trend = "function(x) {
   }
   return(result)}"
 
-# apply per pixel UDF -> Change Detection
+# run UDF
+data.cube= p$run_udf(data = data.cube, udf = ndvi.trend)
 
 ## TODO -> Test
 
