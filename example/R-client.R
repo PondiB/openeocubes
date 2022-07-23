@@ -18,21 +18,21 @@ data.cube = p$load_collection(id = "SENTINEL-2-L2A-COGS",
                                                south=48.06,
                                                east=16.65,
                                                north=48.35),
-                         temporal_extent = c("2021-01-01", "2021-12-30"),
+                         temporal_extent = c("2021-01-01", "2021-03-30"),
                          # extra optional args -> courtesy of gdalcubes
                          pixels_size = 500,
                          time_aggregation = "P1M"
                          )
 
 # filter the data cube for the desired bands
-data.cube= p$filter_bands(data = data.cube, bands = c("B04", "B08"))
+data.cube = p$filter_bands(data = data.cube, bands = c("B04", "B08"))
 
 # rename bands
-data.cube= p$rename_dimension(data = data.cube,"B04", "red")
-data.cube= p$rename_dimension(data = data.cube,"B08", "nir")
+data.cube = p$rename_dimension(data = data.cube,"B04", "red")
+data.cube = p$rename_dimension(data = data.cube,"B08", "nir")
 
 # ndvi calculation
-data.cube= p$ndvi(data = data.cube)
+data.cube = p$ndvi(data = data.cube)
 
 # reducer UDF -> NDVI Trend
 ndvi.trend = "function(x) {
@@ -44,8 +44,22 @@ ndvi.trend = "function(x) {
   return(result)}"
 
 # run UDF
-data.cube= p$run_udf(data = data.cube, udf = ndvi.trend)
+data.cube = p$run_udf(data = data.cube, udf = ndvi.trend)
 
-## TODO -> Test
+# save as GeoTiff or NetCDF
+data.cube = p$save_result(data = data.cube, format = "GTiff" )
 
-# save locally and to s3 bucket
+# create a job
+job = create_job(graph = data.cube, title = "ndviTrend", description = "NDVI Trend")
+
+# then start the processing of the job
+start_job(job = job)
+
+# an overview of the job
+describe_job(job = job)
+
+# an overview of the created files
+list_results(job = job)
+
+# download them to the desired folder
+download_results(job = job, folder = "/Users/brianpondi/Downloads/processed_data")

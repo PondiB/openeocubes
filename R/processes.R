@@ -771,7 +771,7 @@ run_udf = Process$new(
   returns = list(
     description = "The computed result.",
     schema = list(type = c("number", "null"))),
-  operation = function(data, udf, context, runtime, version = NULL) {
+  operation = function(data, udf, context, runtime, version = NULL, job) {
 
     if("cube" %in% class(data)) {
       # NB : more reducer keywords can be added
