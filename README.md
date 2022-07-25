@@ -1,10 +1,10 @@
 
 # OpenEO Compliant Lightweight R Platform for Processing Time Series Satellite Images
 
-This service integrates STAC API, OpenEO standards and gdalcubes(Data Cubes) to be a  lightweight platform to enable processing of time series satellite images via RESTful APIs. It also supports users to run their custom R functions.
+The service integrates STAC API, OpenEO standards and gdalcubes to be a lightweight platform to enable analysis of time series satellite images via OpenEO Compliant RESTful endpoints using R-Client . It also supports users to run their custom R functions.
 
 
-![](docs/lightweight-architecture.png)
+![](docs/lightweight-architecture-v1.png)
 
 
 After processing the data , one can zip and export the final output to AWS S3 bucket where they can download and explore on open source tools like QGIS.
