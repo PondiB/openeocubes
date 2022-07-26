@@ -42,22 +42,6 @@ datacube_schema = function() {
 #' return object for the processes
 eo_datacube = datacube_schema()
 
-#' changeProjection
-#' @description Change from EPSG:4326 to EPSG:3857
-#' @param extent bbox of spatial extent
-#'
-#' @return changed spatial extent
-changeProjection = function(extent) {
-
-  p1 = sf::st_point(c(extent$east,extent$north))
-  p2 = sf::st_point(c(extent$west,extent$south))
-  sfc = sf::st_sfc(p1, p2, crs = 4326)
-  trans = sf::st_transform(sfc, 3857)
-  bb = sf::st_bbox(trans)
-
-  spatial_extent = list(west = bb$xmin[[1]], east = bb$xmax[[1]], north = bb$ymax[[1]], south = bb$ymin[[1]])
-  return(spatial_extent)
-}
 
 #' stacCall
 #' @description Internal function to perform stac api calls
