@@ -185,42 +185,10 @@ load_collection = Process$new(
     # get image collection from stac call
     ic = stac_call(id, spatial_extent, temporal_extent)
 
-    if (! is.null(spatial_extent$crs)) {
-      crsString = toString(spatial_extent$crs)
-    }
-    else {
-      crsString = "3857"
-    }
-
-    crs = paste("EPSG", crsString, sep = ":")
-    ex = extent(ic)
-
-    if(is.null(spatial_extent)) {
-      if(is.null(temporal_extent)) {
-        extent = ic
-      }
-      else {
-        extent = list(left = ex$left, right = ex$right, top = ex$top, bottom = ex$bottom,
-                      t0 = temporal_extent[[1]], t1 = temporal_extent[[2]])
-      }
-    }
-    else {
-      spatial_extent = changeProjection(spatial_extent)
-
-      if(is.null(temporal_extent)) {
-        extent = list(left = spatial_extent$west, right = spatial_extent$east,
-                      top = spatial_extent$north, bottom = spatial_extent$south,
-                      t0 = ex$t0, t1 = ex$t1)
-      }
-      else {
-        extent = list(left = spatial_extent$west, right = spatial_extent$east,
-                             top = spatial_extent$north, bottom = spatial_extent$south,
-                             t0 = temporal_extent[[1]], t1 = temporal_extent[[2]])
-      }
-    }
+    spatial_extent$crs ="EPSG:3857"
 
    # create cube view
-    view = cube_view(srs = crs, extent = extent,
+    view = cube_view(srs = "EPSG:3857", extent = extent,
                      dx=pixels_size, dy=pixels_size, dt = time_aggregation,
                      resampling="bilinear", aggregation="median")
 
