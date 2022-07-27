@@ -63,8 +63,6 @@ stac_call = function(id, spatial_extent, temporal_extent){
   xmax = spatial_extent$east
   ymax = spatial_extent$north
 
-  #id to lower case
-  id = tolower(id)
 
   # Connect to STAC API and get Satellite data
   stac_object = stac("https://earth-search.aws.element84.com/v0")
@@ -169,10 +167,8 @@ load_collection = Process$new(
     # get image collection from stac call
     ic = stac_call(id, spatial_extent, temporal_extent)
 
-    spatial_extent$crs ="EPSG:3857"
-
    # create cube view
-    view = cube_view(srs = "EPSG:3857", extent = extent,
+    view = cube_view(srs = "EPSG:3857", extent = extent(ic),
                      dx=pixels_size, dy=pixels_size, dt = time_aggregation,
                      resampling="bilinear", aggregation="median")
 
