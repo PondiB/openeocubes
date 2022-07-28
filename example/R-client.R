@@ -18,7 +18,7 @@ data.cube = p$load_collection(id = "sentinel-s2-l2a-cogs",
                                                south=51.8,
                                                east=7.2,
                                                north=52.8),
-                         temporal_extent = c("2021-01-01", "2021-03-31"),
+                         temporal_extent = c("2021-01-01", "2021-06-30"),
                          # extra optional args -> courtesy of gdalcubes
                          pixels_size = 500,
                          time_aggregation = "P1M"

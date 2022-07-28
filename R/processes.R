@@ -426,7 +426,8 @@ rename_dimension = Process$new(
   returns = eo_datacube,
   operation = function(data, source, target, job) {
 
-    cube = rename_bands(data, source = target)
+    cube <- rename_bands(data, B04 = "red", B08 = "nir")
+    #cube <- do.call("rename_bands", list(data, renamed))
     return(cube)
   }
 )
