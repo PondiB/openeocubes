@@ -28,8 +28,7 @@ data.cube = p$load_collection(id = "sentinel-s2-l2a-cogs",
 data.cube = p$filter_bands(data = data.cube, bands = c("B04", "B08"))
 
 # rename bands
-data.cube = p$rename_dimension(data = data.cube,"B04", "red")
-data.cube = p$rename_dimension(data = data.cube,"B08", "nir")
+data.cube = rename_dimension( data = data.cube, B04 = "red", B08 ="nir")
 
 # ndvi calculation
 data.cube = p$ndvi(data = data.cube)
@@ -44,7 +43,7 @@ ndvi.trend = "function(x) {
   return(result)}"
 
 # run UDF
-data.cube = p$run_udf(data = data.cube, udf = ndvi.trend)
+#data.cube = p$run_udf(data = data.cube, udf = ndvi.trend)
 
 # save as GeoTiff or NetCDF
 data.cube = p$save_result(data = data.cube, format = "GTiff" )

@@ -424,10 +424,9 @@ rename_dimension = Process$new(
     )
   ),
   returns = eo_datacube,
-  operation = function(data, source, target, job) {
-
-    cube <- rename_bands(data, B04 = "red", B08 = "nir")
-    #cube <- do.call("rename_bands", list(data, renamed))
+  operation = function(data, ..., job) {
+    arguments <- list(data, ...)
+    cube <- do.call("rename_bands", arguments )
     return(cube)
   }
 )
@@ -720,11 +719,11 @@ run_udf = Process$new(
   returns = list(
     description = "The computed result.",
     schema = list(type = c("number", "null"))),
-  operation = function(data, udf, context, runtime, version = NULL, job) {
+  operation = function(data, udf, context = NULL, runtime = NULL, version = NULL, job) {
 
     if("cube" %in% class(data)) {
       # NB : more reducer keywords can be added
-      reducer.keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","product", "max", "count", "variance")
+      reducer.keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","product", "max", "count", "var")
       if(all(sapply(reducer.keywords, grepl, udf))){
         # convert parsed string function to class function
         func.parse = parse(text = udf)
