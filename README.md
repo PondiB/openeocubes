@@ -3,6 +3,15 @@
 
 The service integrates STAC API, OpenEO standards and gdalcubes to be a lightweight platform to enable analysis of time series satellite images via OpenEO Compliant RESTful endpoints using R-Client . It also supports users to run their custom R functions.
 
+####  Motivation for the platform:
+The service tries to improve on the limitations of  established EO data management platforms like Google Earth Engine and Sentinel Hub by supporting:
+* Reproducibility of Science
+* Extensibility
+* Infrastructure Replicability
+* Open governance and development
+* No user management
+* Custom R functions
+
 
 ![](docs/lightweight-architecture-v1.png)
 
