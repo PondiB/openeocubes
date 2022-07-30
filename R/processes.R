@@ -720,26 +720,30 @@ run_udf = Process$new(
     description = "The computed result.",
     schema = list(type = c("number", "null"))),
   operation = function(data, udf, context = NULL, runtime = NULL, version = NULL, job) {
-
+    # NB : more reducer keywords can be added
+    reducer.keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","product", "max", "count", "var")
     if("cube" %in% class(data)) {
-      # NB : more reducer keywords can be added
-      reducer.keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","product", "max", "count", "var")
-      if(all(sapply(reducer.keywords, grepl, udf))){
-        # convert parsed string function to class function
-        func.parse = parse(text = udf)
-        user.function = eval(func.parse)
-        # reducer udf
-        data = reduce_time(data, FUN = user.function)
-        return (data)
+      if(grepl("function", udf)){
+        if(all(sapply(reducer.keywords, grepl, udf))){
+          # convert parsed string function to class function
+          func.parse = parse(text = udf)
+          user.function = eval(func.parse)
+          # reducer udf
+          print(user.function)
+          data = reduce_time(data, FUN = user.function)
+          return (data)
+        }else{
+          # convert parsed string function to class function
+          func.parse = parse(text = udf)
+          user.function = eval(func.parse)
+          # apply per pixel udf
+          data = apply_pixel(data, FUN = user.function)
+          return (data)
+        }
       }else{
-        # convert parsed string function to class function
-        func.parse = parse(text = udf)
-        user.function = eval(func.parse)
-        # apply per pixel udf
-        data = apply_pixel(data, FUN = user.function)
+        data = reduce_time(data, udf)
         return (data)
       }
-
     }
     else {
       stop('Provided cube is not of class "cube"')

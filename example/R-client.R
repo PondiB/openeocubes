@@ -33,7 +33,10 @@ data.cube = rename_dimension( data = data.cube, B04 = "red", B08 ="nir")
 # ndvi calculation
 data.cube = p$ndvi(data = data.cube)
 
-# reducer UDF -> NDVI Trend
+# simple reducer function
+data.cube.median = run_udf(data = data.cube, udf = "median(NDVI)")
+
+# reducer User-Defined Function -> NDVI Trend
 ndvi.trend = "function(x) {
   z = data.frame(t=1:ncol(x), ndvi=x[\"NDVI\",])
   result = NA
@@ -42,7 +45,7 @@ ndvi.trend = "function(x) {
   }
   return(result)}"
 
-# run UDF
+# run User-Defined Function
 #data.cube = p$run_udf(data = data.cube, udf = ndvi.trend)
 
 # save as GeoTiff or NetCDF
