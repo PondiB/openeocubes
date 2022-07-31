@@ -62,6 +62,11 @@ stac_call = function(id, spatial_extent, temporal_extent){
   ymin = spatial_extent$south
   xmax = spatial_extent$east
   ymax = spatial_extent$north
+  print("bbox details are...")
+  print(xmin)
+  print(ymin)
+  print(xmax)
+  print(ymax)
 
 
   # Connect to STAC API and get Satellite data
@@ -166,6 +171,8 @@ load_collection = Process$new(
 
     # get image collection from stac call
     ic = stac_call(id, spatial_extent, temporal_extent)
+    print("image collection")
+    print(ic)
 
    # create cube view
     view = cube_view(srs = "EPSG:3857", extent = extent(ic),
@@ -178,6 +185,8 @@ load_collection = Process$new(
     if(! is.null(bands)) {
       cube = select_bands(cube, bands)
     }
+    print("created cube..")
+    print(cube)
     return(cube)
   }
 )

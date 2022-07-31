@@ -20,10 +20,10 @@ p = processes()
 # load the initial data collection and limit the amount of data loaded
 # global data options :  landsat-8-l1-c1, sentinel-s2-l2a-cogs, sentinel-s2-l2a, sentinel-s2-l1c
 data.cube = p$load_collection(id = "sentinel-s2-l2a-cogs",
-                         spatial_extent = list(west=7.1,
-                                               south=51.8,
-                                               east=7.2,
-                                               north=52.8),
+                        spatial_extent = list(west=35.48,
+                                              south=-3.24,
+                                              east=35.58,
+                                              north=-3.14),
                          temporal_extent = c("2021-01-01", "2021-06-30"),
                          # extra optional args -> courtesy of gdalcubes
                          pixels_size = 500,
@@ -71,3 +71,4 @@ list_results(job = job)
 
 # download them to the desired folder
 download_results(job = job, folder = "/Users/brianpondi/Downloads/processed_data")
+
