@@ -4,6 +4,7 @@
 #' @import gdalcubes
 #' @import rstac
 #' @import useful
+#' @import logger
 NULL
 
 #' schema_format
@@ -62,11 +63,11 @@ stac_call = function(id, spatial_extent, temporal_extent){
   ymin = spatial_extent$south
   xmax = spatial_extent$east
   ymax = spatial_extent$north
-  print("bbox details are...")
-  print(xmin)
-  print(ymin)
-  print(xmax)
-  print(ymax)
+  log_info("bbox details are...")
+  log_info(xmin)
+  log_info(ymin)
+  log_info(xmax)
+  log_info(ymax)
 
 
   # Connect to STAC API and get Satellite data
@@ -171,8 +172,8 @@ load_collection = Process$new(
 
     # get image collection from stac call
     ic = stac_call(id, spatial_extent, temporal_extent)
-    print("image collection")
-    print(ic)
+    log_info("image collection")
+    log_info(ic)
 
    # create cube view
     view = cube_view(srs = "EPSG:3857", extent = extent(ic),
@@ -185,8 +186,8 @@ load_collection = Process$new(
     if(! is.null(bands)) {
       cube = select_bands(cube, bands)
     }
-    print("created cube..")
-    print(cube)
+    log_info("created cube..")
+    log_info(cube)
     return(cube)
   }
 )
