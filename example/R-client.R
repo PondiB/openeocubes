@@ -8,6 +8,12 @@ login(user = "user",
       password = "password",
       login_type = "basic")
 
+# to check available processes and their descriptions
+processes = list_processes()
+processes
+# to check specific process e.g. ndvi
+describe_process(processes$ndvi)
+
 # get the process collection to use the predefined processes of the back-end
 p = processes()
 
