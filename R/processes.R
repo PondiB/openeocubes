@@ -387,9 +387,17 @@ ndvi = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, nir= "nir", red = "red",target_band = NULL, job) {
+    if((toString(nir) =="B08") && (toString(red) == "B04")){
+      cube = apply_pixel(data,"(B08-B04)/(B08+B04)", names = "NDVI", keep_bands=FALSE)
+      return(cube)
+    }else if((toString(nir) =="B05") && (toString(red) == "B04")){
+      cube = apply_pixel(data,"(B05-B04)/(B05+B04)", names = "NDVI", keep_bands=FALSE)
+      return(cube)
+    }else{
+      cube = apply_pixel(data,"(nir-red)/(nir+red)", names = "NDVI", keep_bands=FALSE)
+      return(cube)
+    }
 
-    cube = data %>% apply_pixel("(nir-red)/(nir+red)", names = "NDVI", keep_bands=FALSE)
-    return(cube)
   }
 )
 
