@@ -1,6 +1,5 @@
-# For test
-library(devtools)
-install_github("PondiB/openeogdalcubes")
+# Install check package
+remotes::install_github("PondiB/openeogdalcubes")
 
 # Start service
 library(openeogdalcubes)
