@@ -34,10 +34,10 @@ data.cube = p$load_collection(id = "sentinel-s2-l2a-cogs",
 data.cube = p$filter_bands(data = data.cube, bands = c("B04", "B08"))
 
 # rename bands
-data.cube = rename_dimension( data = data.cube, B04 = "red", B08 ="nir")
+# data.cube = rename_dimension( data = data.cube, "B04" = "red", "B08" ="nir")
 
 # ndvi calculation
-data.cube = p$ndvi(data = data.cube)
+data.cube = p$ndvi(data = data.cube, red = "B04", nir = "B08" )
 
 # simple reducer function
 data.cube.median = run_udf(data = data.cube, udf = "median(NDVI)")

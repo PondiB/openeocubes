@@ -4,7 +4,6 @@
 #' @import gdalcubes
 #' @import rstac
 #' @import useful
-#' @import logger
 NULL
 
 #' schema_format
@@ -63,12 +62,6 @@ stac_call = function(id, spatial_extent, temporal_extent){
   ymin = spatial_extent$south
   xmax = spatial_extent$east
   ymax = spatial_extent$north
-  log_info("bbox details are...")
-  log_info(xmin)
-  log_info(ymin)
-  log_info(xmax)
-  log_info(ymax)
-
 
   # Connect to STAC API and get Satellite data
   stac_object = stac("https://earth-search.aws.element84.com/v0")
@@ -172,8 +165,6 @@ load_collection = Process$new(
 
     # get image collection from stac call
     ic = stac_call(id, spatial_extent, temporal_extent)
-    log_info("image collection")
-    log_info(ic)
 
    # create cube view
     view = cube_view(srs = "EPSG:3857", extent = extent(ic),
@@ -186,9 +177,13 @@ load_collection = Process$new(
     if(! is.null(bands)) {
       cube = select_bands(cube, bands)
     }
-    log_info("created cube..")
-    log_info(cube)
-    return(cube)
+    # check if cube is valid
+    if("cube" %in% class(cube)){
+      return(cube)
+    }else{
+      stop("Cube was not created")
+    }
+
   }
 )
 
