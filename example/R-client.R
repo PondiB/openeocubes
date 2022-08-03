@@ -9,8 +9,8 @@ login(user = "user",
       login_type = "basic")
 
 # to check available processes and their descriptions
-# processes = list_processes()
-# processes
+processes = list_processes()
+
 # to check specific process e.g. ndvi
 # describe_process(processes$ndvi)
 
@@ -33,14 +33,8 @@ data.cube = p$load_collection(id = "sentinel-s2-l2a-cogs",
 # filter the data cube for the desired bands
 data.cube = p$filter_bands(data = data.cube, bands = c("B04", "B08"))
 
-# rename bands
-# data.cube = rename_dimension( data = data.cube, "B04" = "red", "B08" ="nir")
-
 # ndvi calculation
 data.cube = p$ndvi(data = data.cube, red = "B04", nir = "B08" )
-
-# simple reducer function
-data.cube.median = run_udf(data = data.cube, udf = "median(NDVI)")
 
 # reducer User-Defined Function -> NDVI Trend
 ndvi.trend = "function(x) {
@@ -52,10 +46,16 @@ ndvi.trend = "function(x) {
   return(result)}"
 
 # run User-Defined Function
-#data.cube = p$run_udf(data = data.cube, udf = ndvi.trend)
+# data.cube = p$run_udf(data = data.cube, udf = ndvi.trend)
+
+# supported formats
+formats = list_file_formats()
 
 # save as GeoTiff or NetCDF
-data.cube = p$save_result(data = data.cube, format = "GTiff" )
+data.cube = p$save_result(data = data.cube, format = formats$output$GTiff )
+
+# Process and download data synchronously
+compute_result(graph = data.cube, output_file = "ndvi_data.tif")
 
 # create a job
 job = create_job(graph = data.cube, title = "ndviTrend", description = "NDVI Trend")
