@@ -1,5 +1,5 @@
 #' Parameter
-#'
+#' Used to define parameters of a Process.
 #' @field name Name of the parameter
 #' @field description Short description of the parameter
 #' @field schema Type and subtype of the parameter

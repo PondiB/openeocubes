@@ -1,5 +1,7 @@
 #' Process
 #'
+#' The process class in the openEO thinking. It is a described function that can be serialized in short and detail for the webservice,
+#' but also relates to the internal R function (process) that will be applied to perform the task
 #' @field id Id or name of the process
 #' @field summary Shortly what the process does
 #' @field description Extended description of the process

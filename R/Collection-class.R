@@ -1,5 +1,6 @@
 #' Collection Class
 #'
+#' This class represents the collections, which contain a set of Granules.
 #' @field id Id of the collection
 #' @field title Collection title
 #' @field description Short description of the collection

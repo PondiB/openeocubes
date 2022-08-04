@@ -1,4 +1,5 @@
 #' Job
+#' This class represents an openEO job. Which is submitted by a user.
 #'
 #' @field id Id of the job
 #' @field status Current status of the job
