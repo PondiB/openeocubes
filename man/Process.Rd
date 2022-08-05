@@ -8,6 +8,10 @@ Process
 
 Process
 }
+\details{
+The process class in the openEO thinking. It is a described function that can be serialized in short and detail for the webservice,
+but also relates to the internal R function (process) that will be applied to perform the task
+}
 \section{Public fields}{
 \if{html}{\out{<div class="r6-fields">}}
 \describe{

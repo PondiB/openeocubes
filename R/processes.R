@@ -43,42 +43,6 @@ datacube_schema = function() {
 eo_datacube = datacube_schema()
 
 
-#' stacCall
-#' @description Internal function to perform stac api calls
-#' @param id  Collection ID
-#' @param spatial_extent bbox of the region of interest
-#' @param temporal_extent Time range
-#'
-stac_call = function(id, spatial_extent, temporal_extent){
-
-  # Temporal extent preprocess
-  t0 = temporal_extent[[1]]
-  t1 = temporal_extent[[2]]
-  duration = c(t0, t1)
-  time_range = paste(duration, collapse="/")
-
-  # Spatial extent preprocess
-  xmin = spatial_extent$west
-  ymin = spatial_extent$south
-  xmax = spatial_extent$east
-  ymax = spatial_extent$north
-
-  # Connect to STAC API and get Satellite data
-  stac_object = stac("https://earth-search.aws.element84.com/v0")
-  items = stac_object %>%
-    stac_search(
-      collections = id,
-      bbox = c(xmin, ymin, xmax, ymax),
-      datetime = time_range,
-      limit = 10000
-    ) %>%
-    post_request() %>%
-    items_fetch()
-  # create image collection from stac items features
-  img.col = stac_image_collection(items$features)
-  return (img.col)
-}
-
 #' load collection
 load_collection = Process$new(
   id = "load_collection",
@@ -162,17 +126,42 @@ load_collection = Process$new(
   ),
   returns = eo_datacube,
   operation = function(id, spatial_extent, temporal_extent, bands = NULL, pixels_size = 300,time_aggregation = "P1M", job) {
+    # Temporal extent preprocess
+    t0 = temporal_extent[[1]]
+    t1 = temporal_extent[[2]]
+    duration = c(t0, t1)
+    time_range = paste(duration, collapse="/")
 
-    # get image collection from stac call
-    ic = stac_call(id, spatial_extent, temporal_extent)
+    # spatial extent
+    xmin = as.numeric(spatial_extent$west)
+    ymin = as.numeric(spatial_extent$south)
+    xmax = as.numeric(spatial_extent$east)
+    ymax = as.numeric(spatial_extent$north)
 
-   # create cube view
-    view = cube_view(srs = "EPSG:3857", extent = extent(ic),
-                     dx=pixels_size, dy=pixels_size, dt = time_aggregation,
-                     resampling="bilinear", aggregation="median")
-
-    # create gdalcube using image collection and cube view
-    cube = raster_cube(ic, view)
+    # Connect to STAC API and get sentinel data
+    stac_object <- stac("https://earth-search.aws.element84.com/v0")
+    items <- stac_object %>%
+      stac_search(
+        collections = id,
+        bbox = c(xmin, ymin, xmax, ymax),
+        datetime = time_range
+      ) %>%
+      post_request() %>%
+      items_fetch()
+    # create image collection from stac items features
+    img.col <- stac_image_collection(items$features)
+    # Define cube view with monthly aggregation
+    v.overview <- cube_view(
+      srs = "EPSG:3857",
+      extent = img.col,
+      dx = pixels_size,
+      dy = pixels_size,
+      dt = time_aggregation,
+      resampling = "average",
+      aggregation = "median"
+    )
+    # gdalcubes creation
+    cube <- raster_cube(img.col, v.overview)
 
     if(! is.null(bands)) {
       cube = select_bands(cube, bands)
@@ -183,7 +172,6 @@ load_collection = Process$new(
     }else{
       stop("Cube was not created")
     }
-
   }
 )
 

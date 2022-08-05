@@ -2,11 +2,14 @@
 % Please edit documentation in R/Parameter-class.R
 \name{Parameter}
 \alias{Parameter}
-\title{Parameter}
+\title{Parameter
+Used to define parameters of a Process.}
 \description{
 Parameter
+Used to define parameters of a Process.
 
 Parameter
+Used to define parameters of a Process.
 }
 \section{Public fields}{
 \if{html}{\out{<div class="r6-fields">}}

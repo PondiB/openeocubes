@@ -2,11 +2,14 @@
 % Please edit documentation in R/Job-class.R
 \name{Job}
 \alias{Job}
-\title{Job}
+\title{Job
+This class represents an openEO job. Which is submitted by a user.}
 \description{
 Job
+This class represents an openEO job. Which is submitted by a user.
 
 Job
+This class represents an openEO job. Which is submitted by a user.
 }
 \section{Public fields}{
 \if{html}{\out{<div class="r6-fields">}}

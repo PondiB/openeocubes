@@ -55,7 +55,7 @@ formats = list_file_formats()
 data.cube = p$save_result(data = data.cube, format = formats$output$GTiff )
 
 # Process and download data synchronously
-compute_result(graph = data.cube, output_file = "ndvi_data.tif")
+compute_result(graph = data.cube, output_file = "/Users/brianpondi/Downloads/processed_data")
 
 # create a job
 job = create_job(graph = data.cube, title = "ndviTrend", description = "NDVI Trend")

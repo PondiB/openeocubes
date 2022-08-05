@@ -8,6 +8,9 @@ Collection Class
 
 Collection Class
 }
+\details{
+This class represents the collections, which contain a set of Granules.
+}
 \section{Public fields}{
 \if{html}{\out{<div class="r6-fields">}}
 \describe{
