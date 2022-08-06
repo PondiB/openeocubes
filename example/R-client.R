@@ -8,17 +8,22 @@ login(user = "user",
       password = "password",
       login_type = "basic")
 
+# get the collection list
+collections = list_collections()
+
+# print an overview of the available collections (printed as data.frame or tibble)
+print(collections)
+
 # to check available processes and their descriptions
 processes = list_processes()
 
 # to check specific process e.g. ndvi
-# describe_process(processes$ndvi)
+describe_process(processes$ndvi)
 
 # get the process collection to use the predefined processes of the back-end
 p = processes()
 
 # load the initial data collection and limit the amount of data loaded
-# global data options :  landsat-8-l1-c1, sentinel-s2-l2a-cogs, sentinel-s2-l2a, sentinel-s2-l1c
 data.cube = p$load_collection(id = "sentinel-s2-l2a-cogs",
                           spatial_extent = list(west=7.1,
                                                 south=51.8,
@@ -34,10 +39,10 @@ data.cube = p$load_collection(id = "sentinel-s2-l2a-cogs",
 data.cube = p$filter_bands(data = data.cube, bands = c("B04", "B08"))
 
 # rename bands
-data.cube = rename_dimension(data = data.cube, "B04" = "red", "B08" = "nir")
+#data.cube = rename_dimension(data = data.cube, "B04" = "red", "B08" = "nir")
 
 # ndvi calculation
-data.cube = p$ndvi(data = data.cube)
+data.cube = p$ndvi(data = data.cube, red = "B04", nir = "B08" )
 
 # reducer User-Defined Function -> NDVI Trend
 ndvi.trend = "function(x) {
@@ -61,17 +66,17 @@ data.cube = p$save_result(data = data.cube, format = formats$output$GTiff )
 compute_result(graph = data.cube, output_file = "ndvi.tif")
 
 # create a job
-job = create_job(graph = data.cube, title = "ndviTrend", description = "NDVI Trend")
+#job = create_job(graph = data.cube, title = "ndviTrend", description = "NDVI Trend")
 
 # then start the processing of the job
-start_job(job = job)
+#start_job(job = job)
 
 # an overview of the job
-describe_job(job = job)
+#describe_job(job = job)
 
 # an overview of the created files
-list_results(job = job)
+#list_results(job = job)
 
 # download them to the desired folder
-download_results(job = job, folder = "/Users/brianpondi/Downloads/processed_data")
+#download_results(job = job, folder = "/Users/brianpondi/Downloads/processed_data")
 
