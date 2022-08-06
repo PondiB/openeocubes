@@ -272,6 +272,8 @@ addEndpoint = function() {
                          handler = .executeSynchronous,
                          filter = TRUE)
 
+# assign data collection
+  Session$assignData(sentinel_s2_l2a_cogs)
 # assign processes
   Session$assignProcess(load_collection)
   Session$assignProcess(save_result)
@@ -294,4 +296,5 @@ addEndpoint = function() {
   Session$assignProcess(subtract)
   Session$assignProcess(multiply)
   Session$assignProcess(divide)
+
 }

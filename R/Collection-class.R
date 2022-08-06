@@ -1,4 +1,4 @@
-#' Collection Class
+#' Collection
 #'
 #' This class represents the collections, which contain a set of Granules.
 #' @field id Id of the collection
@@ -7,7 +7,6 @@
 #'
 #' @include Session-Class.R
 #' @importFrom R6 R6Class
-#'
 #' @export
 Collection <- R6Class(
   "Collection",
@@ -172,3 +171,11 @@ Collection <- R6Class(
 is.Collection = function(obj) {
   return("Collection" %in% class(obj))
 }
+
+
+#'sentinel-s2-l2a-cogs
+sentinel_s2_l2a_cogs <- Collection$new(
+  id = "sentinel-s2-l2a-cogs",
+  title = "Sentinel 2 L2A COGs",
+  description = "Sentinel-2a and Sentinel-2b imagery, processed to Level 2A (Surface Reflectance) and converted to Cloud-Optimized GeoTIFFs"
+)

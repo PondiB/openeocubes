@@ -2,11 +2,11 @@
 % Please edit documentation in R/Collection-class.R
 \name{Collection}
 \alias{Collection}
-\title{Collection Class}
+\title{Collection}
 \description{
-Collection Class
+Collection
 
-Collection Class
+Collection
 }
 \details{
 This class represents the collections, which contain a set of Granules.
