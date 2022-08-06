@@ -138,7 +138,7 @@ load_collection = Process$new(
     xmax = as.numeric(spatial_extent$east)
     ymax = as.numeric(spatial_extent$north)
 
-    # Connect to STAC API and get sentinel data
+    # Connect to STAC API and get satellite data
     stac_object <- stac("https://earth-search.aws.element84.com/v0")
     items <- stac_object %>%
       stac_search(
@@ -163,15 +163,10 @@ load_collection = Process$new(
     # gdalcubes creation
     cube <- raster_cube(img.col, v.overview)
 
-    if(! is.null(bands)) {
-      cube = select_bands(cube, bands)
-    }
-    # check if cube is valid
-    if("cube" %in% class(cube)){
-      return(cube)
-    }else{
-      stop("Cube was not created")
-    }
+    #if(! is.null(bands)) {
+    #  cube = select_bands(cube, bands)
+    #}
+    return(cube)
   }
 )
 
@@ -248,17 +243,7 @@ filter_bbox = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, extent, job) {
-
-    if (! is.null(extent$crs)) {
-      crsString = toString(extent$crs)
-    }
-    else {
-      crsString = "3857"
-    }
-
-    crs = paste("EPSG", crsString, sep = ":")
-
-    extent = changeProjection(extent)
+    crs = "EPSG:3857"
     nw = c(extent$west, extent$north)
     sw = c(extent$west, extent$south)
     se = c(extent$east, extent$south)
