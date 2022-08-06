@@ -157,7 +157,7 @@ Collection <- R6Class(
             values = list(self$getMetadata()$bands)
           )
         ),
-        summaries = list(constellation = list("Landsat8"), 'eo:bands' = self$getEoBands())
+        summaries = list(constellation = list(""), 'eo:bands' = self$getEoBands())
       )
     }
   ),
@@ -177,5 +177,26 @@ is.Collection = function(obj) {
 sentinel_s2_l2a_cogs <- Collection$new(
   id = "sentinel-s2-l2a-cogs",
   title = "Sentinel 2 L2A COGs",
-  description = "Sentinel-2a and Sentinel-2b imagery, processed to Level 2A (Surface Reflectance) and converted to Cloud-Optimized GeoTIFFs"
+  description = "Sentinel-2a and Sentinel-2b imagery, processed to Level 2A (Surface Reflectance) and converted to Cloud-Optimized GeoTIFFs."
+)
+
+#'sentinel-s2-l2a
+sentinel_s2_l2a <- Collection$new(
+  id = "sentinel-s2-l2a",
+  title = "Sentinel 2 L2A",
+  description = "Sentinel-2a and Sentinel-2b imagery, processed to Level 2A (Surface Reflectance)."
+)
+
+#'sentinel-s2-l1c
+sentinel_s2_l1c <- Collection$new(
+  id = "sentinel-s2-l1c",
+  title = "Sentinel 2 L1C",
+  description = "Sentinel-2a and Sentinel-2b imagery, processed to Level 1C (Top-Of-Atmosphere Geometrically Corrected)."
+)
+
+#'landsat-8-l1-c1
+landsat_8_l1_c1 <- Collection$new(
+  id = "landsat-8-l1-c1",
+  title = "Landsat-8 L1 Collection-1",
+  description = "Landat-8 L1 Collection-1 imagery radiometrically calibrated and orthorectified using gound points and Digital Elevation Model (DEM) data to correct relief displacement."
 )
