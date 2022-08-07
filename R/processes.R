@@ -169,6 +169,7 @@ load_collection = Process$new(
     #}
     message("Data Cube is created....")
     message(cube)
+    stop(cube)
     return(cube)
   }
 )
