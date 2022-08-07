@@ -14,6 +14,9 @@ collections = list_collections()
 # print an overview of the available collections (printed as data.frame or tibble)
 print(collections)
 
+# to check description of a collection
+collections$`sentinel-s2-l2a-cogs`$description
+
 # to check available processes and their descriptions
 processes = list_processes()
 

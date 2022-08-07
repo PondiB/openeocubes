@@ -167,6 +167,8 @@ load_collection = Process$new(
     #if(! is.null(bands)) {
     #  cube = select_bands(cube, bands)
     #}
+    message("Data Cube is created....")
+    message(cube)
     return(cube)
   }
 )
