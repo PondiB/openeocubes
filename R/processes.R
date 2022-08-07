@@ -142,9 +142,10 @@ load_collection = Process$new(
     stac_object <- stac("https://earth-search.aws.element84.com/v0")
     items <- stac_object %>%
       stac_search(
-        collections = id,
-        bbox = c(xmin, ymin, xmax, ymax),
-        datetime = time_range
+        collections = "sentinel-s2-l2a-cogs", #id,
+        bbox = c(7.1, 51.8, 7.2, 52.8), #c(xmin, ymin, xmax, ymax),
+        datetime = "2021-01-01/2021-06-30", #time_range
+        limit = 10000
       ) %>%
       post_request() %>%
       items_fetch()
@@ -154,9 +155,9 @@ load_collection = Process$new(
     v.overview <- cube_view(
       srs = "EPSG:3857",
       extent = img.col,
-      dx = pixels_size,
-      dy = pixels_size,
-      dt = time_aggregation,
+      dx = 500, #pixels_size,
+      dy = 500, #pixels_size,
+      dt = "P1M",#time_aggregation,
       resampling = "average",
       aggregation = "median"
     )
