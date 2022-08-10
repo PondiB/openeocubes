@@ -142,9 +142,9 @@ load_collection = Process$new(
     stac_object <- stac("https://earth-search.aws.element84.com/v0")
     items <- stac_object %>%
       stac_search(
-        collections = "sentinel-s2-l2a-cogs", #id,
-        bbox = c(7.1, 51.8, 7.2, 52.8), #c(xmin, ymin, xmax, ymax),
-        datetime = "2021-01-01/2021-06-30", #time_range
+        collections = id, #"sentinel-s2-l2a-cogs",
+        bbox = c(xmin, ymin, xmax, ymax), #c(7.1, 51.8, 7.2, 52.8),
+        datetime =  time_range, #"2021-01-01/2021-06-30",
         limit = 10000
       ) %>%
       post_request() %>%
@@ -152,24 +152,17 @@ load_collection = Process$new(
     # create image collection from stac items features
     img.col <- stac_image_collection(items$features)
     # Define cube view with monthly aggregation
-    v.overview <- cube_view(
-      srs = "EPSG:3857",
-      extent = img.col,
-      dx = 500, #pixels_size,
-      dy = 500, #pixels_size,
-      dt = "P1M",#time_aggregation,
-      resampling = "average",
-      aggregation = "median"
-    )
+    v.overview <- cube_view(srs = "EPSG:3857", extent = img.col,
+                  dx = pixels_size, dy = pixels_size,dt = time_aggregation,
+                  resampling = "average", aggregation = "median")
     # gdalcubes creation
     cube <- raster_cube(img.col, v.overview)
 
-    #if(! is.null(bands)) {
-    #  cube = select_bands(cube, bands)
-    #}
+    if(! is.null(bands)) {
+      cube = select_bands(cube, bands)
+    }
     message("Data Cube is created....")
     message(cube)
-    stop(cube)
     return(cube)
   }
 )
