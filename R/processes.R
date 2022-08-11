@@ -27,6 +27,48 @@ schema_format = function(type, subtype = NULL, items = NULL) {
   return(schema)
 }
 
+#' generic definition
+.generic_param = function(description,required=NULL, ...) {
+  param = list()
+  param = append(param,list(description=description))
+
+  if (!is.null(required) && !is.na(required)) {
+    param = append(param,list(required = required))
+  }
+
+
+  schema = do.call(.generic_schema,list(...))
+
+  param = append(param,list(schema=schema))
+
+  return(param)
+}
+
+.generic_schema = function(type, format=NULL, items=NULL,examples=NULL) {
+  schema = list()
+  schema = append(schema,list(type=type))
+
+  if (!is.null(format) && !is.na(format)) {
+    schema = append(schema, list(format=format))
+  }
+
+  if (!is.null(examples) && !is.na(examples)) {
+    schema = append(schema,list(examples=examples))
+  }
+
+  if ("arrays" %in% tolower(type)) {
+    if (!is.null(items) && !is.na(items)) {
+      schema = append(schema,list(items=items))
+    }
+  }
+
+  return(schema)
+}
+
+result.eodata = .generic_param(description = "Processed EO data.",
+                               type="object",
+                               format="eodata")
+
 #' datacube_schema
 #' @description Return a list with datacube description and schema
 #'
@@ -124,7 +166,7 @@ load_collection = Process$new(
     )
 
   ),
-  returns = eo_datacube,
+  returns = result.eodata, #eo_datacube,
   operation = function(id, spatial_extent, temporal_extent, bands = NULL, pixels_size = 300,time_aggregation = "P1M", job) {
     # Temporal extent preprocess
     t0 = temporal_extent[[1]]
@@ -190,7 +232,7 @@ filter_bands = Process$new(
       optional = TRUE
     )
   ),
-  returns = eo_datacube,
+  returns = result.eodata, #eo_datacube,
   operation = function(data, bands, job) {
 
     if(! is.null(bands)) {
@@ -360,7 +402,7 @@ ndvi = Process$new(
     )
 
   ),
-  returns = eo_datacube,
+  returns = result.eodata, #eo_datacube,
   operation = function(data, nir= "nir", red = "red",target_band = NULL, job) {
     if((toString(nir) =="B08") && (toString(red) == "B04")){
       cube = apply_pixel(data,"(B08-B04)/(B08+B04)", names = "NDVI", keep_bands=FALSE)
@@ -406,7 +448,7 @@ rename_dimension = Process$new(
       optional = FALSE
     )
   ),
-  returns = eo_datacube,
+  returns = result.eodata, #eo_datacube,
   operation = function(data, ..., job) {
     arguments <- list(data, ...)
     cube <- do.call(rename_bands, arguments)
@@ -775,3 +817,6 @@ save_result = Process$new(
     return(data)
   }
 )
+
+
+
