@@ -140,6 +140,7 @@ load_collection = Process$new(
     ymax = as.numeric(spatial_extent$north)
 
     # Connect to STAC API and get satellite data
+    message("STAC API call.....")
     stac_object <- stac("https://earth-search.aws.element84.com/v0")
     items <- stac_object %>%
       stac_search(
