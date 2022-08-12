@@ -17,8 +17,8 @@ collections
 # to check description of a collection
 collections$`sentinel-s2-l2a-cogs`$description
 
-# Check that required processes are available ,if you remove the indexing you will get all processes visualized.
-list_processes()[1:5]
+# Check that required processes are available.
+processes = list_processes()
 
 # to check specific process e.g. ndvi
 describe_process(processes$ndvi)
@@ -63,7 +63,7 @@ ndvi_trend = "function(x) {
 formats = list_file_formats()
 
 # save as GeoTiff or NetCDF
-result = p$save_result(data = data.cube, format = formats$output$GTiff )
+result = p$save_result(data = datacube_ndvi, format = formats$output$GTiff )
 
 # Process and download data synchronously
 compute_result(graph = result, output_file = "ndvi.tif")
