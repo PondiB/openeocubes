@@ -778,8 +778,7 @@ save_result = Process$new(
   operation = function(data, format, options = NULL, job) {
     message("Data is being saved in format :")
     message(format)
-    message("The Job ID is")
-    message(job)
+    message("The above format is being saved")
     job$setOutput(format)
     return(data)
   }
