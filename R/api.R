@@ -89,6 +89,7 @@ NULL
 }
 
 .processes = function() {
+  message("processed api.R called")
   tryCatch({
     processes = list(processes = unname(lapply(Session$processes, function(process){
       return(process$processInfo())
@@ -104,7 +105,7 @@ NULL
 }
 
 .login_basic = function(req, res) {
-
+  message("log in from api.R called")
   auth = req$HTTP_AUTHORIZATION
   encoded = substr(auth,7,nchar(auth))
   decoded = rawToChar(base64enc::base64decode(encoded))

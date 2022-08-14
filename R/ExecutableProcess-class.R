@@ -47,6 +47,7 @@ ExecutableProcess <- R6Class(
     #' @description Run the operation including a generated list of parameters
     #'
     execute = function() {
+      message("Executable Process called ...")
 
         parameterList = list()
         for (key in 1:length(self$parameters)) {

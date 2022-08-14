@@ -164,6 +164,7 @@ load_collection = Process$new(
       cube = select_bands(cube, bands)
     }
     message("Data Cube is created....")
+    message(as_json(cube))
     return(cube)
   }
 )
@@ -197,6 +198,8 @@ filter_bands = Process$new(
     if(! is.null(bands)) {
       cube = select_bands(data, bands)
     }
+    message("Filtered data cube ....")
+    message(as_json(cube))
     return(cube)
   }
 )
@@ -411,6 +414,8 @@ rename_dimension = Process$new(
   operation = function(data, ..., job) {
     arguments <- list(data, ...)
     cube <- do.call(rename_bands, arguments)
+    message("Renamed Data Cube....")
+    message(as_json(cube))
     return(cube)
   }
 )
@@ -771,7 +776,10 @@ save_result = Process$new(
     schema = list(type = "boolean")
   ),
   operation = function(data, format, options = NULL, job) {
-
+    message("Data is being saved in format :")
+    message(format)
+    message("The Job ID is")
+    message(job)
     job$setOutput(format)
     return(data)
   }
