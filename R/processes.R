@@ -374,6 +374,8 @@ ndvi = Process$new(
       return(cube)
     }else{
       cube = apply_pixel(data,"(nir-red)/(nir+red)", names = "NDVI", keep_bands=FALSE)
+      message("ndvi calculated ....")
+      message(as_json(cube))
       return(cube)
     }
 

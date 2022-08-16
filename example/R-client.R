@@ -32,7 +32,7 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
                                                 south=51.8,
                                                 east=7.2,
                                                 north=52.8),
-                         temporal_extent = c("2021-01-01", "2021-06-30"),
+                         temporal_extent = c("2021-06-01", "2021-06-30"),
                          # extra optional args -> courtesy of gdalcubes
                          pixels_size = 500,
                          time_aggregation = "P1M"
@@ -42,10 +42,10 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
 datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
 
 # rename bands
-#datacube_renamed = rename_dimension(data = datacube_filtered, "B04" = "red", "B08" = "nir")
+datacube_renamed = rename_dimension(data = datacube_filtered, "B04" = "red", "B08" = "nir")
 
 # ndvi calculation
-datacube_ndvi = p$ndvi(data = datacube_filtered , red = "B04", nir = "B08" )
+datacube_ndvi = p$ndvi(data = datacube_renamed)
 
 # reducer User-Defined Function -> NDVI Trend
 ndvi_trend = "function(x) {
@@ -66,20 +66,22 @@ formats = list_file_formats()
 result = p$save_result(data = datacube_ndvi, format = formats$output$GTiff )
 
 # Process and download data synchronously
-compute_result(graph = result, output_file = "ndvi.tif")
+compute_result(graph = result, output_file = "./ndvi.tif")
+print("DONE")
 
 # create a job
-#job = create_job(graph = result, title = "ndviTrend", description = "NDVI Trend")
+job = create_job(graph = result, title = "ndviTrend", description = "NDVI Trend")
 
 # then start the processing of the job
-#start_job(job = job)
+start_job(job = job)
 
 # an overview of the job
-#describe_job(job = job)
+describe_job(job = job)
 
 # an overview of the created files
-#list_results(job = job)
+list_results(job = job)
 
 # download them to the desired folder
-#download_results(job = job, folder = "/Users/brianpondi/Downloads/processed_data")
+download_results(job = job, folder = "/Users/brianpondi/Downloads/processed_data")
+print("Job is done")
 
