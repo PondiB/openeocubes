@@ -89,7 +89,7 @@ NULL
 }
 
 .processes = function() {
-  message("processed api.R called")
+  message("processes at api.R called")
   tryCatch({
     processes = list(processes = unname(lapply(Session$processes, function(process){
       return(process$processInfo())

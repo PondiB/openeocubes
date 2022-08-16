@@ -42,10 +42,10 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
 datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
 
 # rename bands
-datacube_renamed = rename_dimension(data = datacube_filtered, "B04" = "red", "B08" = "nir")
+#datacube_renamed = rename_dimension(data = datacube_filtered, "B04" = "red", "B08" = "nir")
 
 # ndvi calculation
-datacube_ndvi = p$ndvi(data = datacube_renamed)
+datacube_ndvi = p$ndvi(data = datacube_filtered, red = "B04", nir = "B08")
 
 # reducer User-Defined Function -> NDVI Trend
 ndvi_trend = "function(x) {
@@ -66,7 +66,7 @@ formats = list_file_formats()
 result = p$save_result(data = datacube_ndvi, format = formats$output$GTiff )
 
 # Process and download data synchronously
-compute_result(graph = result, output_file = "./ndvi.tif")
+compute_result(graph = result, output_file = "ndvi.tiff")
 print("DONE")
 
 # create a job
