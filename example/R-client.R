@@ -63,10 +63,10 @@ ndvi_trend = "function(x) {
 formats = list_file_formats()
 
 # save as GeoTiff or NetCDF
-result = p$save_result(data = datacube_ndvi, format = formats$output$GTiff )
+result = p$save_result(data = datacube_ndvi, format = formats$output$NetCDF)
 
 # Process and download data synchronously
-compute_result(graph = result, output_file = "ndvi.tiff")
+compute_result(graph = result, output_file = "ndvi.nc")
 print("DONE")
 
 # create a job
