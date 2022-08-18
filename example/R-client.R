@@ -41,8 +41,6 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
 # filter the data cube for the desired bands
 datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
 
-# rename bands
-#datacube_renamed = rename_dimension(data = datacube_filtered, "B04" = "red", "B08" = "nir")
 
 # ndvi calculation
 datacube_ndvi = p$ndvi(data = datacube_filtered, red = "B04", nir = "B08")
@@ -63,25 +61,11 @@ ndvi_trend = "function(x) {
 formats = list_file_formats()
 
 # save as GeoTiff or NetCDF
-result = p$save_result(data = datacube_ndvi, format = formats$output$NetCDF)
+result = p$save_result(data = datacube_ndvi, format = formats$output$GTiff)
 
 # Process and download data synchronously
 compute_result(graph = result, output_file = "ndvi.tiff")
-print("DONE")
+print("Download of data done")
 
-# create a job
-job = create_job(graph = result, title = "ndviTrend", description = "NDVI Trend")
 
-# then start the processing of the job
-start_job(job = job)
-
-# an overview of the job
-describe_job(job = job)
-
-# an overview of the created files
-list_results(job = job)
-
-# download them to the desired folder
-download_results(job = job, folder = "/Users/brianpondi/Downloads/processed_data")
-print("Job is done")
 
