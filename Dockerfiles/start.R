@@ -1,5 +1,5 @@
 # Install check package
-remotes::install_github("PondiB/openeogdalcubes")
+remotes::install_github("PondiB/openeogdalcubes", ref = "main")
 
 # Start service
 library(openeogdalcubes)
