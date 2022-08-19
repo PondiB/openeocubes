@@ -15,7 +15,7 @@ collections = list_collections()
 collections
 
 # to check description of a collection
-collections$`sentinel-s2-l2a-cogs`$description
+collections$`sentinel-s2-l2a-cogs`$descriptions
 
 # Check that required processes are available.
 processes = list_processes()
@@ -28,14 +28,14 @@ p = processes()
 
 # load the initial data collection and limit the amount of data loaded
 datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
-                          spatial_extent = list(west=7.1,
-                                                south=51.8,
-                                                east=7.2,
-                                                north=52.8),
-                         temporal_extent = c("2021-06-01", "2021-06-30"),
+                          spatial_extent = list(west=13.778139,
+                                                south=52.379898,
+                                                east=13.837294,
+                                                north=52.426108),
+                         temporal_extent = c("2017-01-01", "2021-12-31"),
                          # extra optional args -> courtesy of gdalcubes
                          pixels_size = 500,
-                         time_aggregation = "P1M"
+                         time_aggregation = "P1Y"
                          )
 
 # filter the data cube for the desired bands
@@ -45,7 +45,7 @@ datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08")
 # ndvi calculation
 datacube_ndvi = p$ndvi(data = datacube_filtered, red = "B04", nir = "B08")
 
-# User-Defined Function -> NDVI Trend
+# User-Defined Function -> generate NDVI Trend
 ndvi_trend = "function(x) {
   z = data.frame(t=1:ncol(x), ndvi=x[\"NDVI\",])
   result = NA
@@ -55,16 +55,16 @@ ndvi_trend = "function(x) {
   return(result)}"
 
 # run User-Defined Function
-# datacube_ndvitrend = p$run_udf(data = datacube_ndvi, udf = ndvi_trend, names = c("ndvi_trend"))
+datacube_ndvitrend = p$run_udf(data = datacube_ndvi, udf = ndvi_trend, names = c("ndvi_trend"))
 
 # supported formats
 formats = list_file_formats()
 
 # save as GeoTiff or NetCDF
-result = p$save_result(data = datacube_ndvi, format = formats$output$GTiff)
+result = p$save_result(data = datacube_ndvitrend, format = formats$output$GTiff)
 
 # Process and download data synchronously
-compute_result(graph = result, output_file = "ndvi.tiff")
+compute_result(graph = result, output_file = "ndvi_trend.tiff")
 print("Download of data done")
 
 

@@ -723,8 +723,7 @@ run_udf = Process$new(
     schema = list(type = c("number", "null"))),
   operation = function(data, udf, names = c("default"),context = NULL, runtime = NULL, version = NULL, job) {
     # NB : more reducer keywords can be added
-    message("user defined function....")
-    message(udf)
+    message("run UDF called")
     reducer.keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","product", "max", "count", "var")
     if("cube" %in% class(data)) {
       if(grepl("function", udf)){
