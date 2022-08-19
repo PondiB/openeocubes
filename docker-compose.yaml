@@ -1,9 +1,8 @@
-version: "3.9"
+version: "3.3"
 
 services:
   openeocube:
     build: .
-    #image: openeocube:0.0.1
     container_name: openeocube
     ports:
       - "8000:8000"
