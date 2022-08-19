@@ -45,7 +45,7 @@ datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08")
 # ndvi calculation
 datacube_ndvi = p$ndvi(data = datacube_filtered, red = "B04", nir = "B08")
 
-# reducer User-Defined Function -> NDVI Trend
+# User-Defined Function -> NDVI Trend
 ndvi_trend = "function(x) {
   z = data.frame(t=1:ncol(x), ndvi=x[\"NDVI\",])
   result = NA
@@ -55,7 +55,7 @@ ndvi_trend = "function(x) {
   return(result)}"
 
 # run User-Defined Function
-# datacube_ndvitrend = p$run_udf(data = datacube_ndvi, udf = ndvi_trend)
+# datacube_ndvitrend = p$run_udf(data = datacube_ndvi, udf = ndvi_trend, names = c("ndvi_trend"))
 
 # supported formats
 formats = list_file_formats()

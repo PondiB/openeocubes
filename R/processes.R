@@ -698,6 +698,13 @@ run_udf = Process$new(
         subtype = "string")
     ),
     Parameter$new(
+      name = "names",
+      description = "List of names to define outputs from a reducer UDF",
+      schema = list(
+        type = "string",
+        subtype = "string")
+    ),
+    Parameter$new(
       name = "runtime",
       description = "A UDF runtime identifier available at the back-end.",
       schema = list(
@@ -714,21 +721,24 @@ run_udf = Process$new(
   returns = list(
     description = "The computed result.",
     schema = list(type = c("number", "null"))),
-  operation = function(data, udf, context = NULL, runtime = NULL, version = NULL, job) {
+  operation = function(data, udf, names = c("default"),context = NULL, runtime = NULL, version = NULL, job) {
     # NB : more reducer keywords can be added
+    message("user defined function....")
+    message(udf)
     reducer.keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","product", "max", "count", "var")
     if("cube" %in% class(data)) {
       if(grepl("function", udf)){
-        if(all(sapply(reducer.keywords, grepl, udf))){
+        if(any(sapply(reducer.keywords, grepl, udf))){
           # convert parsed string function to class function
           func.parse = parse(text = udf)
           user.function = eval(func.parse)
           # reducer udf
-          print(user.function)
-          data = reduce_time(data, FUN = user.function)
+          message("reducer function -> time")
+          data = reduce_time(data, names= names, FUN = user.function)
           return (data)
         }else{
           # convert parsed string function to class function
+          message("apply per pixel function")
           func.parse = parse(text = udf)
           user.function = eval(func.parse)
           # apply per pixel udf
@@ -736,6 +746,7 @@ run_udf = Process$new(
           return (data)
         }
       }else{
+        message("simple reducer udf")
         data = reduce_time(data, udf)
         return (data)
       }
