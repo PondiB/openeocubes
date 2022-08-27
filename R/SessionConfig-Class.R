@@ -14,8 +14,8 @@ SessionConfig = function(api.port = NULL, host = NULL) {
   }
 
   if (host == "0.0.0.0") {
-    #base = paste("http://", "localhost:", api.port,  sep = "")
-    base = paste("http://", "35.80.32.24:", api.port,  sep = "")
+    base = paste("http://", "localhost:", api.port,  sep = "")
+    #base = paste("http://", "35.80.32.24:", api.port,  sep = "")
   }
   else {
     base = paste("http://",host, ":", api.port,  sep = "")
@@ -29,7 +29,7 @@ SessionConfig = function(api.port = NULL, host = NULL) {
 
     id = "openeo-gdalcubes-R-driver",
     title = "openeo-gdalcubes-R-driver",
-    description = "This is an openEo-compliant R driver interfacing with the package gdalcubes",
+    description = "This is an OpenEO compliant R driver interfacing with gdalcubes package and STAC API",
 
     links = NULL,
     demo.path = NULL,
