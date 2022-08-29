@@ -15,7 +15,7 @@ collections = list_collections()
 collections
 
 # to check description of a collection
-collections$`sentinel-s2-l2a-cogs`$descriptions
+collections$`sentinel-s2-l2a-cogs`$description
 
 # Check that required processes are available.
 processes = list_processes()
