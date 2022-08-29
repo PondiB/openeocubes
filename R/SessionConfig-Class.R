@@ -1,6 +1,6 @@
 #' SessionConfig class
 #' @description Session configuration
-#' @param api.port On which port to run the plumer API
+#' @param api.port On which port to run the plumber API
 #' @param host Host of the plumber API
 #'
 #' @export
@@ -14,7 +14,7 @@ SessionConfig = function(api.port = NULL, host = NULL) {
   }
 
   if (host == "0.0.0.0") {
-    base = paste("http://", "localhost:", api.port,  sep = "")
+    base = paste("http://", "127.0.0.1:", api.port,  sep = "")
   }
   else {
     base = paste("http://",host, ":", api.port,  sep = "")
