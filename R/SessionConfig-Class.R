@@ -14,7 +14,7 @@ SessionConfig = function(api.port = NULL, host = NULL) {
   }
 
   if (host == "0.0.0.0") {
-    base = paste("http://", "127.0.0.1:", api.port,  sep = "")
+    base = paste("http://", "0.0.0.0:", api.port,  sep = "")
   }
   else {
     base = paste("http://",host, ":", api.port,  sep = "")
