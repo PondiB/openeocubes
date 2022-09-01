@@ -11,7 +11,7 @@ The service tries to improve on the limitations of  established EO data manageme
 * Open governance and development
 * No user management
 * Custom R functions
-
+* Flexibility - Resampling EO Data
 
 ![](docs/lightweight-architecture-v1.png)
 
@@ -68,4 +68,9 @@ Force restart  and rebuild:
 
 ```bash
 docker-compose up --build --force-recreate --no-deps -d
+```
+
+If there are new changes on the images or Dockerfiles:
+```bash
+docker-compose build --no-cache && docker-compose up
 ```
