@@ -1,0 +1,77 @@
+library(openeo)
+
+# connect  to the back-end
+con = connect("http://127.0.0.1:8000")
+
+# basic login with default params
+login(user = "user",
+      password = "password",
+      login_type = "basic")
+
+# get the collection list
+collections = list_collections()
+
+# print an overview of the available collections (printed as data.frame or tibble)
+collections
+
+# to check description of a collection
+collections$`sentinel-s2-l2a-cogs`$description
+
+# Check that required processes are available.
+processes = list_processes()
+
+# to check specific process e.g. ndvi
+describe_process(processes$ndvi)
+
+# get the process collection to use the predefined processes of the back-end
+p = processes()
+
+# load the initial data collection and limit the amount of data loaded
+datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
+                                  spatial_extent = list(west=13.77795,
+                                                        south=52.376139,
+                                                        east=13.854731,
+                                                        north=52.408004),
+                                  temporal_extent = c("2016-01-01", "2020-12-31"),
+                                  # extra optional args -> courtesy of gdalcubes
+                                  pixels_size = 50,
+                                  time_aggregation = "P1Y"
+)
+
+# filter the data cube for the desired bands
+datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
+
+# bfast custom change detection method
+change.detection = "function(x) {
+  knr <- exp(-((x[\"B08\",]/10000)-(x[\"B04\",]/10000))^2/(2))
+  kndvi <- (1-knr) / (1+knr)
+  if (all(is.na(kndvi))) {
+    return(c(NA,NA))
+  }
+    kndvi_ts = ts(kndvi, start = c(2016, 1), frequency = 12)
+    library(bfast)
+    tryCatch({
+        result = bfastmonitor(kndvi_ts, start = c(2020,1), level = 0.01)
+        return(c(result$breakpoint, result$magnitude))
+      }, error = function(x) {
+        return(c(NA,NA))
+      })
+  }"
+
+# run udf
+data.cube.udf = run_udf(data = data.cube.bands, udf = change.detection, names =  c("change_date", "change_magnitude"))
+
+# supported formats
+formats = list_file_formats()
+
+# save as GeoTiff or NetCDF
+result = p$save_result(data = data.cube.udf, format = formats$output$NetCDF)
+
+# Process and download data synchronously
+start.time <- Sys.time()
+compute_result(graph = result, output_file = "change_detection.nc")
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+print("End of processes")
+

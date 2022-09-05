@@ -28,11 +28,11 @@ p = processes()
 
 # load the initial data collection and limit the amount of data loaded
 datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
-                          spatial_extent = list(west=13.778139,
-                                                south=52.379898,
-                                                east=13.837294,
-                                                north=52.426108),
-                         temporal_extent = c("2017-01-01", "2021-12-31"),
+                          spatial_extent = list(west=13.77795,
+                                                south=52.376139,
+                                                east=13.854731,
+                                                north=52.408004),
+                         temporal_extent = c("2019-01-01", "2020-12-31"),
                          # extra optional args -> courtesy of gdalcubes
                          pixels_size = 500,
                          time_aggregation = "P1Y"
@@ -64,8 +64,11 @@ formats = list_file_formats()
 result = p$save_result(data = datacube_ndvitrend, format = formats$output$GTiff)
 
 # Process and download data synchronously
-compute_result(graph = result, output_file = "ndvi_trend.tiff")
-print("Download of data done")
-
+start.time <- Sys.time()
+compute_result(graph = result, output_file = "ndvi_trend.tif")
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+print("End of processes")
 
 
