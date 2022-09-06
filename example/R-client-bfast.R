@@ -35,7 +35,7 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
                                   temporal_extent = c("2016-01-01", "2020-12-31"),
                                   # extra optional args -> courtesy of gdalcubes
                                   pixels_size = 50,
-                                  time_aggregation = "P1Y"
+                                  time_aggregation = "P1M"
 )
 
 # filter the data cube for the desired bands
@@ -59,13 +59,13 @@ change.detection = "function(x) {
   }"
 
 # run udf
-data.cube.udf = run_udf(data = data.cube.bands, udf = change.detection, names =  c("change_date", "change_magnitude"))
+datacube_udf = run_udf(data = datacube_filtered, udf = change.detection, names =  c("change_date", "change_magnitude"))
 
 # supported formats
 formats = list_file_formats()
 
 # save as GeoTiff or NetCDF
-result = p$save_result(data = data.cube.udf, format = formats$output$NetCDF)
+result = p$save_result(data = datacube_udf, format = formats$output$NetCDF)
 
 # Process and download data synchronously
 start.time <- Sys.time()
