@@ -127,7 +127,8 @@ load_collection = Process$new(
   ),
   returns = eo_datacube,
   operation = function(id, spatial_extent, temporal_extent, bands = NULL, pixels_size = 300,time_aggregation = "P1M", job) {
-    # Temporal extent preprocess
+    gdalcubes_options(parallel = 8)
+     # Temporal extent preprocess
     t0 = temporal_extent[[1]]
     t1 = temporal_extent[[2]]
     duration = c(t0, t1)
@@ -194,7 +195,7 @@ filter_bands = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, bands, job) {
-
+    gdalcubes_options(parallel = 8)
     if(! is.null(bands)) {
       cube = select_bands(data, bands)
     }
@@ -244,7 +245,8 @@ filter_bbox = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, extent, job) {
-    crs = "EPSG:3857"
+    gdalcubes_options(parallel = 8)
+    crs = srs(data)
     nw = c(extent$west, extent$north)
     sw = c(extent$west, extent$south)
     se = c(extent$east, extent$south)
@@ -283,6 +285,7 @@ filter_spatial = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, geometries, job) {
+    gdalcubes_options(parallel = 8)
     # read geojson url and convert to geometry
     geo.data = read_sf(geometries)
     geo.data = geo.data$geometry
@@ -319,7 +322,7 @@ filter_temporal = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, extent, dimension = NULL, job) {
-
+    gdalcubes_options(parallel = 8)
     if(! is.null(extent)) {
       cube = select_time(data, c(extent[1], extent[2]))
     }
@@ -366,6 +369,7 @@ ndvi = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, nir= "nir", red = "red",target_band = NULL, job) {
+    gdalcubes_options(parallel = 8)
     if((toString(nir) =="B08") && (toString(red) == "B04")){
       cube = apply_pixel(data,"(B08-B04)/(B08+B04)", names = "NDVI", keep_bands=FALSE)
       message("ndvi calculated ....")
@@ -418,6 +422,7 @@ rename_dimension = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, ..., job) {
+    gdalcubes_options(parallel = 8)
     arguments <- list(data, ...)
     cube <- do.call(rename_bands, arguments)
     message("Renamed Data Cube....")
@@ -482,7 +487,7 @@ reduce_dimension = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, reducer, dimension, job) {
-
+    gdalcubes_options(parallel = 8)
     if(dimension == "t" || dimension == "time") {
 
       bands = bands(data)$name
@@ -536,6 +541,7 @@ merge_cubes = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data1, data2, context, job) {
+    gdalcubes_options(parallel = 8)
 
     if("cube" %in% class(data1) && "cube" %in% class(data2)) {
 
@@ -649,7 +655,7 @@ rename_labels = Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, dimension, target, source = NULL, job) {
-
+    gdalcubes_options(parallel = 8)
     if (dimension == "bands") {
       if (! is.null(source)) {
           if(class(source) == "number" || class(source) == "integer") {
@@ -722,6 +728,7 @@ run_udf = Process$new(
     description = "The computed result.",
     schema = list(type = c("number", "null"))),
   operation = function(data, udf, names = c("default"),context = NULL, runtime = NULL, version = NULL, job) {
+    gdalcubes_options(parallel = 8)
     # NB : more reducer keywords can be added
     message("run UDF called")
     reducer.keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","product", "max", "count", "var")
@@ -792,6 +799,7 @@ save_result = Process$new(
     schema = list(type = "boolean")
   ),
   operation = function(data, format, options = NULL, job) {
+    gdalcubes_options(parallel = 8)
     message("Data is being saved in format :")
     message(format)
     message("The above format is being saved")
