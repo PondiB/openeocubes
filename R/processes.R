@@ -117,6 +117,13 @@ load_collection = Process$new(
       optional = TRUE
     ),
     Parameter$new(
+      name = "crs",
+      description = "Coordinate Reference System, default = EPSG:3857",
+      schema = list(
+        type = "string"),
+      optional = TRUE
+    ),
+    Parameter$new(
       name = "time_aggregation",
       description = "size of pixels in time-direction, expressed as ISO8601 period string (only 1 number and unit is allowed) such as \"P16D\".Default is monthly i.e. \"P1M\".",
       schema = list(
@@ -126,7 +133,8 @@ load_collection = Process$new(
 
   ),
   returns = eo_datacube,
-  operation = function(id, spatial_extent, temporal_extent, bands = NULL, pixels_size = 300,time_aggregation = "P1M", job) {
+  operation = function(id, spatial_extent, temporal_extent, bands = NULL, pixels_size = 300,time_aggregation = "P1M",
+                       crs = "EPSG:3857", job) {
     gdalcubes_options(parallel = 8)
      # Temporal extent preprocess
     t0 = temporal_extent[[1]]
@@ -145,9 +153,9 @@ load_collection = Process$new(
     stac_object <- stac("https://earth-search.aws.element84.com/v0")
     items <- stac_object %>%
       stac_search(
-        collections = id, #"sentinel-s2-l2a-cogs",
-        bbox = c(xmin, ymin, xmax, ymax), #c(7.1, 51.8, 7.2, 52.8),
-        datetime =  time_range, #"2021-01-01/2021-06-30",
+        collections = id,
+        bbox = c(xmin, ymin, xmax, ymax),
+        datetime =  time_range,
         limit = 10000
       ) %>%
       post_request() %>%
@@ -155,7 +163,7 @@ load_collection = Process$new(
     # create image collection from stac items features
     img.col <- stac_image_collection(items$features)
     # Define cube view with monthly aggregation
-    v.overview <- cube_view(srs = "EPSG:3857", extent = img.col,
+    v.overview <- cube_view(srs = crs, extent = img.col,
                   dx = pixels_size, dy = pixels_size,dt = time_aggregation,
                   resampling = "average", aggregation = "median")
     # gdalcubes creation
