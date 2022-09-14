@@ -4,6 +4,7 @@
 #' @import gdalcubes
 #' @import rstac
 #' @import useful
+#' @import sf
 NULL
 
 #' schema_format
@@ -155,15 +156,15 @@ load_collection = Process$new(
     ymax_stac = ymax
     if(crs != 4326){
       min_pt <- st_sfc(st_point(c(xmin, ymin)), crs = crs)
-      min_pt <- st_transform(pt, crs = 4326)
+      min_pt <- st_transform(min_pt, crs = 4326)
       min_bbx <- st_bbox(min_pt)
       xmin_stac <- min_bbx$xmin
       ymin_stac <- min_bbx$ymin
       max_pt <- st_sfc(st_point(c(xmax, ymax)), crs = crs)
-      max_pt <- st_transform(pt, crs = 4326)
+      max_pt <- st_transform(max_pt, crs = 4326)
       max_bbx <- st_bbox(max_pt)
       xmax_stac <- max_bbx$xmax
-      ymax_stac <- max_bbx$max
+      ymax_stac <- max_bbx$ymax
     }
 
     # Connect to STAC API and get satellite data

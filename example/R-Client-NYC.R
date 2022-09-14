@@ -36,7 +36,7 @@ datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B02","B03","
 # supported formats
 formats = list_file_formats()
 
-result = p$save_result(data = datacube_udf, format = formats$output$NetCDF)
+result = p$save_result(data = datacube_filtered , format = formats$output$NetCDF)
 
 # Process and download data synchronously
 start.time <- Sys.time()
