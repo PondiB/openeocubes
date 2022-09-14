@@ -117,24 +117,24 @@ load_collection = Process$new(
       optional = TRUE
     ),
     Parameter$new(
-      name = "crs",
-      description = "Coordinate Reference System, default = EPSG:3857",
+      name = "time_aggregation",
+      description = "size of pixels in time-direction, expressed as ISO8601 period string (only 1 number and unit is allowed) such as \"P16D\".Default is monthly i.e. \"P1M\".",
       schema = list(
         type = "string"),
       optional = TRUE
     ),
     Parameter$new(
-      name = "time_aggregation",
-      description = "size of pixels in time-direction, expressed as ISO8601 period string (only 1 number and unit is allowed) such as \"P16D\".Default is monthly i.e. \"P1M\".",
+      name = "crs",
+      description = "Coordinate Reference System, default = 4326",
       schema = list(
-        type = "string"),
+        type = "number"),
       optional = TRUE
     )
 
   ),
   returns = eo_datacube,
   operation = function(id, spatial_extent, temporal_extent, bands = NULL, pixels_size = 300,time_aggregation = "P1M",
-                       crs = "EPSG:3857", job) {
+                       crs = 4326, job) {
     gdalcubes_options(parallel = 8)
      # Temporal extent preprocess
     t0 = temporal_extent[[1]]
@@ -142,11 +142,29 @@ load_collection = Process$new(
     duration = c(t0, t1)
     time_range = paste(duration, collapse="/")
 
-    # spatial extent
+    # spatial extent for cube view
     xmin = as.numeric(spatial_extent$west)
     ymin = as.numeric(spatial_extent$south)
     xmax = as.numeric(spatial_extent$east)
     ymax = as.numeric(spatial_extent$north)
+
+    # spatial extent for stac call
+    xmin_stac = xmin
+    ymin_stac = ymin
+    xmax_stac = xmax
+    ymax_stac = ymax
+    if(crs != 4326){
+      min_pt <- st_sfc(st_point(c(xmin, ymin)), crs = crs)
+      min_pt <- st_transform(pt, crs = 4326)
+      min_bbx <- st_bbox(min_pt)
+      xmin_stac <- min_bbx$xmin
+      ymin_stac <- min_bbx$ymin
+      max_pt <- st_sfc(st_point(c(xmax, ymax)), crs = crs)
+      max_pt <- st_transform(pt, crs = 4326)
+      max_bbx <- st_bbox(max_pt)
+      xmax_stac <- max_bbx$xmax
+      ymax_stac <- max_bbx$max
+    }
 
     # Connect to STAC API and get satellite data
     message("STAC API call.....")
@@ -154,18 +172,24 @@ load_collection = Process$new(
     items <- stac_object %>%
       stac_search(
         collections = id,
-        bbox = c(xmin, ymin, xmax, ymax),
+        bbox = c(xmin_stac, ymin_stac, xmax_stac, ymax_stac),
         datetime =  time_range,
         limit = 10000
       ) %>%
       post_request() %>%
       items_fetch()
     # create image collection from stac items features
-    img.col <- stac_image_collection(items$features)
+    img.col <- stac_image_collection(items$features, property_filter =
+                                       function(x) {x[["eo:cloud_cover"]] < 30})
     # Define cube view with monthly aggregation
-    v.overview <- cube_view(srs = crs, extent = img.col,
-                  dx = pixels_size, dy = pixels_size,dt = time_aggregation,
-                  resampling = "average", aggregation = "median")
+     gdalcubes_options(parallel = 8)
+     crs <- c("EPSG", crs)
+     crs <- paste(crs, collapse=":")
+     v.overview <- cube_view(srs=crs, dx=pixels_size, dy=pixels_size, dt=time_aggregation,
+                  aggregation="median", resampling = "average",
+                  extent=list(t0 = t0, t1 = t1,
+                              left=xmin, right=xmax,
+                              top=ymax, bottom=ymin))
     # gdalcubes creation
     cube <- raster_cube(img.col, v.overview)
 
