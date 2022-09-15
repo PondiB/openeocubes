@@ -4,10 +4,10 @@
 \alias{SessionConfig}
 \title{SessionConfig class}
 \usage{
-SessionConfig(api.port = NULL, host = NULL)
+SessionConfig(api.port = NULL, host = NULL, aws.ipv4 = NULL)
 }
 \arguments{
-\item{api.port}{On which port to run the plumer API}
+\item{api.port}{On which port to run the plumber API}
 
 \item{host}{Host of the plumber API}
 }

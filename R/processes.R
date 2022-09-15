@@ -142,29 +142,34 @@ load_collection = Process$new(
     t1 = temporal_extent[[2]]
     duration = c(t0, t1)
     time_range = paste(duration, collapse="/")
+    message("....After Temporal extent")
 
     # spatial extent for cube view
     xmin = as.numeric(spatial_extent$west)
     ymin = as.numeric(spatial_extent$south)
     xmax = as.numeric(spatial_extent$east)
     ymax = as.numeric(spatial_extent$north)
+    message("...After Spatial extent")
 
     # spatial extent for stac call
     xmin_stac = xmin
     ymin_stac = ymin
     xmax_stac = xmax
     ymax_stac = ymax
+    message("....After default Spatial extent for stac")
     if(crs != 4326){
-      min_pt <- st_sfc(st_point(c(xmin, ymin)), crs = crs)
-      min_pt <- st_transform(min_pt, crs = 4326)
-      min_bbx <- st_bbox(min_pt)
+      message("....crs is not 4326")
+      min_pt <- sf::st_sfc(st_point(c(xmin, ymin)), crs = crs)
+      min_pt <- sf::st_transform(min_pt, crs = 4326)
+      min_bbx <- sf::st_bbox(min_pt)
       xmin_stac <- min_bbx$xmin
       ymin_stac <- min_bbx$ymin
-      max_pt <- st_sfc(st_point(c(xmax, ymax)), crs = crs)
-      max_pt <- st_transform(max_pt, crs = 4326)
-      max_bbx <- st_bbox(max_pt)
+      max_pt <- sf::st_sfc(st_point(c(xmax, ymax)), crs = crs)
+      max_pt <- sf::st_transform(max_pt, crs = 4326)
+      max_bbx <- sf::st_bbox(max_pt)
       xmax_stac <- max_bbx$xmax
       ymax_stac <- max_bbx$ymax
+      message("....transformed to 4326")
     }
 
     # Connect to STAC API and get satellite data
