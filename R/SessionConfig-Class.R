@@ -4,7 +4,7 @@
 #' @param host Host of the plumber API
 #'
 #' @export
-SessionConfig = function(api.port = NULL, host = NULL) {
+SessionConfig = function(api.port = NULL, host = NULL, aws.ipv4 = NULL) {
 
   if (is.null(api.port)) {
     api.port = 8000
