@@ -28,14 +28,15 @@ p = processes()
 
 # load the initial data collection and limit the amount of data loaded
 datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
-                                  spatial_extent = list(west=13.77795,
-                                                        south=52.376139,
-                                                        east=13.854731,
-                                                        north=52.408004),
-                                  temporal_extent = c("2018-01-01", "2020-12-31"),
+                                  spatial_extent = list(west=416812.2,
+                                                        south=5803577.5,
+                                                        east=422094.8,
+                                                        north=5807036.1),
+                                  temporal_extent = c("2016-01-01", "2020-12-31"),
                                   # extra optional args -> courtesy of gdalcubes
-                                  pixels_size = 50,
-                                  time_aggregation = "P1M")
+                                  pixels_size = 10,
+                                  time_aggregation = "P6M",
+                                  crs = 32633)
 
 # filter the data cube for the desired bands
 datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
@@ -47,7 +48,7 @@ change.detection = "function(x) {
   if (all(is.na(kndvi))) {
     return(c(NA,NA))
   }
-    kndvi_ts = ts(kndvi, start = c(2018, 1), frequency = 12)
+    kndvi_ts = ts(kndvi, start = c(2016, 1), frequency = 2)
     library(bfast)
     tryCatch({
         result = bfastmonitor(kndvi_ts, start = c(2020,1), level = 0.01)

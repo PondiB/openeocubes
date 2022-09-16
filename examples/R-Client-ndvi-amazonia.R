@@ -25,14 +25,15 @@ p = processes()
 
 # load the initial data collection and limit the amount of data loaded
 datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
-                                  spatial_extent = list(west=7.5780798164,
-                                                        south=51.9749173915,
-                                                        east=7.5823383235,
-                                                        north=51.9777686516),
-                                  temporal_extent = c("2021-06-01", "2021-06-30"),
-                                  # extra optional args -> courtesy of gdalcubes
-                                  pixels_size = 10,
-                                  time_aggregation = "P1M")
+                                spatial_extent = list(west=-7338335,
+                                                      south=-1027138,
+                                                      east=-7329987,
+                                                      north=-1018790),
+                                temporal_extent = c("2022-01-01", "2022-03-30"),
+                                # extra optional args -> courtesy of gdalcubes
+                                pixels_size = 60,
+                                time_aggregation = "P3M",
+                                crs = 3857)
 
 # filter the data cube for the desired bands
 datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
@@ -49,7 +50,7 @@ result = p$save_result(data = datacube_ndvi, format = formats$output$GTiff)
 
 # Process and download data synchronously
 start.time <- Sys.time()
-compute_result(graph = result, output_file = "ndvi_2021.tif")
+compute_result(graph = result, output_file = "amazonia_2022_summer.tif")
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken

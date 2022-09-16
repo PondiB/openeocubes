@@ -17,7 +17,7 @@ RUN mkdir -p /opt/dockerfiles/ && mkdir -p /var/openeo/workspace/ && mkdir -p /v
 RUN Rscript -e "install.packages('gdalcubes')"
 
 RUN apt-get install -y libsodium-dev libudunits2-dev
-RUN Rscript -e "install.packages(c('plumber', 'useful', 'ids', 'R6', 'sf', 'rstac'))"
+RUN Rscript -e "install.packages(c('plumber', 'useful', 'ids', 'R6', 'sf', 'rstac','bfast'))"
 
 COPY ./ /opt/dockerfiles/
 
