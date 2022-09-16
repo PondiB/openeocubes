@@ -35,7 +35,7 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
                                   temporal_extent = c("2016-01-01", "2020-12-31"),
                                   # extra optional args -> courtesy of gdalcubes
                                   pixels_size = 10,
-                                  time_aggregation = "P6M",
+                                  time_aggregation = "P1M",
                                   crs = 32633)
 
 # filter the data cube for the desired bands
@@ -48,7 +48,7 @@ change.detection = "function(x) {
   if (all(is.na(kndvi))) {
     return(c(NA,NA))
   }
-    kndvi_ts = ts(kndvi, start = c(2016, 1), frequency = 2)
+    kndvi_ts = ts(kndvi, start = c(2016, 1), frequency = 12)
     library(bfast)
     tryCatch({
         result = bfastmonitor(kndvi_ts, start = c(2020,1), level = 0.01)
