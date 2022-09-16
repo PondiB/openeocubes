@@ -11,17 +11,14 @@ login(user = "user",
 # get the collection list
 collections = list_collections()
 
-# print an overview of the available collections (printed as data.frame or tibble)
-collections
-
 # to check description of a collection
 collections$`sentinel-s2-l2a-cogs`$description
 
 # Check that required processes are available.
 processes = list_processes()
 
-# to check specific process e.g. ndvi
-describe_process(processes$ndvi)
+# to check specific process e.g. filter_bands
+describe_process(processes$filter_bands)
 
 # get the process collection to use the predefined processes of the back-end
 p = processes()
