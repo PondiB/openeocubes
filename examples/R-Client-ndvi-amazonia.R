@@ -25,10 +25,10 @@ p = processes()
 
 # load the initial data collection and limit the amount of data loaded
 datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
-                                spatial_extent = list(west=-7338335,
-                                                      south=-1027138,
-                                                      east=-7329987,
-                                                      north=-1018790),
+                                spatial_extent = list(west=-7347259,
+                                                      south=-1025490,
+                                                      east=-7314864,
+                                                      north=-995476.1),
                                 temporal_extent = c("2022-01-01", "2022-03-30"),
                                 # extra optional args -> courtesy of gdalcubes
                                 pixels_size = 60,

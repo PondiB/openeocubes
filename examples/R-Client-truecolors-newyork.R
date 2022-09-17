@@ -20,10 +20,10 @@ p = processes()
 
 # load the initial data collection and limit the amount of data loaded
 datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
-                                  spatial_extent = list(west=582182,
-                                                        south=4505883,
-                                                        east=587019,
-                                                        north=4508997),
+                                  spatial_extent = list(west=563080.6,
+                                                        south=4483092.4,
+                                                        east=609472,
+                                                        north=4530135),
                                   temporal_extent = c("2021-06-01", "2021-06-30"),
                                   # extra optional args -> courtesy of gdalcubes
                                   pixels_size = 10,
@@ -40,7 +40,7 @@ result = p$save_result(data = datacube_filtered , format = formats$output$GTiff)
 
 # Process and download data synchronously
 start.time <- Sys.time()
-compute_result(graph = result, output_file = "nyc_manhattan.tif")
+compute_result(graph = result, output_file = "nyc_june_2021.tif")
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
