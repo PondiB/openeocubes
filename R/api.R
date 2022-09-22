@@ -105,6 +105,16 @@ NULL
 }
 
 .login_basic = function(req, res) {
+  # GDAL parameters to make accessing COGs on AWS faster
+  gdalcubes::gdalcubes_options(parallel = 8) # depends on the system
+  gdalcubes::gdalcubes_set_gdal_config("VSI_CACHE", "TRUE")
+  gdalcubes::gdalcubes_set_gdal_config("GDAL_CACHEMAX","20%")
+  gdalcubes::gdalcubes_set_gdal_config("VSI_CACHE_SIZE","5000000")
+  gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MULTIPLEX","YES")
+  gdalcubes::gdalcubes_set_gdal_config("GDAL_INGESTED_BYTES_AT_OPEN","32000")
+  gdalcubes::gdalcubes_set_gdal_config("GDAL_DISABLE_READDIR_ON_OPEN","EMPTY_DIR")
+  gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_VERSION","2")
+  gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES","YES")
   message("log in from api.R called")
   auth = req$HTTP_AUTHORIZATION
   encoded = substr(auth,7,nchar(auth))
