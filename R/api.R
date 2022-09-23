@@ -111,6 +111,7 @@ NULL
   gdalcubes::gdalcubes_set_gdal_config("GDAL_CACHEMAX","20%")
   gdalcubes::gdalcubes_set_gdal_config("VSI_CACHE_SIZE","5000000")
   gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MULTIPLEX","YES")
+  message("GDAL commands set up to speed CoG calls")
   gdalcubes::gdalcubes_set_gdal_config("GDAL_INGESTED_BYTES_AT_OPEN","32000")
   gdalcubes::gdalcubes_set_gdal_config("GDAL_DISABLE_READDIR_ON_OPEN","EMPTY_DIR")
   gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_VERSION","2")
