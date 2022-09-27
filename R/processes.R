@@ -121,14 +121,16 @@ load_collection = Process$new(
       name = "time_aggregation",
       description = "size of pixels in time-direction, expressed as ISO8601 period string (only 1 number and unit is allowed) such as \"P16D\".Default is monthly i.e. \"P1M\".",
       schema = list(
-        type = "string"),
+        type = "string",
+        subtype = "duration"),
       optional = TRUE
     ),
     Parameter$new(
       name = "crs",
       description = "Coordinate Reference System, default = 4326",
       schema = list(
-        type = "number"),
+        type = "number",
+        subtype = "epsg-code"),
       optional = TRUE
     )
 
