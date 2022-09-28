@@ -1,7 +1,7 @@
 library(openeo)
 
 # connect  to the back-end
-con = connect("http://127.0.0.1:8000")
+con = connect("http://<AWS-IPv4-ADDRESS>:8000")
 
 # basic login with default params
 login(user = "user",

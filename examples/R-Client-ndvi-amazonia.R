@@ -1,7 +1,7 @@
 library(openeo)
 
 # connect  to the back-end
-con = connect("http://127.0.0.1:8000")
+con = connect("http://<AWS-IPv4-ADDRESS>:8000")
 
 # basic login with default params
 login(user = "user",
@@ -25,14 +25,14 @@ p = processes()
 
 # load the initial data collection and limit the amount of data loaded
 datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
-                                spatial_extent = list(west=-7347259,
-                                                      south=-1025490,
-                                                      east=-7314864,
-                                                      north=-995476.1),
-                                temporal_extent = c("2022-01-01", "2022-03-30"),
+                                spatial_extent = list(west=-7338335,
+                                                      south=-1027138,
+                                                      east=-7329987,
+                                                      north=-1018790),
+                                temporal_extent = c("2022-01-01", "2022-12-31"),
                                 # extra optional args -> courtesy of gdalcubes
-                                pixels_size = 60,
-                                time_aggregation = "P3M",
+                                pixels_size = 30,
+                                time_aggregation = "P1Y",
                                 crs = 3857)
 
 # filter the data cube for the desired bands
@@ -50,7 +50,7 @@ result = p$save_result(data = datacube_ndvi, format = formats$output$GTiff)
 
 # Process and download data synchronously
 start.time <- Sys.time()
-compute_result(graph = result, output_file = "amazonia_2022_summer.tif")
+compute_result(graph = result, output_file = "amazonia_2022_ndvi.tif")
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
