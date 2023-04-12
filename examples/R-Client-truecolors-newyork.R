@@ -5,8 +5,7 @@ con = connect("http://<AWS-IPv4-ADDRESS>:8000")
 
 # basic login with default params
 login(user = "user",
-      password = "password",
-      login_type = "basic")
+      password = "password")
 
 # get the collection list
 collections = list_collections()
