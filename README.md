@@ -1,5 +1,5 @@
 
-# openeocubes : openEO Compliant Lightweight R Platform for Processing Time Series Satellite Images
+# openeocubes (openeogdalcubes) : openEO Compliant Lightweight R Platform for Processing Time Series Satellite Images
 
 The service integrates STAC API, OpenEO standards and gdalcubes to be a lightweight platform to enable analysis of time series satellite images via OpenEO Compliant RESTful endpoints using R-Client . It also supports users to run their custom R functions.
 
