@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       matrix:
-        r-version: ['4.2']
+        r-version: ['4.1.1']
 
     steps:
       - uses: actions/checkout@v3
