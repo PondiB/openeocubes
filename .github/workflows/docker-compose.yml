@@ -10,9 +10,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
-    - name: Build and run containers
-      uses: docker/compose-action@v2
-      with:
-        compose-file: docker-compose.yaml
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Set up Docker Compose
+        uses: docker/compose-cli-action@v1
+      - name: Build and run containers
+        run: |
+          docker-compose up -d
+
