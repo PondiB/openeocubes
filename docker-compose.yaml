@@ -3,6 +3,9 @@ version: "3.3"
 services:
   openeocube:
     build: .
+    environment:
+      - TZ=Etc/UTC
+      - DEBIAN_FRONTEND=noninteractive
     container_name: openeocube
     ports:
       - "8000:8000"
