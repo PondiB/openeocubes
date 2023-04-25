@@ -1,4 +1,4 @@
-FROM rocker/geospatial:4.1
+FROM --platform=linux/amd64 rocker/geospatial:4.1
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common cmake g++ git supervisor wget
 ENV TZ=Etc/UTC
