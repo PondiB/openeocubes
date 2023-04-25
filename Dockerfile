@@ -1,6 +1,7 @@
 FROM ubuntu:20.04
 
-RUN apt-get update && apt-get install -y software-properties-common cmake g++ git supervisor wget
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common cmake g++ git supervisor wget
+ENV TZ=Etc/UTC
 RUN apt-get install  -y libnetcdf-dev libcurl4-openssl-dev libcpprest-dev doxygen graphviz  libsqlite3-dev libboost-all-dev
 RUN add-apt-repository -y ppa:ubuntugis/ubuntugis-unstable && apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 314DF160 && apt-get update && apt-get install -y libproj-dev libgdal-dev
 
