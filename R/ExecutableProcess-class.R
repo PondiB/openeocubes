@@ -76,7 +76,7 @@ ExecutableProcess <- R6Class(
 
         }
         parameterList$job = self$job
-        result = rlang::call2(self$operation, !!!parameterList)
+        result = rlang::call2(self$operation, parameterList)
         message("Result invoked using call2 keyword in Executable Process")
 
         return(result)
