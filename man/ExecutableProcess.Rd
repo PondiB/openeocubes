@@ -29,8 +29,8 @@ Executable process
 \if{html}{\out{
 <details open><summary>Inherited methods</summary>
 <ul>
-<li><span class="pkg-link" data-pkg="openeogdalcubes" data-topic="Process" data-id="processInfo"><a href='../../openeogdalcubes/html/Process.html#method-Process-processInfo'><code>openeogdalcubes::Process$processInfo()</code></a></li>
-<li><span class="pkg-link" data-pkg="openeogdalcubes" data-topic="Process" data-id="setParameter"><a href='../../openeogdalcubes/html/Process.html#method-Process-setParameter'><code>openeogdalcubes::Process$setParameter()</code></a></li>
+<li><span class="pkg-link" data-pkg="openeogdalcubes" data-topic="Process" data-id="processInfo"><a href='../../openeogdalcubes/html/Process.html#method-Process-processInfo'><code>openeogdalcubes::Process$processInfo()</code></a></span></li>
+<li><span class="pkg-link" data-pkg="openeogdalcubes" data-topic="Process" data-id="setParameter"><a href='../../openeogdalcubes/html/Process.html#method-Process-setParameter'><code>openeogdalcubes::Process$setParameter()</code></a></span></li>
 </ul>
 </details>
 }}
@@ -52,7 +52,7 @@ Initialize executable process
 \subsection{Arguments}{
 \if{html}{\out{<div class="arguments">}}
 \describe{
-\item{\code{id}}{Id or name of the proces}
+\item{\code{id}}{Id or name of the process}
 
 \item{\code{description}}{Shortly what the process does}
 
