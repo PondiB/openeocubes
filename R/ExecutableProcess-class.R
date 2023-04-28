@@ -1,7 +1,7 @@
 #' Executable process
 #'
 #' @include Process-class.R
-#' @importFrom rlang invoke
+#' @importFrom rlang exec
 #' @field job Attached job to the process
 #'
 #' @export
@@ -13,7 +13,7 @@ ExecutableProcess <- R6Class(
 
     #' @description Initialize executable process
     #'
-    #' @param id Id or name of the proces
+    #' @param id Id or name of the process
     #' @param description Shortly what the process does
     #' @param parameters Used parameters in the process
     #' @param operation Function that executes the process
@@ -76,8 +76,8 @@ ExecutableProcess <- R6Class(
 
         }
         parameterList$job = self$job
-        result = invoke(self$operation, parameterList)
-        message("Result invoked in Executable Process")
+        result = exec(self$operation, !!!parameterList)
+        message("Result invoked using exec keyword in Executable Process")
 
         return(result)
     }
