@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 ubuntu:bionic
+FROM ubuntu:bionic
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common cmake g++ git supervisor wget
 ENV TZ=Etc/UTC
