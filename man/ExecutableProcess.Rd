@@ -9,7 +9,7 @@ Executable process
 Executable process
 }
 \section{Super class}{
-\code{\link[openeogdalcubes:Process]{openeogdalcubes::Process}} -> \code{ExecutableProcess}
+\code{\link[openeocubes:Process]{openeocubes::Process}} -> \code{ExecutableProcess}
 }
 \section{Public fields}{
 \if{html}{\out{<div class="r6-fields">}}
@@ -29,8 +29,8 @@ Executable process
 \if{html}{\out{
 <details open><summary>Inherited methods</summary>
 <ul>
-<li><span class="pkg-link" data-pkg="openeogdalcubes" data-topic="Process" data-id="processInfo"><a href='../../openeogdalcubes/html/Process.html#method-Process-processInfo'><code>openeogdalcubes::Process$processInfo()</code></a></span></li>
-<li><span class="pkg-link" data-pkg="openeogdalcubes" data-topic="Process" data-id="setParameter"><a href='../../openeogdalcubes/html/Process.html#method-Process-setParameter'><code>openeogdalcubes::Process$setParameter()</code></a></span></li>
+<li><span class="pkg-link" data-pkg="openeocubes" data-topic="Process" data-id="processInfo"><a href='../../openeocubes/html/Process.html#method-Process-processInfo'><code>openeocubes::Process$processInfo()</code></a></span></li>
+<li><span class="pkg-link" data-pkg="openeocubes" data-topic="Process" data-id="setParameter"><a href='../../openeocubes/html/Process.html#method-Process-setParameter'><code>openeocubes::Process$setParameter()</code></a></span></li>
 </ul>
 </details>
 }}

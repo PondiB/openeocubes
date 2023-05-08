@@ -1,5 +1,5 @@
 
-# openeocubes (openeogdalcubes) : openEO Compliant Lightweight R Platform for Processing Time Series Satellite Images
+# openeocubes: OpenEO Compliant Lightweight R Platform for Processing Time Series Satellite Images
 
 The service integrates STAC API, OpenEO standards and gdalcubes to be a lightweight platform to enable analysis of time series satellite images via OpenEO Compliant RESTful endpoints using R-Client . It also supports users to run their custom R functions.
 
@@ -40,13 +40,13 @@ If you want to change the source code then this approach is recommended.
 You first need to clone the repository via this command:
 
 ```bash
-git clone https://github.com/PondiB/openeogdalcubes.git
+git clone https://github.com/PondiB/openeocubes.git
 ```
 
 then you can change to that directory
 
 ```bash
-cd openeogdalcubes
+cd openeocubes
 ```
 
 

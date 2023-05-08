@@ -1,4 +1,4 @@
-Package: openeogdalcubes
+Package: openeocubes
 Type: Package
 Title: OpenEO Compliant R Backend
 Version: 0.1.0
@@ -7,7 +7,7 @@ Authors@R:
            family = "Pondi",
            role = c("aut", "cre"),
            email = "brian.pondi@uni-muenster.de")
-Description: openeogdalcubes operates as an openEo-compliant back-end interfacing gdalcubes as the main data cube.
+Description: openeocubes operates as an openEo-compliant back-end interfacing gdalcubes as the main data cube.
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
