@@ -1,8 +1,8 @@
 # Install package from GitHub
-#remotes::install_github("PondiB/openeogdalcubes", ref = "main", dependencies=TRUE, force = TRUE)
+#remotes::install_github("PondiB/openeocubes", ref = "main", dependencies=TRUE, force = TRUE)
 
 # Start service
-library(openeogdalcubes)
+library(openeocubes)
 
 
 aws.host <-Sys.getenv("AWSHOST")
