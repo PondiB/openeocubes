@@ -13,7 +13,7 @@ The service tries to improve on the limitations of  established EO data manageme
 * User-Defined R Functions
 * Flexibility - Custom CRS, and Quick Resampling of Massive EO Data
 
-![](docs/lightweight-architecture-v1.png)
+![](docs/lightweight-architecture.png)
 
 
 After processing the data , one can  download and explore on open source tools like QGIS, R, Python, etc.
