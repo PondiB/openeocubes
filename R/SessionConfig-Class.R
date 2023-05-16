@@ -29,9 +29,9 @@ SessionConfig = function(api.port = NULL, host = NULL, aws.ipv4 = NULL) {
     stac_version = "1.0.0",
     stac_extensions = "datacube",
 
-    id = "openeo-gdalcubes-R-driver",
-    title = "openeo-gdalcubes-R-driver",
-    description = "This is an OpenEO compliant R driver interfacing with gdalcubes package and STAC API",
+    id = "openeo-gdalcubes-R-backend",
+    title = "openeo-gdalcubes-R-backend",
+    description = "This is an OpenEO compliant R backend interfacing with gdalcubes package and STAC API",
 
     links = NULL,
     demo.path = NULL,
