@@ -1,4 +1,4 @@
-FROM ubuntu:bionic
+FROM ubuntu:jammy
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common cmake g++ git supervisor wget
 ENV TZ=Etc/UTC
@@ -9,7 +9,7 @@ RUN add-apt-repository -y ppa:ubuntugis/ubuntugis-unstable && apt-key adv --keys
 RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys E298A3A825C0D65DFD57CBB651716619E084DAB9
 
 # add R repository
-RUN add-apt-repository 'deb https://cloud.r-project.org/bin/linux/ubuntu bionic-cran40/'
+RUN add-apt-repository 'deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/'
 
 # install R
 RUN apt update -q && DEBIAN_FRONTEND=noninteractive apt install -q -y r-base
