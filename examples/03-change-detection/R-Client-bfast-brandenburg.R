@@ -29,7 +29,7 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
                                                         east=422094.8,
                                                         north=5807036.1),
                                   temporal_extent = c("2016-01-01", "2020-12-31"),
-                                  # extra optional args -> courtesy of gdalcubes
+                                  # extra optional args for datacubes regularization -> courtesy of gdalcubes
                                   pixels_size = 10,
                                   time_aggregation = "P1M",
                                   crs = 32633)
