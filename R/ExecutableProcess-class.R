@@ -76,7 +76,7 @@ ExecutableProcess <- R6Class(
 
         }
         parameterList$job = self$job
-        result = invoke(self$operation, parameterList)
+        result = do.call(self$operation, parameterList) #invoke deprecated
         message("Result invoked in Executable Process")
 
         return(result)
