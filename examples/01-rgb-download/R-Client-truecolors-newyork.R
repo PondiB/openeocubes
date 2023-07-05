@@ -1,6 +1,9 @@
 library(openeo)
 
-# connect  to the back-end
+
+# connect  to the back-end when deployed locally
+# con = connect("http://localhost:8000")
+# connect  to the back-end when deployed on aws
 con = connect("http://<AWS-IPv4-ADDRESS>:8000")
 
 # basic login with default params
