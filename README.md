@@ -1,7 +1,7 @@
 
-# openeocubes : OpenEO Compliant Lightweight R Platform for Processing Time Series Satellite Images
+# OpenEOcubes: OpenEO Compliant Lightweight R Platform for Processing Time Series Satellite Images
 
-The service integrates STAC API, OpenEO standards and gdalcubes to be a lightweight platform to enable analysis of time series satellite images via OpenEO Compliant RESTful endpoints using R-Client . It also supports users to run their custom R functions.
+The service integrates STAC API, OpenEO standards, and gdalcubes to be a lightweight platform to enable analysis of time series satellite images via OpenEO Compliant RESTful endpoints using R-Client. It also supports users to run their custom R functions.
 
 ####  Motivation for the platform:
 The service tries to improve on the limitations of  established EO data management platforms like Google Earth Engine and Sentinel Hub by supporting:
@@ -24,7 +24,7 @@ You can get a hosted Docker image of the platform on DockerHub
 https://hub.docker.com/r/brianpondi/openeocubes
 
 ### Running the container
-It is highly recommended to deploy the service on an AWS EC2 machine that is in us-west-2 region (Oregon) as that is data centre where the Earth Observation(EO) datasets found in AWS STAC search are stored. This enables processing of EO data from the source so that the network latency between the platform and data is as low as possible hence cheaper. You can expose port 8000 of the EC2 instance to deploy and communicate with the service.
+It is highly recommended to deploy the service on an AWS EC2 machine that is in us-west-2 region (Oregon) as that is the data centre where the Earth Observation(EO) datasets found in AWS STAC search are stored. This enables the processing of EO data from the source so that the network latency between the platform and data is as low as possible hence cheaper. You can expose port 8000 of the EC2 instance to deploy and communicate with the service.
 ```bash
 docker run -p 8000:8000  --env AWSHOST=<AWS-IPv4-ADDRESS>  brianpondi/openeocubes
 ```
