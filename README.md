@@ -14,9 +14,11 @@ The service tries to improve on the limitations of  established EO data manageme
 * Flexibility - Custom CRS, and Quick Resampling of Massive EO Data
 
 ![](docs/lightweight-architecture.png)
-
-
 After processing the data , one can  download and explore on open source tools like QGIS, R, Python, etc.
+
+####  Direction:
+![](docs/openeocubes.png)
+
 
 ## Easy Deployment from DockerHub
 Assuming you have Docker installed. This is the easiest approach.
