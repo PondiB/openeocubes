@@ -40,8 +40,8 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
 datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
 
 # bfast custom change detection method
-change.detection = "function(x) {
-  knr <- exp(-((x[\"B08\",]/10000)-(x[\"B04\",]/10000))^2/(2))
+change.detection = 'function(x) {
+  knr <- exp(-((x["B08",]/10000)-(x["B04",]/10000))^2/(2))
   kndvi <- (1-knr) / (1+knr)
   if (all(is.na(kndvi))) {
     return(c(NA,NA))
@@ -54,7 +54,7 @@ change.detection = "function(x) {
       }, error = function(x) {
         return(c(NA,NA))
       })
-  }"
+  }'
 
 # run udf
 datacube_udf = p$run_udf(data = datacube_filtered, udf = change.detection, names =  c("change_date", "change_magnitude"))

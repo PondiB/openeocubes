@@ -13,12 +13,16 @@ The service tries to improve on the limitations of  established EO data manageme
 * User-Defined R Functions
 * Flexibility - Custom CRS, and Quick Resampling of Massive EO Data
 
-![](docs/lightweight-architecture.png)
-After processing the data , one can  download and explore on open source tools like QGIS, R, Python, etc.
 
-####  Direction:
 ![](docs/openeocubes.png)
 
+After processing the data , one can  download and explore on open source tools like QGIS, R, Python, etc.
+
+
+####  Future developments:
+Geospatial Machine Learning APIs for time-series EO Data:
+* ML APIs e.g. Random Forest, SVM, XGBoost, etc.
+* DL APIs e.g. TempCNN, ResNet, etc.
 
 ## Easy Deployment from DockerHub
 Assuming you have Docker installed. This is the easiest approach.
