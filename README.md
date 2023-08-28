@@ -21,8 +21,8 @@ After processing the data , one can  download and explore on open source tools l
 
 ####  Future developments:
 Geospatial Machine Learning APIs for time-series EO Data:
-* ML APIs e.g. Random Forest, SVM,CART etc
-* Deep Learning APIs e.g. TempCNN, ETC
+* ML APIs e.g. Random Forest, SVM, XGBoost, etc.
+* DL APIs e.g. TempCNN, ResNet, etc.
 
 ## Easy Deployment from DockerHub
 Assuming you have Docker installed. This is the easiest approach.
