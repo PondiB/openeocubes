@@ -24,6 +24,7 @@ Geospatial Machine Learning APIs for time-series EO Data:
 * ML APIs e.g. Random Forest, SVM, XGBoost, etc.
 * DL APIs e.g. TempCNN, ResNet, etc.
 
+Currently PoC is being worked on at [this reposity](https://github.com/Open-Earth-Monitor/openeosits) on the  [Open Earth Monitor Cyberinfrastructure](https://earthmonitor.org/) EU funded project.
 ## Easy Deployment from DockerHub
 Assuming you have Docker installed. This is the easiest approach.
 You can get a hosted Docker image of the platform on DockerHub
