@@ -44,4 +44,4 @@ Collate:
     'SessionConfig-Class.R'
     'error.R'
 Depends:
-    R (>= 3.6.0)
+    R (>= 4.3.0)
