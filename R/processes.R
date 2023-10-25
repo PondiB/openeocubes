@@ -152,7 +152,7 @@ load_collection = Process$new(
     ymax = as.numeric(spatial_extent$north)
     message("...After Spatial extent")
 
-    # spatial extent for stac call
+    # spatial extent for stac API call
     xmin_stac = xmin
     ymin_stac = ymin
     xmax_stac = xmax
@@ -173,9 +173,9 @@ load_collection = Process$new(
       message("....transformed to 4326")
     }
 
-    # Connect to STAC API and get satellite data
+    # Connect to STAC API using rstac and get satellite data
     message("STAC API call.....")
-    stac_object <- stac("https://earth-search.aws.element84.com/v0")
+    stac_object <- rstac::stac("https://earth-search.aws.element84.com/v0")
     items <- stac_object %>%
       stac_search(
         collections = id,
@@ -186,21 +186,21 @@ load_collection = Process$new(
       post_request() %>%
       items_fetch()
     # create image collection from stac items features
-    img.col <- stac_image_collection(items$features, property_filter =
+    img.col <- gdalcubes::stac_image_collection(items$features, property_filter =
                                        function(x) {x[["eo:cloud_cover"]] < 30})
     # Define cube view with monthly aggregation
      crs <- c("EPSG", crs)
      crs <- paste(crs, collapse=":")
-     v.overview <- cube_view(srs=crs, dx=pixels_size, dy=pixels_size, dt=time_aggregation,
+     v.overview <- gdalcubes::cube_view(srs=crs, dx=pixels_size, dy=pixels_size, dt=time_aggregation,
                   aggregation="median", resampling = "average",
                   extent=list(t0 = t0, t1 = t1,
                               left=xmin, right=xmax,
                               top=ymax, bottom=ymin))
     # gdalcubes creation
-    cube <- raster_cube(img.col, v.overview)
+    cube <- gdalcubes::raster_cube(img.col, v.overview)
 
     if(! is.null(bands)) {
-      cube = select_bands(cube, bands)
+      cube = gdalcubes::select_bands(cube, bands)
     }
     message("Data Cube is created....")
     message(as_json(cube))
@@ -291,7 +291,7 @@ filter_bbox = Process$new(
     p = list(rbind(nw, sw, se, ne, nw))
     pol = sf::st_polygon(p)
 
-    cube = filter_geom(data, pol, srs = crs)
+    cube = gdalcubes::filter_geom(data, pol, srs = crs)
 
     return(cube)
   }
@@ -322,12 +322,12 @@ filter_spatial = Process$new(
   returns = eo_datacube,
   operation = function(data, geometries, job) {
     # read geojson url and convert to geometry
-    geo.data = read_sf(geometries)
+    geo.data = sf::read_sf(geometries)
     geo.data = geo.data$geometry
-    geo.data = st_transform(geo.data, 3857)
+    geo.data = sf::st_transform(geo.data, 3857)
     # filter using geom
-    cube = filter_geom(data_cube, geo.data)
-    return (cube)
+    cube = gdalcubes::filter_geom(data_cube, geo.data)
+    return(cube)
   }
 )
 
@@ -358,7 +358,7 @@ filter_temporal = Process$new(
   returns = eo_datacube,
   operation = function(data, extent, dimension = NULL, job) {
     if(! is.null(extent)) {
-      cube = select_time(data, c(extent[1], extent[2]))
+      cube = gdalcubes::select_time(data, c(extent[1], extent[2]))
     }
     return(cube)
   }
@@ -404,17 +404,17 @@ ndvi = Process$new(
   returns = eo_datacube,
   operation = function(data, nir= "nir", red = "red",target_band = NULL, job) {
     if((toString(nir) =="B08") && (toString(red) == "B04")){
-      cube = apply_pixel(data,"(B08-B04)/(B08+B04)", names = "NDVI", keep_bands=FALSE)
+      cube = gdalcubes::apply_pixel(data,"(B08-B04)/(B08+B04)", names = "NDVI", keep_bands=FALSE)
       message("ndvi calculated ....")
       message(as_json(cube))
       return(cube)
     }else if((toString(nir) =="B05") && (toString(red) == "B04")){
-      cube = apply_pixel(data,"(B05-B04)/(B05+B04)", names = "NDVI", keep_bands=FALSE)
+      cube = gdalcubes::apply_pixel(data,"(B05-B04)/(B05+B04)", names = "NDVI", keep_bands=FALSE)
       message("ndvi calculated ....")
       message(as_json(cube))
       return(cube)
     }else{
-      cube = apply_pixel(data,"(nir-red)/(nir+red)", names = "NDVI", keep_bands=FALSE)
+      cube = gdalcubes::apply_pixel(data,"(nir-red)/(nir+red)", names = "NDVI", keep_bands=FALSE)
       message("ndvi calculated ....")
       message(as_json(cube))
       return(cube)
@@ -528,12 +528,12 @@ reduce_dimension = Process$new(
         bandStr = append(bandStr, sprintf("%s(%s)", reducer, bands[i]))
       }
 
-      cube = reduce_time(data, bandStr)
+      cube = gdalcubes::reduce_time(data, bandStr)
       return(cube)
     }
     else if (dimension == "bands") {
 
-      cube = apply_pixel(data, reducer, keep_bands = FALSE)
+      cube = gdalcubes::apply_pixel(data, reducer, keep_bands = FALSE)
       return(cube)
     }
     else {
@@ -581,7 +581,7 @@ merge_cubes = Process$new(
         stop("Dimensions of datacubes are not equal")
       }
       else {
-        cube = join_bands(c(data1, data2))
+        cube = gdalcubes::join_bands(c(data1, data2))
         return(cube)
       }
     }
@@ -689,10 +689,10 @@ rename_labels = Process$new(
       if (! is.null(source)) {
           if(class(source) == "number" || class(source) == "integer") {
             band = as.character(bands(data)$name[source])
-            cube = apply_pixel(data, band, names = target)
+            cube = gdalcubes::apply_pixel(data, band, names = target)
           }
           else if (class(source) == "string" || class(source) == "character") {
-            cube = apply_pixel(data, source, names = target)
+            cube = gdalcubes::apply_pixel(data, source, names = target)
           }
           else {
             stop("Source is not a number or string")
@@ -700,7 +700,7 @@ rename_labels = Process$new(
       }
       else {
         band = as.character(bands(data)$name[1])
-        cube = apply_pixel(data, band, names = target)
+        cube = gdalcubes::apply_pixel(data, band, names = target)
       }
       return(cube)
     }
@@ -768,7 +768,7 @@ run_udf = Process$new(
           user.function = eval(func.parse)
           # reducer udf
           message("reducer function -> time")
-          data = reduce_time(data, names= names, FUN = user.function)
+          data = gdalcubes::reduce_time(data, names= names, FUN = user.function)
           return (data)
         }else{
           # convert parsed string function to class function
@@ -776,12 +776,12 @@ run_udf = Process$new(
           func.parse = parse(text = udf)
           user.function = eval(func.parse)
           # apply per pixel udf
-          data = apply_pixel(data, FUN = user.function)
+          data = gdalcubes::apply_pixel(data, FUN = user.function)
           return (data)
         }
       }else{
         message("simple reducer udf")
-        data = reduce_time(data, udf)
+        data = gdalcubes::reduce_time(data, udf)
         return (data)
       }
     }

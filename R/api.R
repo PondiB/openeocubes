@@ -167,10 +167,10 @@ NULL
 
   if (class(format) == "list") {
     if (format$title == "Network Common Data Form") {
-      file = write_ncdf(job$results)
+      file = gdalcubes::write_ncdf(job$results)
     }
     else if (format$title == "GeoTiff") {
-      file = write_tif(job$results)
+      file = gdalcubes::write_tif(job$results)
     }
     else {
       throwError("FormatUnsupported")
@@ -178,10 +178,10 @@ NULL
   }
   else {
     if (format == "NetCDF") {
-      file = write_ncdf(job$results)
+      file = gdalcubes::write_ncdf(job$results)
     }
     else if (format == "GTiff") {
-      file = write_tif(job$results)
+      file = gdalcubes::write_tif(job$results)
     }
     else {
       throwError("FormatUnsupported")
