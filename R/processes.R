@@ -234,10 +234,10 @@ filter_bands = Process$new(
   returns = eo_datacube,
   operation = function(data, bands, job) {
     if(! is.null(bands)) {
-      cube = select_bands(data, bands)
+      cube = gdalcubes::select_bands(data, bands)
     }
     message("Filtered data cube ....")
-    message(as_json(cube))
+    message(gdalcubes::as_json(cube))
     return(cube)
   }
 )
