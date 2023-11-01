@@ -1,7 +1,7 @@
 
 # OpenEOcubes: OpenEO Compliant Lightweight R Platform for Processing Time Series Satellite Images
 
-The service integrates STAC API, OpenEO standards, and gdalcubes to be a lightweight platform to enable analysis of time series satellite images via OpenEO Compliant RESTful endpoints using R-Client. It also supports users to run their custom R functions.
+The service integrates STAC API (using Rstac package), the OpenEO standardized API, and data cubes concepts (using gdalcubes R package) to be a lightweight platform to enable analysis of time series satellite images via OpenEO Compliant RESTful endpoints using R-Client. It also supports users to run their custom R functions.
 
 ####  Motivation for the platform:
 The service tries to improve on the limitations of  established EO data management platforms like Google Earth Engine and Sentinel Hub by supporting:
@@ -134,8 +134,8 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
 # filter the data cube for the desired bands
 datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
 
-# bfast custom change detection method
-change.detection = "function(x) {
+# user defined R function - bfast change detection method
+change_detection = "function(x) {
   knr <- exp(-((x[\"B08\",]/10000)-(x[\"B04\",]/10000))^2/(2))
   kndvi <- (1-knr) / (1+knr)
   if (all(is.na(kndvi))) {
@@ -152,7 +152,7 @@ change.detection = "function(x) {
   }"
 
 # run udf
-datacube_udf = p$run_udf(data = datacube_filtered, udf = change.detection, names =  c("change_date", "change_magnitude"))
+datacube_udf = p$run_udf(data = datacube_filtered, udf = change_detection, names =  c("change_date", "change_magnitude"))
 
 # supported formats
 formats = list_file_formats()
