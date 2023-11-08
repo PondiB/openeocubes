@@ -289,7 +289,7 @@ load_stac <- Process$new(
     )
   ),
   returns = eo_datacube,
-  operation = function(url, spatial_extent, temporal_extent, bands = NULL, properties = NULL) {
+  operation = function(url, spatial_extent, temporal_extent, bands = NULL, properties = NULL, job) {
     # Temporal extent preprocess
     t0 <- temporal_extent[[1]]
     t1 <- temporal_extent[[2]]
