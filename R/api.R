@@ -291,6 +291,7 @@ addEndpoint = function() {
   Session$assignData(landsat_8_l1_c1)
 # assign processes
   Session$assignProcess(load_collection)
+  Session$assignProcess(load_stac)
   Session$assignProcess(save_result)
   Session$assignProcess(filter_bands)
   Session$assignProcess(filter_bbox)
