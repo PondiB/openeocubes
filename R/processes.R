@@ -928,40 +928,38 @@ run_udf <- Process$new(
     schema = list(type = c("number", "null"))
   ),
   operation = function(data, udf, names = c("default"), context = NULL, runtime = "R", version = NULL, job) {
-    if (runtime != NULL) {
+    if (runtime != "R") {
       stop("Only R is supported.")
     }
 
-    # NB : more reducer keywords can be added
-    message("run UDF called")
-    reducer.keywords <- c("sum", "bfast", "sd", "mean", "median", "min", "reduce", "product", "max", "count", "var")
-    if ("cube" %in% class(data)) {
-      if (grepl("function", udf)) {
-        if (any(sapply(reducer.keywords, grepl, udf))) {
-          # convert parsed string function to class function
-          func.parse <- parse(text = udf)
-          user.function <- eval(func.parse)
-          # reducer udf
-          message("reducer function -> time")
-          data <- gdalcubes::reduce_time(data, names = names, FUN = user.function)
-          return(data)
-        } else {
-          # convert parsed string function to class function
-          message("apply per pixel function")
-          func.parse <- parse(text = udf)
-          user.function <- eval(func.parse)
-          # apply per pixel udf
-          data <- gdalcubes::apply_pixel(data, FUN = user.function)
-          return(data)
-        }
-      } else {
-        message("simple reducer udf")
-        data <- gdalcubes::reduce_time(data, udf)
-        return(data)
-      }
-    } else {
+    # List of reducer keywords
+    reducer_keywords <- c("sum", "bfast", "sd", "mean", "median", "min", "reduce", "product", "max", "count", "var")
+
+    # Check if the data is of class "cube"
+    if (class(data) != "cube") {
       stop('Provided cube is not of class "cube"')
     }
+
+    message("Running UDF")
+
+    # Parse the user-defined function
+    func_parse <- parse(text = udf)
+    user_function <- eval(func_parse)
+
+    # Check if the user-defined function contains any reducer keywords
+    if (any(sapply(reducer_keywords, grepl, udf))) {
+      message("Reducer function -> Time")
+
+      # Apply reducer UDF
+      data <- reduce_time(data, names = names, FUN = user_function)
+    } else {
+      message("Apply per-pixel function")
+
+      # Apply per-pixel UDF
+      data <- apply_pixel(data, FUN = user_function)
+    }
+
+    return(data)
   }
 )
 
