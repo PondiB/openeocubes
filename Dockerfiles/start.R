@@ -1,5 +1,5 @@
 # Install package from GitHub
-#remotes::install_github("PondiB/openeocubes", ref = "main", dependencies=TRUE, force = TRUE)
+remotes::install_github("PondiB/openeocubes", ref = "main", dependencies=TRUE, force = TRUE)
 
 # Start service
 library(openeocubes)
