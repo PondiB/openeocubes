@@ -486,11 +486,11 @@ filter_spatial <- Process$new(
   returns = eo_datacube,
   operation = function(data, geometries, job) {
     # read geojson url and convert to geometry
-    geo.data <- sf::read_sf(geometries)
-    geo.data <- geo.data$geometry
-    geo.data <- sf::st_transform(geo.data, 3857)
+    geo_data <- sf::read_sf(geometries)
+    geo_data <- geo_data$geometry
+    geo_data <- sf::st_transform(geo_data, 3857)
     # filter using geom
-    cube <- gdalcubes::filter_geom(data_cube, geo.data)
+    cube <- gdalcubes::filter_geom(data_cube, geo_data)
     return(cube)
   }
 )
@@ -935,41 +935,40 @@ run_udf <- Process$new(
     description = "The computed result.",
     schema = list(type = c("number", "null"))
   ),
-  operation = function(data, udf, names = c("default"), runtime = "R", version = NULL,  context = NULL, job){
-
-    if (runtime != "R"){
+  operation = function(data, udf, names = c("default"), runtime = "R", version = NULL, context = NULL, job) {
+    if (runtime != "R") {
       stop("Only R runtime is supported.")
     }
     # NB : more reducer keywords can be added
     message("run UDF called")
-    reducer_keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","product", "max", "count", "var")
-    if !("cube" %in% class(data)) {
+    reducer_keywords <- c("sum", "bfast", "sd", "mean", "median", "min", "reduce", "product", "max", "count", "var")
+    if (!("cube" %in% class(data))) {
       stop('Provided cube is not of class "cube"')
     }
 
-    if(grepl("function", udf)){
-      if(any(sapply(reducer_keywords, grepl, udf))){
+    if (grepl("function", udf)) {
+      if (any(sapply(reducer_keywords, grepl, udf))) {
         # convert parsed string function to class function
         func_parse <- parse(text = udf)
         user_function <- eval(func_parse)
         # reducer udf
         message("reducer function -> time")
         data <- reduce_time(data, names = names, FUN = user_function)
-        return (data)
-      }else{
+        return(data)
+      } else {
         # convert parsed string function to class function
         message("apply per pixel function")
         func_parse <- parse(text = udf)
         user_function <- eval(func_parse)
         # apply per pixel udf
         data <- apply_pixel(data, FUN = user_function)
-        return (data)
+        return(data)
       }
-    }else{
+    } else {
       message("simple reducer udf")
       data <- reduce_time(data, udf)
-      return (data)
-    }   
+      return(data)
+    }
   }
 )
 
