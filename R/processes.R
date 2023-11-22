@@ -901,14 +901,6 @@ run_udf <- Process$new(
       )
     ),
     Parameter$new(
-      name = "names",
-      description = "List of names to define outputs from a reducer UDF",
-      schema = list(
-        type = "string",
-        subtype = "string"
-      )
-    ),
-    Parameter$new(
       name = "runtime",
       description = "A UDF runtime identifier available at the back-end.",
       schema = list(
@@ -935,7 +927,7 @@ run_udf <- Process$new(
     description = "The computed result.",
     schema = list(type = c("number", "null"))
   ),
-  operation = function(data, udf, names = c("default"), runtime = "R", version = NULL, context = NULL, job) {
+  operation = function(data, udf, runtime = "R", version = NULL, context = NULL, job) {
     if (runtime != "R") {
       stop("Only R runtime is supported.")
     }
@@ -953,7 +945,7 @@ run_udf <- Process$new(
         user_function <- eval(func_parse)
         # reducer udf
         message("reducer function -> time")
-        data <- reduce_time(data, names = names, FUN = user_function)
+        data <- reduce_time(data, names = context, FUN = user_function)
         return(data)
       } else {
         # convert parsed string function to class function
