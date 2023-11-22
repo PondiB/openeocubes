@@ -902,7 +902,7 @@ run_udf <- Process$new(
     ),
     Parameter$new(
       name = "runtime",
-      description = "A UDF runtime identifier availab le at the back-end.",
+      description = "A UDF runtime identifier available at the back-end.",
       schema = list(
         type = "string",
         subtype = "string"
