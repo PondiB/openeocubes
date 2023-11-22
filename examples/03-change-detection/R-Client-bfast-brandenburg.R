@@ -57,7 +57,7 @@ change.detection = 'function(x) {
   }'
 
 # run udf
-datacube_udf = p$run_udf(data = datacube_filtered, udf = change.detection, context =  c("change_date", "change_magnitude"))
+datacube_udf = p$run_udf(data = datacube_filtered, udf = change.detection, context = c("change_date", "change_magnitude"))
 
 # supported formats
 formats = list_file_formats()
