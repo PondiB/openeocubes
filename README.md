@@ -223,7 +223,7 @@ change_detection = "function(x) {
   }"
 
 # run udf
-datacube_udf = p$run_udf(data = datacube_filtered, udf = change_detection, names =  c("change_date", "change_magnitude"))
+datacube_udf = p$run_udf(data = datacube_filtered, udf = change.detection, context =  c("change_date", "change_magnitude"))
 
 # supported formats
 formats = list_file_formats()
@@ -233,7 +233,7 @@ result = p$save_result(data = datacube_udf, format = formats$output$NetCDF)
 
 # Process and download data synchronously
 start.time <- Sys.time()
-compute_result(graph = result, output_file = "change_detection.nc")
+compute_result(graph = result, output_file = "detected_changes.nc")
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
