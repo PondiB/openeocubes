@@ -293,6 +293,7 @@ addEndpoint = function() {
   Session$assignProcess(load_collection)
   Session$assignProcess(load_stac)
   Session$assignProcess(save_result)
+  Session$assignProcess(aggregate_temporal_period)
   Session$assignProcess(filter_bands)
   Session$assignProcess(filter_bbox)
   Session$assignProcess(filter_spatial)

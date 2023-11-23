@@ -101,6 +101,15 @@ load_collection <- Process$new(
       )
     ),
     Parameter$new(
+      name = "crs",
+      description = "Coordinate Reference System, default = 4326",
+      schema = list(
+        type = "number",
+        subtype = "epsg-code"
+      ),
+      optional = TRUE
+    ),
+    Parameter$new(
       name = "temporal_extent",
       description = "Limits the data to load from the collection to the specified left-closed temporal interval.",
       schema = list(
@@ -115,38 +124,10 @@ load_collection <- Process$new(
         type = "array"
       ),
       optional = TRUE
-    ),
-    ### Additional variables for flexibility due to gdalcubes
-    Parameter$new(
-      name = "pixels_size",
-      description = "size of pixels in x-direction(longitude / easting) and y-direction (latitude / northing). Default is 300",
-      schema = list(
-        type = "number"
-      ),
-      optional = TRUE
-    ),
-    Parameter$new(
-      name = "time_aggregation",
-      description = "size of pixels in time-direction, expressed as ISO8601 period string (only 1 number and unit is allowed) such as \"P16D\".Default is monthly i.e. \"P1M\".",
-      schema = list(
-        type = "string",
-        subtype = "duration"
-      ),
-      optional = TRUE
-    ),
-    Parameter$new(
-      name = "crs",
-      description = "Coordinate Reference System, default = 4326",
-      schema = list(
-        type = "number",
-        subtype = "epsg-code"
-      ),
-      optional = TRUE
     )
   ),
   returns = eo_datacube,
-  operation = function(id, spatial_extent, temporal_extent, bands = NULL, pixels_size = 300, time_aggregation = "P1M",
-                       crs = 4326, job) {
+  operation = function(id, spatial_extent, crs = 4326, temporal_extent, bands = NULL, job) {
     # Temporal extent preprocess
     t0 <- temporal_extent[[1]]
     t1 <- temporal_extent[[2]]
@@ -205,7 +186,7 @@ load_collection <- Process$new(
     crs <- c("EPSG", crs)
     crs <- paste(crs, collapse = ":")
     v.overview <- gdalcubes::cube_view(
-      srs = crs, dx = pixels_size, dy = pixels_size, dt = time_aggregation,
+      srs = crs, dx = 30, dy = 30, dt = "P15D",
       aggregation = "median", resampling = "average",
       extent = list(
         t0 = t0, t1 = t1,
@@ -362,6 +343,72 @@ load_stac <- Process$new(
   }
 )
 
+#' aggregate temporal period
+aggregate_temporal_period <- Process$new(
+  id = "aggregate_temporal_period",
+  description = "Computes a temporal aggregation based on calendar hierarchies such as years, months or seasons.",
+  categories = as.array("aggregate", "cubes", "climatology"),
+  summary = "Temporal aggregations based on calendar hierarchies",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "The source data cube.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube"
+      )
+    ),
+    Parameter$new(
+      name = "period",
+      description = "The time intervals to aggregate",
+      schema = list(
+        type = "string"
+      ),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "reducer",
+      description = "A reducer to be applied for the values contained in each interval. A reducer is a single process such as mean or a set of processes, which computes a single value for a list of values",
+      schema = list(
+        type = "any"
+      ),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "dimension",
+      description = "The name of the temporal dimension for aggregation",
+      schema = list(
+        type = "any"
+      ),
+      optional = TRUE
+    ),
+    Parameter$new(
+      name = "context",
+      description = "Additional data to be passed to the reducer",
+      schema = list(
+        type = "any"
+      ),
+      optional = TRUE
+    )
+  ),
+  returns = eo_datacube,
+  operation = function(data, period, reducer, dimension = NULL, context = NULL, job) {
+    dt_period <- switch(period,
+      week = "P7D",
+      month = "P1M",
+      year = "P1Y",
+      decade = "P10Y",
+      stop("The specified period is not supported")
+    )
+
+    message("Aggregate temporal period ...")
+    message("Aggregate temporal period:", dt_period, "using reducer:", reducer)
+
+    cube <- gdalcubes::aggregate_time(cube = data, dt = dt_period, method = reducer)
+    message(gdalcubes::as_json(cube))
+    return(cube)
+  }
+)
 
 #' filter bands
 filter_bands <- Process$new(

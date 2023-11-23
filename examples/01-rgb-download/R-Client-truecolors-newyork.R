@@ -26,11 +26,9 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
                                                         south=4483092.4,
                                                         east=609472,
                                                         north=4530135),
-                                  temporal_extent = c("2021-06-01", "2021-06-30"),
-                                  # extra optional args for datacubes regularization -> courtesy of gdalcubes
-                                  pixels_size = 10,
-                                  time_aggregation = "P1M",
-                                  crs = 32618)
+                                                        crs = 32618,
+                                  temporal_extent = c("2021-06-01", "2021-06-30")
+                                  )
 # filter the data cube for the desired bands
 datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B02","B03","B04"))
 
