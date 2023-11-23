@@ -126,18 +126,17 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
                                                       south=-1027138,
                                                       east=-7329987,
                                                       north=-1018790),
-                                temporal_extent = c("2021-05-01", "2022-06-30"),
-                                # extra args for data cubes regularization -> courtesy of gdalcubes
-                                pixels_size = 30,
-                                time_aggregation = "P1Y",
-                                crs = 3857)
+                                                      crs = 3857,
+                                temporal_extent = c("2021-05-01", "2022-06-30"))
 
 # filter the data cube for the desired bands
 datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
 
+# aggregate data cube to a year
+datacube_agg = p$aggregate_temporal_period(data = datacube_filtered, period = "year", reducer = "median")
 
 # ndvi calculation
-datacube_ndvi = p$ndvi(data = datacube_filtered, red = "B04", nir = "B08")
+datacube_ndvi = p$ndvi(data = datacube_agg, red = "B04", nir = "B08")
 
 # supported formats
 formats = list_file_formats()
@@ -203,7 +202,11 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
                                   crs = 32633)
 
 # filter the data cube for the desired bands
-datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
+datacube_filtered = p$filter_bands(data = datacube_init, 
+                                          bands = c("B04", "B08"))
+# aggregate data cube to monthly
+datacube_agg = p$aggregate_temporal_period(data = datacube_filtered, 
+                            period = "month", reducer = "median")
 
 # user defined R function - bfast change detection method
 change_detection = "function(x) {
@@ -223,7 +226,7 @@ change_detection = "function(x) {
   }"
 
 # run udf
-datacube_udf = p$run_udf(data = datacube_filtered, udf = change.detection, context =  c("change_date", "change_magnitude"))
+datacube_udf = p$run_udf(data = datacube_agg, udf = change.detection, context =  c("change_date", "change_magnitude"))
 
 # supported formats
 formats = list_file_formats()
