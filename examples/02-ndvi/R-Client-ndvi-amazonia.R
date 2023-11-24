@@ -38,7 +38,7 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
 # filter the data cube for the desired bands
 datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
 
-# aggregate data cube to a year
+# aggregate data cube to yearly
 datacube_agg = p$aggregate_temporal_period(data = datacube_filtered, period = "year", reducer = "median")
 
 # ndvi calculation
