@@ -206,8 +206,8 @@ datacube_agg = p$aggregate_temporal_period(data = datacube_filtered,
                             period = "month", reducer = "median")
 
 # user defined R function - bfast change detection method
-change_detection = "function(x) {
-  knr <- exp(-((x[\"B08\",]/10000)-(x[\"B04\",]/10000))^2/(2))
+change_detection = 'function(x) {
+  knr <- exp(-((x["B08",]/10000)-(x["B04",]/10000))^2/(2))
   kndvi <- (1-knr) / (1+knr)
   if (all(is.na(kndvi))) {
     return(c(NA,NA))
@@ -220,10 +220,10 @@ change_detection = "function(x) {
       }, error = function(x) {
         return(c(NA,NA))
       })
-  }"
+  }'
 
 # run udf
-datacube_udf = p$run_udf(data = datacube_agg, udf = change.detection, context =  c("change_date", "change_magnitude"))
+datacube_udf = p$run_udf(data = datacube_agg, udf = change_detection, context =  c("change_date", "change_magnitude"))
 
 # supported formats
 formats = list_file_formats()

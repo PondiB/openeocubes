@@ -128,7 +128,7 @@ load_collection <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(id, spatial_extent, crs = 4326, temporal_extent, bands = NULL, job) {
-    # Temporal extent preprocess
+    # temporal extent preprocess
     t0 <- temporal_extent[[1]]
     t1 <- temporal_extent[[2]]
     duration <- c(t0, t1)
@@ -142,12 +142,13 @@ load_collection <- Process$new(
     ymax <- as.numeric(spatial_extent$north)
     message("...After Spatial extent")
 
-    # spatial extent for stac API call
+    # spatial extent for STAC API call
     xmin_stac <- xmin
     ymin_stac <- ymin
     xmax_stac <- xmax
     ymax_stac <- ymax
-    message("....After default Spatial extent for stac")
+    message("....After default Spatial extent for STAC")
+
     if (crs != 4326) {
       message("....crs is not 4326")
       min_pt <- sf::st_sfc(st_point(c(xmin, ymin)), crs = crs)
@@ -163,7 +164,7 @@ load_collection <- Process$new(
       message("....transformed to 4326")
     }
 
-    # Connect to STAC API using rstac and get satellite data
+    # connect to STAC API using rstac and get satellite data
     message("STAC API call.....")
     stac_object <- rstac::stac("https://earth-search.aws.element84.com/v0")
     items <- stac_object %>%
@@ -175,14 +176,16 @@ load_collection <- Process$new(
       ) %>%
       post_request() %>%
       items_fetch()
-    # create image collection from stac items features
+
+    # create image collection from STAC items features
     img.col <- gdalcubes::stac_image_collection(items$features,
-      property_filter =
-        function(x) {
-          x[["eo:cloud_cover"]] < 30
-        }
+                                                property_filter =
+                                                  function(x) {
+                                                    x[["eo:cloud_cover"]] < 30
+                                                  }
     )
-    # Define cube view with monthly aggregation
+
+    # Define cube view with bi weekly aggregation
     crs <- c("EPSG", crs)
     crs <- paste(crs, collapse = ":")
     v.overview <- gdalcubes::cube_view(
@@ -194,13 +197,15 @@ load_collection <- Process$new(
         top = ymax, bottom = ymin
       )
     )
-    # gdalcubes creation
+
+    # data cube creation
     cube <- gdalcubes::raster_cube(img.col, v.overview)
 
     if (!is.null(bands)) {
       cube <- gdalcubes::select_bands(cube, bands)
     }
-    message("Data Cube is created....")
+
+    message("The data cube is created....")
     message(gdalcubes::as_json(cube))
     return(cube)
   }
@@ -288,11 +293,9 @@ load_stac <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(url, spatial_extent, temporal_extent, bands = NULL, properties = NULL, job) {
-    # Temporal extent preprocess
-    t0 <- temporal_extent[[1]]
-    t1 <- temporal_extent[[2]]
-    duration <- c(t0, t1)
-    time_range <- paste(duration, collapse = "/")
+
+    # temporal extent preprocess
+    duration <- paste(temporal_extent[[1]], temporal_extent[[2]], collapse = "/")
 
     # spatial extent for cube view
     xmin <- as.numeric(spatial_extent$west)
@@ -300,44 +303,46 @@ load_stac <- Process$new(
     xmax <- as.numeric(spatial_extent$east)
     ymax <- as.numeric(spatial_extent$north)
 
-    # get stac catalog metadata
-    stacmetadata <- rstac::stac(url) %>%
+    # get STAC catalog metadata
+    stac_metadata <- rstac::stac(url) %>%
       rstac::get_request()
 
-    stac_base_url <- stacmetadata$links[[4]]$href
-    id <- stacmetadata$id
+    stac_base_url <- stac_metadata$links[[4]]$href
+    id <- stac_metadata$id
 
-    # Connect to STAC API using rstac and get satellite data
+    # connect to STAC API using rstac and get satellite data
     stac_object <- rstac::stac(stac_base_url)
     items <- stac_object %>%
       rstac::stac_search(
         collections = id,
         bbox = c(xmin, ymin, xmax, ymax),
-        datetime = time_range,
+        datetime = duration,
         limit = 10000
       ) %>%
       rstac::post_request() %>%
       rstac::items_fetch()
 
-    # create image collection from stac items features # , property_filter =function(x) {x[["eo:cloud_cover"]] < 30}
-    img.col <- gdalcubes::stac_image_collection(items$features)
+    # create image collection from STAC items features
+    img_col <- gdalcubes::stac_image_collection(items$features)
 
-    # Define cube view with monthly aggregation
-    v.overview <- gdalcubes::cube_view(
+    # define cube view with monthly aggregation
+    cube_view <- gdalcubes::cube_view(
       srs = "EPSG:4326", dx = 30, dy = 30, dt = "P1M",
       aggregation = "median", resampling = "average",
       extent = list(
-        t0 = t0, t1 = t1,
+        t0 = temporal_extent[[1]], t1 = temporal_extent[[2]],
         left = xmin, right = xmax,
         top = ymax, bottom = ymin
       )
     )
-    # gdalcubes creation
-    cube <- gdalcubes::raster_cube(img.col, v.overview)
+
+    # create data cube
+    cube <- gdalcubes::raster_cube(img_col, cube_view)
 
     if (!is.null(bands)) {
       cube <- gdalcubes::select_bands(cube, bands)
     }
+
     message(gdalcubes::as_json(cube))
     return(cube)
   }
@@ -395,6 +400,7 @@ aggregate_temporal_period <- Process$new(
   operation = function(data, period, reducer, dimension = NULL, context = NULL, job) {
     dt_period <- switch(period,
       week = "P7D",
+      dekad = "P10D",
       month = "P1M",
       year = "P1Y",
       decade = "P10Y",
@@ -760,6 +766,81 @@ reduce_dimension <- Process$new(
     }
   }
 )
+
+#' resample spatial
+resample_spatial <- Process$new(
+  id = "resample_spatial",
+  description = "Resamples the spatial dimensions (x,y) of the data cube to a specified resolution and/or warps the data cube to the target projection. At least resolution or projection must be specified.",
+  categories = as.array("aggregate", "cubes", "climatology"),
+  summary = "Resample and warp the spatial dimensions",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A raster data cube.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube"
+      )
+    ),
+    Parameter$new(
+      name = "resolution",
+      description = "Resamples the data cube to the target resolution, which can be specified either as separate values for x and y or as a single value for both axes. Specified in the units of the target projection. Doesn't change the resolution by default (0).",
+      schema = list(
+        type = list( "number","array")
+      ),
+      optional = TRUE
+    ),
+    Parameter$new(
+      name = "projection",
+      description = "Warps the data cube to the target projection, specified as as EPSG code or WKT2 CRS string. By default (null), the projection is not changed",
+      schema = list(
+        type = "integer"
+      ),
+      optional = TRUE
+    ),
+    Parameter$new(
+      name = "method",
+      description = "Resampling method to use",
+      schema = list(
+        type = "string"
+      ),
+      optional = TRUE
+    ),
+    Parameter$new(
+      name = "align",
+      description = "Specifies to which corner of the spatial extent the new resampled data is aligned to",
+      schema = list(
+        type = "string"
+      ),
+      optional = TRUE
+    )
+  ),
+  returns = eo_datacube,
+  operation = function(data, resolution = 0, projection = NULL, method = "mean", align = "upper-left", job) {
+    if (resolution == 0 && is.null(projection)) {
+      stop("At least resolution or projection must be specified.")
+    }
+
+    valid_methods <- c("mean", "min", "max", "median", "count", "sum", "prod", "var", "sd")
+    if (!(method %in% valid_methods)) {
+      stop(paste("Invalid method. Please choose one of", toString(valid_methods)))
+    }
+
+    if (!is.null(projection)) {
+      stop("Currently, only resampling spatial resolution is implemented.")
+    }
+
+    cube <- if (resolution != 0) {
+      gdalcubes::aggregate_space(cube = data, dx = resolution, dy = resolution, method = method)
+    } else {
+      stop("Currently, only resampling spatial resolution is implemented.")
+    }
+
+    message(gdalcubes::as_json(cube))
+    return(cube)
+  }
+)
+
 
 #' merge_cubes
 merge_cubes <- Process$new(

@@ -30,11 +30,8 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
                                                         south=5803577.5,
                                                         east=422094.8,
                                                         north=5807036.1),
-                                  temporal_extent = c("2016-01-01", "2020-12-31"),
-                                  # extra args for data cubes regularization
-                                  pixels_size = 10,
-                                  time_aggregation = "P1M",
-                                  crs = 32633)
+                                                        crs = 32633,
+                                  temporal_extent = c("2016-01-01", "2020-12-31"))
 
 # filter the data cube for the desired bands
 datacube_filtered = p$filter_bands(data = datacube_init,
@@ -44,8 +41,8 @@ datacube_agg = p$aggregate_temporal_period(data = datacube_filtered,
                                            period = "month", reducer = "median")
 
 # user defined R function - bfast change detection method
-change_detection = "function(x) {
-  knr <- exp(-((x[\"B08\",]/10000)-(x[\"B04\",]/10000))^2/(2))
+change_detection = 'function(x) {
+  knr <- exp(-((x["B08",]/10000)-(x["B04",]/10000))^2/(2))
   kndvi <- (1-knr) / (1+knr)
   if (all(is.na(kndvi))) {
     return(c(NA,NA))
@@ -58,10 +55,10 @@ change_detection = "function(x) {
       }, error = function(x) {
         return(c(NA,NA))
       })
-  }"
+  }'
 
 # run udf
-datacube_udf = p$run_udf(data = datacube_agg, udf = change.detection, context =  c("change_date", "change_magnitude"))
+datacube_udf = p$run_udf(data = datacube_agg, udf = change_detection, context =  c("change_date", "change_magnitude"))
 
 # supported formats
 formats = list_file_formats()
