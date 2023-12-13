@@ -161,6 +161,7 @@ load_collection <- Process$new(
       max_bbx <- sf::st_bbox(max_pt)
       xmax_stac <- max_bbx$xmax
       ymax_stac <- max_bbx$ymax
+
       message("....transformed to 4326")
     }
 
