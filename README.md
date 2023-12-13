@@ -88,6 +88,12 @@ docker-compose build --no-cache && docker-compose up
 
 ```
 
+## Development Notes:
+While developing, you can skip rebuilding the docker container everytime. Instead you can run the server locally. 
+Just run "Rscript startLocal.R" inside this directory.
+
+This will compile this Repository as a R Package and start the server.
+
 ## Getting Started:
 
 ### Example 1:  NDVI Script in R-Studio using OpenEO R-Client

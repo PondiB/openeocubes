@@ -161,6 +161,7 @@ load_collection <- Process$new(
       max_bbx <- sf::st_bbox(max_pt)
       xmax_stac <- max_bbx$xmax
       ymax_stac <- max_bbx$ymax
+
       message("....transformed to 4326")
     }
 
@@ -1061,11 +1062,7 @@ run_udf <- Process$new(
     }
     # NB : more reducer keywords can be added
     message("run UDF called")
-<<<<<<< HEAD
-    reducer_keywords = c("sum","bfast","sd", "mean", "median", "min","reduce","product", "max", "count", "var")
-=======
     reducer_keywords <- c("sum", "bfast", "sd", "mean", "median", "min", "reduce", "product", "max", "count", "var")
->>>>>>> 98967b732289fd51ebbd610db9e675bfec4683ea
     if (!("cube" %in% class(data))) {
       stop('Provided cube is not of class "cube"')
     }
