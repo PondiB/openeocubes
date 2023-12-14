@@ -4,7 +4,6 @@ remotes::install_local("./", dependencies = TRUE, force = TRUE)
 # Start service
 library(openeocubes)
 
-
 aws.host <- Sys.getenv("AWSHOST")
 
 if (aws.host == "") {
