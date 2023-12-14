@@ -1,12 +1,12 @@
 version: "3.3"
 
 services:
-  openeocube:
+  openeocubes:
     build: .
     environment:
       - TZ=Etc/UTC
       - DEBIAN_FRONTEND=noninteractive
-    container_name: openeocube
+    container_name: openeocubes
     ports:
       - "8000:8000"
     restart: always
