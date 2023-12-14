@@ -1,8 +1,6 @@
-# build and install package locally (use for development)
-remotes::install_local("./", dependencies = TRUE, force = TRUE)
-
 # Start service
 library(openeocubes)
+
 
 aws.host <- Sys.getenv("AWSHOST")
 
