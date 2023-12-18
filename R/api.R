@@ -172,6 +172,22 @@ NULL
     else if (format$title == "GeoTiff") {
       file = gdalcubes::write_tif(job$results)
     }
+    else if (format$title == "R Data Set")
+    {
+      # THINK ABOUT PRETTIER SOLUTION
+
+      temp = base::tempfile()
+
+      base::saveRDS(job$results, temp)
+
+      res$status = 200
+      res$body = readBin(temp, "raw", n = file.info(temp)$size)
+
+      content_type = plumber:::getContentType(tools::file_ext(temp))
+      res$setHeader("Content-Type", content_type)
+
+      return(res)
+    }
     else {
       throwError("FormatUnsupported")
     }
@@ -183,18 +199,38 @@ NULL
     else if (format == "GTiff") {
       file = gdalcubes::write_tif(job$results)
     }
+    else if (format == "RDS") {
+
+      # THINK ABOUT PRETTIER SOLUTION
+
+      temp = base::tempfile()
+
+      base::saveRDS(job$results, temp)
+
+      res$status = 200
+      res$body = readBin(temp, "raw", n = file.info(temp)$size)
+
+      content_type = plumber:::getContentType(tools::file_ext(temp))
+      res$setHeader("Content-Type", content_type)
+
+      return(res)
+    }
     else {
       throwError("FormatUnsupported")
     }
   }
 
+  # path to where the data is stored
   first = file[1]
+
   res$status = 200
   res$body = readBin(first, "raw", n = file.info(first)$size)
+
   content_type = plumber:::getContentType(tools::file_ext(first))
   res$setHeader("Content-Type", content_type)
 
   return(res)
+
 },error=handleError)
 }
 
@@ -315,5 +351,6 @@ addEndpoint = function() {
   Session$assignProcess(multiply)
   Session$assignProcess(divide)
   Session$assignProcess(naive_ml)
+  Session$assignProcess(train_model)
 
 }
