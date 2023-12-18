@@ -1246,3 +1246,40 @@ naive_ml = Process$new(
   }
 
 )
+
+# Train ML Model
+train_model <- Process$new(
+  id = "train_model",
+  description = "Train a machine learning algorithm based on the provided training data on satellite imagery gathered from a datacube.",
+  categories = as.array("machine-learning", "cubes"),
+  summary = "train machine learning model.",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A data cube with bands.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube"
+      )
+    ),
+    Parameter$new(
+      name = "bands",
+      description = "A list of band names.",
+      schema = list(
+        type = "array"
+      ),
+      optional = TRUE
+    )
+  ),
+  returns = list(
+    description = "The trained model.",
+    schema = list(type = "object", subtype = "caret-ml-model")
+  ),
+  operation = function(data, bands, job)
+  {
+    message("Test Train model")
+    x = 1
+    return(x)
+  }
+)
+
