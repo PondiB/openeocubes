@@ -67,17 +67,6 @@ SessionConfig = function(api.port = NULL, host = NULL, aws.ipv4 = NULL) {
           )
         )
 
-      ),
-      RDS = list(
-        title = "R Data Set",
-        description = "Export to RDS",
-        parameters = list(
-          format = list(
-            type = "string",
-            description = "RDS"
-          )
-        )
-
       )
     ),
     inputFormats = list(
