@@ -381,10 +381,4 @@ addEndpoint = function() {
   Session$assignProcess(subtract)
   Session$assignProcess(multiply)
   Session$assignProcess(divide)
-<<<<<<< HEAD
-  Session$assignProcess(naive_ml)
-  Session$assignProcess(train_model)
-=======
->>>>>>> parent of 35bfe49 (first draft for ml process)
-
 }
