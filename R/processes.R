@@ -1140,6 +1140,7 @@ save_result <- Process$new(
     return(data)
   }
 )
+<<<<<<< HEAD
 
 naive_ml = Process$new(
   id = "naive_ml",
@@ -1283,3 +1284,5 @@ train_model <- Process$new(
   }
 )
 
+=======
+>>>>>>> parent of 35bfe49 (first draft for ml process)
