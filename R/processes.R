@@ -1424,7 +1424,7 @@ train_model <- Process$new(
 predict_model <- Process$new(
   id = "predict_model",
   description = "Perform a prediction on a datacube based on the given model.",
-  categories = as.array("cubes", "machine-learning"),
+  categories = as.array("machine-learning", "cubes"),
   summary = "Predict data on datacube.",
   parameters = list(
     Parameter$new(
@@ -1507,6 +1507,7 @@ predict_model <- Process$new(
 
       poly <- aoi_polygon_df |>
         # create sf_point object
+        # TODO: find CRS of AOI from data, not hardcoded
         sf::st_as_sf(coords = c("x", "y"), crs = 3857) |> sf::st_transform(gdalcubes::srs(data)) |>
         sf::st_bbox() |>
         sf::st_as_sfc() |>
@@ -1551,27 +1552,15 @@ predict_model <- Process$new(
       stop()
     })
 
+
     tryCatch({
-      message("\nAdd spatial information to data.frame...")
+      message("\nMerge data.frame and aoi_points...")
 
       # FID for later merge
       aoi_points$FID = rownames(aoi_points)
 
       # remove old ID
       aoi_points$ID = NULL
-
-      message("Spatial information added!")
-    },
-    error = function(err)
-    {
-      message("An Error occured!")
-      message(toString(err))
-      stop()
-    })
-
-
-    tryCatch({
-      message("\nMerge data.frame and aoi_points...")
 
       features = base::merge(features, aoi_points, by = "FID")
 
