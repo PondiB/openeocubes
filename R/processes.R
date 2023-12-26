@@ -1471,13 +1471,20 @@ predict_model <- Process$new(
           required = c("east", "west", "south", "north")
         )
       )
+    ),
+    Parameter$new(
+      name = "aoi_crs",
+      description = "CRS of the given AOI",
+      schema = list(
+        type = "numeric"
+      )
     )
   ),
   returns = list(
     description = "Spatial data frame containing the geometry, class and class probability for each pixel",
     schema = list(type = "data.frame")
   ),
-  operation = function(data, model_id, aoi_extend, job) {
+  operation = function(data, model_id, aoi_extend, aoi_crs job) {
     # show call stack for debugging
     message("predict_model called...")
 
@@ -1494,6 +1501,9 @@ predict_model <- Process$new(
       message(paste0(name),": ", aoi_extend[name])
     }
 
+    message("\naoi_crs:")
+    message(aoi_crs)
+
     xmin = aoi_extend$west
     ymin = aoi_extend$south
     xmax = aoi_extend$east
@@ -1507,8 +1517,7 @@ predict_model <- Process$new(
 
       poly <- aoi_polygon_df |>
         # create sf_point object
-        # TODO: find CRS of AOI from data, not hardcoded
-        sf::st_as_sf(coords = c("x", "y"), crs = 3857) |> sf::st_transform(gdalcubes::srs(data)) |>
+        sf::st_as_sf(coords = c("x", "y"), crs = aoi_crs) |> sf::st_transform(gdalcubes::srs(data)) |>
         sf::st_bbox() |>
         sf::st_as_sfc() |>
         # create sf_polygon object
