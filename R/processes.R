@@ -1484,7 +1484,7 @@ predict_model <- Process$new(
     description = "Spatial data frame containing the geometry, class and class probability for each pixel",
     schema = list(type = "data.frame")
   ),
-  operation = function(data, model_id, aoi_extend, aoi_crs job) {
+  operation = function(data, model_id, aoi_extend, aoi_crs, job) {
     # show call stack for debugging
     message("predict_model called...")
 
