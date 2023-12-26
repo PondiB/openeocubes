@@ -1141,11 +1141,13 @@ save_result <- Process$new(
   }
 )
 
-naive_ml = Process$new(
-  id = "naive_ml",
-  description = "Simple implementation of Random Forest Algorithm.",
-  categories = as.array("cubes"),
-  summary = "perform RF on a Datacube.",
+
+# Train ML Model
+train_model <- Process$new(
+  id = "train_model",
+  description = "Train a machine learning algorithm based on the provided training data on satellite imagery gathered from a datacube.",
+  categories = as.array("machine-learning", "cubes"),
+  summary = "train machine learning model.",
   parameters = list(
     Parameter$new(
       name = "data",
@@ -1153,10 +1155,296 @@ naive_ml = Process$new(
       schema = list(
         type = "object",
         subtype = "raster-cube"
-      )),
+      )
+    ),
     Parameter$new(
-      name = "spatial_extent",
-      description = "Limits the data to load from the collection to the specified bounding box",
+      name = "model_type",
+      description = "Type of the model to be trained. Must be one of the following types: RF.",
+      schema = list(
+        type = "string"
+      ),
+    ),
+    Parameter$new(
+      name = "labeled_polygons",
+      description = "String containing the GeoJSON with Polygons. These contain class labels used to train the model.",
+      schema = list(
+        type = "string",
+        subtype = "GeoJSON"
+      )
+    ),
+    Parameter$new(
+      name = "hyperparameters",
+      description = "List of Hyperparameters used for the model",
+      schema = list(
+        type = "list"
+      ),
+      optional = TRUE
+    ),
+    Parameter$new(
+      name = "save_model",
+      description = "Declare wether the computed model should be saved in the user workspace. Defaults to false.",
+      schema = list(
+        type = "boolean"
+      ),
+      optional = TRUE
+    ),
+    Parameter$new(
+      name = "model_id",
+      description = "Id under which the model should be stored. Defaults to NULL",
+      schema = list(
+        type = "string"
+      ),
+      optional = TRUE
+    )
+
+  ),
+  returns = list(
+    description = "The trained model.",
+    schema = list(type = "object", subtype = "caret-ml-model")
+  ),
+  operation = function(data, model_type, labeled_polygons, hyperparameters = NULL, save_model = FALSE, model_id = NULL, job)
+  {
+    # show call stack for debugging
+    message("train_model called...")
+
+    message("\nCall parameters: ")
+    message("\ndata: ")
+    message(gdalcubes::as_json(data))
+    message("\nmodel_type: ")
+    message(model_type)
+
+    tryCatch({
+      message("\nlabeled_polygons: ")
+
+      # read GeoJSON data as sf
+      labeled_polygons = sf::st_read(labeled_polygons, quiet = TRUE)
+
+      # change CRS to cube CRS
+      labeled_polygons = sf::st_transform(labeled_polygons, crs = gdalcubes::srs(data))
+
+      message("Training Polygons sucessfully loaded!")
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+    })
+
+    message("\nhyperparameters: ")
+    if (is.null(hyperparameters))
+    {
+      message("No Hyperparameters passed!")
+    }
+    else
+    {
+      for (name in names(hyperparameters))
+      {
+        message(paste0(name, ": ", hyperparameters[name]))
+      }
+    }
+
+    message("\nsave_model:")
+    message(save_model)
+
+    message("\nmodel_id:")
+    print(model_id) # to also show "NULL"
+
+
+    # obvios boolean check for mor readibility
+    if (save_model == TRUE && is.null(model_id))
+    {
+      message("If the model should be safed, a model_id needs to be given!")
+      stop("")
+    }
+
+    tryCatch({
+      message("\nExtract features...")
+
+      # extract features from cube
+      features = gdalcubes::extract_geom(data, labeled_polygons)
+
+      message("all features extracted!")
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+    })
+
+    # add FID for merge with 'features'
+    labeled_polygons$FID = rownames(labeled_polygons)
+
+    tryCatch({
+      message("\nMerge features with training data...")
+
+      # this df contains all information from the datacube and the labeled_polgons
+      training_df = merge(labeled_polygons, features, by = "FID")
+
+      message("Merging complete!")
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+    })
+
+    # make copy to filter out values not needed for training
+    training_df_filtered = training_df
+    training_df_filtered$time = NULL
+    training_df_filtered$geometry = NULL
+
+
+    #TODO: find reasonable threshold
+    if (nrow(training_df) > 10000)
+    {
+      tryCatch({
+        message("\nReduce number of features...")
+        # data frame for later storage
+        training_df_reduced = data.frame()
+
+        # from all data with the same FID (same polygon) take only 50% of the
+        # features for each training polygon as they are assumed to carry similar information
+        for (i in as.numeric(unique(training_df_filtered$FID)))
+        {
+          #TODO: find better "reducing" function
+          sub_df = training_df_filtered[training_df_filtered$FID == i,]
+
+          # take 50% of sub_df rows
+          sub_df = sub_df[1:(nrow(sub_df)/2),]
+
+          # append new rows
+          training_df_reduced = rbind(training_df_reduced, sub_df)
+        }
+
+        # overwrite filtered df
+        training_df_filtered = training_df_reduced
+
+        message("Reducing completed!")
+      },
+      error = function(err)
+      {
+        message("An Error occured!")
+        message(toString(err))
+      })
+    }
+
+    # remove FID to not train model on FID
+    training_df_filtered$FID = NULL
+
+
+    tryCatch({
+      message("\nSplit training Data...")
+
+      train_row_numbers = caret::createDataPartition(
+        training_df_filtered$class, p=0.8, list=FALSE
+      )
+      training_data = training_df_filtered[train_row_numbers,]
+      testing_data = training_df_filtered[-train_row_numbers,]
+
+      message("Data splitting completed!")
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+    })
+
+    # build specific model given by "model_type"
+    if (model_type == "RF")
+    {
+      # set seed for reproducibility while model training
+      #TODO possibly remove
+      set.seed(100)
+
+      message("\nChecking hyperparameters for Random Forest...")
+
+      if (!all(c("mtry", "ntree") %in% names(hyperparameters)))
+      {
+        message("'hyperparameters' has to contain 'mtry' and 'ntree'!")
+        stop("")
+      }
+
+      message("hyperparameters for Random Forest checked!")
+
+      # use fixed hyperparams given by the user
+      # (this may result in a lack of accuracy for the model)
+      if (!is.null(hyperparameters))
+      {
+
+        tryCatch({
+          message("\nTrain Model with fixed hyperparameters...")
+
+          # no parameters are tuned
+          trainCtrl <- caret::trainControl(method = "none", classProbs = TRUE)
+
+          model <- caret::train(
+            class ~ .,
+            data = training_data,
+            method = "rf",
+            trControl = trainCtrl,
+            # only one model is passed (fixed hyperparams are given)
+            tuneGrid = expand.grid(mtry = hyperparameters$mtry),
+            ntree = hyperparameters$ntree)
+
+          message("Model training finished!")
+        },
+        error = function(err)
+        {
+          message("An Error occured!")
+          message(toString(err))
+        })
+
+      }
+      # else tune model hyperparameters
+
+    }
+
+    # save model to user workspace
+    if (save_model)
+    {
+      tryCatch({
+        message("\nSaving model to user workspace...")
+
+        saveRDS(model, paste0(Session$getConfig()$workspace.path, "/", model_id, ".rds"))
+
+        message("Saving complete!")
+      },
+      error = function(err)
+      {
+        message("An Error occured!")
+        message(toString(err))
+      })
+    }
+
+    return(model)
+  }
+)
+
+
+predict_model <- Process$new(
+  id = "predict_model",
+  description = "Perform a prediction on a datacube based on the given model.",
+  categories = as.array("cubes", "machine-learning"),
+  summary = "Predict data on datacube.",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "The data to work with.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube"
+      )
+    ),
+    Parameter$new(
+      name = "model_id",
+      description = "Id of the model that should be used for prediction. The model will be searches in the user workspace.",
+      schema = list(
+        type = "string"
+      )
+    ),
+    Parameter$new(
+      name = "aoi_extend",
+      description = "Spatial extend of the area of interest (aoi) to be used for classification. Has to be in EPSG:3857",
       schema = list(
         list(
           title = "Bounding box",
@@ -1181,105 +1469,191 @@ naive_ml = Process$new(
             )
           ),
           required = c("east", "west", "south", "north")
-        ),
-        list(
-          title = "GeoJson",
-          type = "object",
-          subtype = "geojson"
-        ),
-        list(
-          title = "No filter",
-          description = "Don't filter spatially. All data is included in the data cube.",
-          type = "null"
         )
       )
     )
   ),
-  returns = eo_datacube,
-  operation = function(data, spatial_extend, job)
-  {
-    message("naive ML")
-    # # get spatial extend to build polygon
-    # xmin <- as.numeric(spatial_extent$west)
-    # ymin <- as.numeric(spatial_extent$south)
-    # xmax <- as.numeric(spatial_extent$east)
-    # ymax <- as.numeric(spatial_extent$north)
-    #
-    # # get CRS from Datacube (via Int parsing)
-    # cube_crs = as.numeric(gsub("\\D", "", gdalcubes::srs(cube)))
-    #
-    #
-    # # create polygon for later extraction of the cube
-    # polygon_coord_df = data.frame(x = c(xmin,ymin), y = c(xmax ,ymax))
-    #
-    # message("Create Polygon from AOI...")
-    #
-    # polygon <- polygon_coord_df |>
-    #   # create sf_point object, convert to cube crs
-    #   st_as_sf(coords = c("x", "y"), crs = 4326) %>% st_transform(crs = cube_crs) |>
-    #   st_bbox() |>
-    #   st_as_sfc() |>
-    #   # create sf_polygon object
-    #   st_as_sf()
-    #
-    # message(polygon)
-    #
-    # # create grid with same spatial resolution to later join the geometry with each pixel of the satellite image
-    # grid = st_as_stars(st_bbox(polygon), dx = 30, dy = 30)
-    #
-    # message("Rasterize Polygon...")
-    #
-    # # each point represents the center of a raster cell in the satellite image
-    # aoi_points = polygon |> st_rasterize(grid) |> st_as_sf(as_points = TRUE)
-    #
-    # message(aoi_points)
-
-
-    # message("Extract Features...")
-    #
-    # # extract geometry from the datacube
-    # features = extract_geom(data, aoi_points)
-    #
-    # message("Head of Features: ")
-    # message(head(features))
-    return(data)
-  }
-
-)
-
-# Train ML Model
-train_model <- Process$new(
-  id = "train_model",
-  description = "Train a machine learning algorithm based on the provided training data on satellite imagery gathered from a datacube.",
-  categories = as.array("machine-learning", "cubes"),
-  summary = "train machine learning model.",
-  parameters = list(
-    Parameter$new(
-      name = "data",
-      description = "A data cube with bands.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
-    ),
-    Parameter$new(
-      name = "bands",
-      description = "A list of band names.",
-      schema = list(
-        type = "array"
-      ),
-      optional = TRUE
-    )
-  ),
   returns = list(
-    description = "The trained model.",
-    schema = list(type = "object", subtype = "caret-ml-model")
+    description = "Spatial data frame containing the geometry, class and class probability for each pixel",
+    schema = list(type = "data.frame")
   ),
-  operation = function(data, bands, job)
-  {
-    message("Test Train model")
-    x = 1
-    return(x)
+  operation = function(data, model_id, aoi_extend, job) {
+    # show call stack for debugging
+    message("predict_model called...")
+
+    message("\nCall parameters: ")
+    message("\ndata: ")
+    message(gdalcubes::as_json(data))
+
+    message("\nmodel_id:")
+    message(model_id)
+
+    message("\naoi_extend:")
+    for (name in names(aoi_extend))
+    {
+      message(paste0(name),": ", aoi_extend[name])
+    }
+
+    xmin = aoi_extend$west
+    ymin = aoi_extend$south
+    xmax = aoi_extend$east
+    ymax = aoi_extend$north
+
+
+    tryCatch({
+      message("\nCreate AOI Polygons...")
+
+      aoi_polygon_df = data.frame(x = c(xmin,xmax), y = c(ymin ,ymax))
+
+      poly <- aoi_polygon_df |>
+        # create sf_point object
+        sf::st_as_sf(coords = c("x", "y"), crs = 3857) |> sf::st_transform(gdalcubes::srs(data)) |>
+        sf::st_bbox() |>
+        sf::st_as_sfc() |>
+        # create sf_polygon object
+        sf::st_as_sf()
+
+
+      # get cube resolution
+      cube_resolution = gdalcubes::dimensions(data)$x$pixel_size
+
+      # grid to rasterize the aoi polygon
+      grid = stars::st_as_stars(sf::st_bbox(poly), dx = cube_resolution, dy = cube_resolution)
+
+      # aoi polygon rastern (in ein polygon pro pixel)
+      aoi_points = poly |> stars::st_rasterize(grid) |> sf::st_as_sf()
+
+      message("AOI Polygons created!")
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+      stop()
+    })
+
+    tryCatch({
+      message("\nExtract features...")
+
+      # extract features from cube
+      features = gdalcubes::extract_geom(data, aoi_points)
+
+      # reset FID to prevent mismatch after extraction
+      features$FID = NULL
+      features$FID = rownames(features)
+
+      message("All features extracted!")
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+      stop()
+    })
+
+    tryCatch({
+      message("\nAdd spatial information to data.frame...")
+
+      # FID for later merge
+      aoi_points$FID = rownames(aoi_points)
+
+      # remove old ID
+      aoi_points$ID = NULL
+
+      message("Spatial information added!")
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+      stop()
+    })
+
+
+    tryCatch({
+      message("\nMerge data.frame and aoi_points...")
+
+      features = base::merge(features, aoi_points, by = "FID")
+
+      # reset FID to prevent mismatch after merge
+      features$FID = rownames(features)
+
+      message("Merge completed!")
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+      stop()
+    })
+
+    tryCatch({
+      message("\nPreparing prediction dataset...")
+
+      # copy features to filter out unwanted data
+      features_filtered = features
+      features_filtered$time = NULL
+      features_filtered$FID = NULL
+      features_filtered$geometry = NULL
+
+      message("Data preperation finished!")
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+      stop()
+    })
+
+    tryCatch({
+      message("\nPerform predicition...")
+
+      # get model from user workspace
+      model = readRDS(paste0(Session$getConfig()$workspace.path, "/", model_id, ".rds"))
+
+      # predict classes
+      predicted_classes = stats::predict(model, newdata = features_filtered)
+
+      # get class probalilities
+      prediction_accuracys = stats::predict(model, newdata = features_filtered, type = "prob")
+
+      # get column with only the highest class prob
+      max_accuracy_per_pixel = apply(prediction_accuracys, 1, base::max)
+
+      message("Prediction completed!")
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+      stop()
+    })
+
+
+    tryCatch({
+      message("\nCreate output dataframe...")
+
+      # create data.frame of same length as features
+      output_dataframe = base::as.data.frame(base::matrix(NA,
+                                                          nrow = nrow(features),
+                                                          ncol = 1,
+                                                          dimnames = list(c(), "FID")))
+
+      output_dataframe$FID = features$FID
+      output_dataframe$class = predicted_classes
+      output_dataframe$class_accuracys = max_accuracy_per_pixel
+      output_dataframe$geometry = features$geometry
+
+      message("Output dataframe created!")
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+      stop()
+    })
+
+
+    return(output_dataframe)
   }
 )
-
