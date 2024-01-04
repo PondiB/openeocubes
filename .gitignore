@@ -41,5 +41,8 @@ vignettes/*.pdf
 #mac 
 .DS_Store
 
-#results from backend jobs
-/results
+# test workspace
+/test_workspace
+
+# jobInfos from backend jobs
+/jobs

@@ -89,10 +89,11 @@ docker-compose build --no-cache && docker-compose up
 ```
 
 ## Development Notes:
-While developing, you can skip rebuilding the docker container everytime. Instead you can run the server locally. 
-Just run "Rscript startLocal.R" inside this directory.
+While developing, you can skip rebuilding the docker container everytime. Instead you can run the server locally. To run this server locally, you need RTools4.0. For easier setup, please open "openeocubes.Rproj". Here every build tool is already set up and you can just run "Rscript startLocal.R" inside this directory.
 
 This will compile this Repository as a R Package and start the server.
+
+The script "statLocal.R" is not intended to be used on an AWS Instance.
 
 ## Getting Started:
 
