@@ -1434,7 +1434,7 @@ train_model <- Process$new(
 predict_model <- Process$new(
   id = "predict_model",
   description = "Perform a prediction on a datacube based on the given model.",
-  categories = as.array("cubes", "machine-learning"),
+  categories = as.array("machine-learning", "cubes"),
   summary = "Predict data on datacube.",
   parameters = list(
     Parameter$new(
@@ -1481,19 +1481,24 @@ predict_model <- Process$new(
           required = c("east", "west", "south", "north")
         )
       )
+    ),
+    Parameter$new(
+      name = "aoi_crs",
+      description = "CRS of the given AOI",
+      schema = list(
+        type = "numeric"
+      )
     )
   ),
   returns = list(
     description = "Spatial data frame containing the geometry, class and class probability for each pixel",
     schema = list(type = "data.frame")
   ),
-  operation = function(data, model_id, aoi_extend, job) {
+  operation = function(data, model_id, aoi_extend, aoi_crs, job) {
     # show call stack for debugging
     message("predict_model called...")
 
     message("\nCall parameters: ")
-    message("\ndata: ")
-    message(gdalcubes::as_json(data))
 
     message("\nmodel_id:")
     message(model_id)
@@ -1503,6 +1508,9 @@ predict_model <- Process$new(
     {
       message(paste0(name),": ", aoi_extend[name])
     }
+
+    message("\naoi_crs:")
+    message(aoi_crs)
 
     xmin = aoi_extend$west
     ymin = aoi_extend$south
@@ -1517,7 +1525,7 @@ predict_model <- Process$new(
 
       poly <- aoi_polygon_df |>
         # create sf_point object
-        sf::st_as_sf(coords = c("x", "y"), crs = 3857) |> sf::st_transform(gdalcubes::srs(data)) |>
+        sf::st_as_sf(coords = c("x", "y"), crs = aoi_crs) |> sf::st_transform(gdalcubes::srs(data)) |>
         sf::st_bbox() |>
         sf::st_as_sfc() |>
         # create sf_polygon object
@@ -1561,27 +1569,15 @@ predict_model <- Process$new(
       stop()
     })
 
+
     tryCatch({
-      message("\nAdd spatial information to data.frame...")
+      message("\nMerge data.frame and aoi_points...")
 
       # FID for later merge
       aoi_points$FID = rownames(aoi_points)
 
       # remove old ID
       aoi_points$ID = NULL
-
-      message("Spatial information added!")
-    },
-    error = function(err)
-    {
-      message("An Error occured!")
-      message(toString(err))
-      stop()
-    })
-
-
-    tryCatch({
-      message("\nMerge data.frame and aoi_points...")
 
       features = base::merge(features, aoi_points, by = "FID")
 
@@ -1665,5 +1661,62 @@ predict_model <- Process$new(
 
 
     return(output_dataframe)
+  }
+)
+
+#' fill_missing_values
+fill_missing_values <- Process$new(
+  id = "fill_missing_values",
+  description = "Fill NA data cube pixels by simple time series interpolation.",
+  categories = as.array("cubes"),
+  summary = "Fill out missing values",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A data cube with bands.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube"
+      )
+    ),
+    Parameter$new(
+      name = "method",
+      description = "Method of interpolation to fill NA values. Valid methods are: near,linear, locf, nocb. Look up the gdalcubes reference for further information.",
+      schema = list(
+        type = "string"
+      ),
+    )
+  ),
+  returns = eo_datacube,
+  operation = function(data, method, job) {
+    message("Call parameters:")
+    message("\ndata:")
+    message(gdalcubes::as_json(data))
+
+    message("\nmethod:")
+    message(method)
+
+    valid_methods <- c("near", "linear", "locf", "nocb")
+    if (!(method %in% valid_methods)) {
+      stop(paste("Invalid method. Please choose one of", toString(valid_methods)))
+    }
+
+    tryCatch({
+      message("\nFill NA values...")
+
+      gdalcubes::fill_time(data, method)
+
+      message("NA values filled!")
+
+
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+      stop()
+    })
+
+    return(data)
   }
 )
