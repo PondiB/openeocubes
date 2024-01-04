@@ -124,10 +124,18 @@ load_collection <- Process$new(
         type = "array"
       ),
       optional = TRUE
+    ),
+    Parameter$new(
+      name = "resolution",
+      description = "Specify resolution for spatial resampling.",
+      schema = list(
+        type = "integer"
+      ),
+      optional = TRUE
     )
   ),
   returns = eo_datacube,
-  operation = function(id, spatial_extent, crs = 4326, temporal_extent, bands = NULL, job) {
+  operation = function(id, spatial_extent, crs = 4326, temporal_extent, bands = NULL, resolution = 30, job) {
     # temporal extent preprocess
     t0 <- temporal_extent[[1]]
     t1 <- temporal_extent[[2]]
@@ -190,7 +198,7 @@ load_collection <- Process$new(
     crs <- c("EPSG", crs)
     crs <- paste(crs, collapse = ":")
     v.overview <- gdalcubes::cube_view(
-      srs = crs, dx = 30, dy = 30, dt = "P15D",
+      srs = crs, dx = resolution, dy = resolution, dt = "P15D",
       aggregation = "median", resampling = "average",
       extent = list(
         t0 = t0, t1 = t1,
@@ -205,6 +213,9 @@ load_collection <- Process$new(
     if (!is.null(bands)) {
       cube <- gdalcubes::select_bands(cube, bands)
     }
+
+    message(gdalcubes::dimensions(cube))
+
 
     message("The data cube is created....")
     message(gdalcubes::as_json(cube))
@@ -1142,6 +1153,7 @@ save_result <- Process$new(
 )
 
 
+
 # Train ML Model
 train_model <- Process$new(
   id = "train_model",
@@ -1657,3 +1669,4 @@ predict_model <- Process$new(
     return(output_dataframe)
   }
 )
+

@@ -254,6 +254,7 @@ NULL
           return(res)
         })
     }
+
     else {
       throwError("FormatUnsupported")
     }
@@ -311,6 +312,7 @@ NULL
     else if (format == "GTiff") {
       file = gdalcubes::write_tif(job$results)
     }
+
     else if (format == "RDS") {
 
       # THINK ABOUT PRETTIER SOLUTION
@@ -343,22 +345,19 @@ NULL
         })
 
     }
+
     else {
       throwError("FormatUnsupported")
     }
   }
 
-  # path to where the data is stored
   first = file[1]
-
   res$status = 200
   res$body = readBin(first, "raw", n = file.info(first)$size)
-
   content_type = plumber:::getContentType(tools::file_ext(first))
   res$setHeader("Content-Type", content_type)
 
   return(res)
-
 },error=handleError)
 }
 
