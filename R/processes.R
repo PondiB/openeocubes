@@ -1152,8 +1152,6 @@ save_result <- Process$new(
   }
 )
 
-
-
 # Train ML Model
 train_model <- Process$new(
   id = "train_model",
@@ -1669,4 +1667,3 @@ predict_model <- Process$new(
     return(output_dataframe)
   }
 )
-
