@@ -165,9 +165,60 @@ NULL
   job = newJob$run()
   format = job$output
 
+
+  #TODO: IMPLEMENT CHECK, IF job$results == datacube
+  # if Datacube: write in desired format as is
+  # if data.frame (NetCDF): write whole data.frame as NetCDF
+
+  # TODO: harmonize whole file save process do reduce redundancy
+
   if (class(format) == "list") {
     if (format$title == "Network Common Data Form") {
-      file = gdalcubes::write_ncdf(job$results)
+
+      # if no error occurs, job$results == datacube
+      tryCatch(
+        {
+          file = gdalcubes::write_ncdf(job$results)
+          break
+        },
+        error = function(error)
+        {
+          message('An Error Occurred.')
+          message(toString(error))
+        },
+        warning = function(warning) {
+          message('A Warning Occurred')
+          message(toString(warning))
+        })
+      # when error then proceed with the "data.frame" variant
+      tryCatch(
+        {
+
+          # convert data.frame in "spatial dataframe"
+          data = sf::st_as_sf(job$results)
+
+          file = base::tempfile()
+
+          # save whole file
+          sf::st_write(data, file, driver = "netCDF")
+
+          res$status = 200
+          res$body = readBin(file, "raw", n = file.info(file)$size)
+
+          content_type = plumber:::getContentType(tools::file_ext(file))
+          res$setHeader("Content-Type", content_type)
+
+          return(res)
+        },
+        error = function(error)
+        {
+          message('An Error Occurred.')
+          message(toString(error))
+        },
+        warning = function(warning) {
+          message('A Warning Occurred')
+          message(toString(warning))
+        })
     }
     else if (format$title == "GeoTiff") {
       file = gdalcubes::write_tif(job$results)
@@ -182,7 +233,7 @@ NULL
         },
         error = function(error)
         {
-          message('An Error Occurred')
+          message('An Error Occurred. Passed data was not of type "datacube".')
           message(error)
         },
         warning = function(warning) {
@@ -203,17 +254,65 @@ NULL
           return(res)
         })
     }
+
     else {
       throwError("FormatUnsupported")
     }
   }
   else {
     if (format == "NetCDF") {
-      file = gdalcubes::write_ncdf(job$results)
+
+      # if no error occurs, job$results == datacube
+      tryCatch(
+        {
+          file = gdalcubes::write_ncdf(job$results)
+          break
+        },
+        error = function(error)
+        {
+          message('An Error Occurred.')
+          message(toString(error))
+        },
+        warning = function(warning) {
+          message('A Warning Occurred')
+          message(toString(warning))
+        })
+      # when error then proceed with the "data.frame" variant
+      tryCatch(
+        {
+
+          # convert data.frame in "spatial dataframe"
+          data = sf::st_as_sf(job$results)
+
+          file = base::tempfile()
+
+          # save whole file
+          sf::st_write(data, file, driver = "netCDF")
+
+          res$status = 200
+          res$body = readBin(file, "raw", n = file.info(file)$size)
+
+          content_type = plumber:::getContentType(tools::file_ext(file))
+          res$setHeader("Content-Type", content_type)
+
+          return(res)
+        },
+        error = function(error)
+        {
+          message('An Error Occurred.')
+          message(toString(error))
+        },
+        warning = function(warning) {
+          message('A Warning Occurred')
+          message(toString(warning))
+        })
+
+
     }
     else if (format == "GTiff") {
       file = gdalcubes::write_tif(job$results)
     }
+
     else if (format == "RDS") {
 
       # THINK ABOUT PRETTIER SOLUTION
@@ -224,7 +323,7 @@ NULL
         },
         error = function(error)
         {
-          message('An Error Occurred')
+          message('An Error Occurred. Passed data was not of type "datacube".')
           message(error)
         },
         warning = function(warning) {
@@ -246,22 +345,19 @@ NULL
         })
 
     }
+
     else {
       throwError("FormatUnsupported")
     }
   }
 
-  # path to where the data is stored
   first = file[1]
-
   res$status = 200
   res$body = readBin(first, "raw", n = file.info(first)$size)
-
   content_type = plumber:::getContentType(tools::file_ext(first))
   res$setHeader("Content-Type", content_type)
 
   return(res)
-
 },error=handleError)
 }
 
@@ -381,4 +477,6 @@ addEndpoint = function() {
   Session$assignProcess(subtract)
   Session$assignProcess(multiply)
   Session$assignProcess(divide)
+  Session$assignProcess(train_model)
+  Session$assignProcess(predict_model)
 }
