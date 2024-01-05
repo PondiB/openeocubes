@@ -1366,20 +1366,21 @@ train_model <- Process$new(
       #TODO possibly remove
       set.seed(100)
 
-      message("\nChecking hyperparameters for Random Forest...")
-
-      if (!all(c("mtry", "ntree") %in% names(hyperparameters)))
-      {
-        message("'hyperparameters' has to contain 'mtry' and 'ntree'!")
-        stop("")
-      }
-
-      message("hyperparameters for Random Forest checked!")
 
       # use fixed hyperparams given by the user
       # (this may result in a lack of accuracy for the model)
       if (!is.null(hyperparameters))
       {
+
+        message("\nChecking hyperparameters for Random Forest...")
+
+        if (!all(c("mtry", "ntree") %in% names(hyperparameters)))
+        {
+          message("'hyperparameters' has to contain 'mtry' and 'ntree'!")
+          stop("")
+        }
+
+        message("hyperparameters for Random Forest checked!")
 
         tryCatch({
           message("\nTrain Model with fixed hyperparameters...")
@@ -1405,8 +1406,44 @@ train_model <- Process$new(
         })
 
       }
-      # else tune model hyperparameters
+      else
+      {
+        # else tune model hyperparameters
+        tryCatch({
+          message("\nTrain Model with parameter tuning...")
+          # cross-validate training data with random-parameter search
+          trainCtrl <- caret::trainControl(
+            search = "random",
+            # 10-fold CV
+            method = "repeatedcv",
+            number = 10,
+            # repeated 10 times
+            repeats = 10)
 
+          model <- caret::train(
+            class ~ .,
+            data = training_data,
+            method = "rf",
+            trControl = trainCtrl,
+            tuneLength = 10)
+
+          # print model and confusion matrix, to evaluate if the model is well trained
+          message("\nModel Details: ")
+          print(model)
+
+          predicted_test_classes = stats::predict(model, newdata = testing_data)
+
+          message("\nConfusion Matrix based on Test Dataset: ")
+          print(caret::confusionMatrix(predicted_test_classes, as.factor(testing_data$class)))
+
+          message("Model training finished!")
+        },
+        error = function(err)
+        {
+          message("An Error occured!")
+          message(toString(err))
+        })
+      }
     }
 
     # save model to user workspace
@@ -1525,7 +1562,8 @@ predict_model <- Process$new(
 
       poly <- aoi_polygon_df |>
         # create sf_point object
-        sf::st_as_sf(coords = c("x", "y"), crs = aoi_crs) |> sf::st_transform(gdalcubes::srs(data)) |>
+        sf::st_as_sf(coords = c("x", "y"), crs = aoi_crs) |>
+        sf::st_transform(gdalcubes::srs(data)) |>
         sf::st_bbox() |>
         sf::st_as_sfc() |>
         # create sf_polygon object
@@ -1658,6 +1696,9 @@ predict_model <- Process$new(
       message(toString(err))
       stop()
     })
+
+    # convert output to spatial dataframe
+    output_dataframe = sf::st_as_sf(output_dataframe)
 
 
     return(output_dataframe)
