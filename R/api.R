@@ -203,9 +203,6 @@ NULL
           }
           else if (format == "RDS")
           {
-
-            print(class(job$results))
-
             file = base::tempfile()
 
             # check class of the result
