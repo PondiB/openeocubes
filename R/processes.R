@@ -628,32 +628,71 @@ ndvi <- Process$new(
       optional = FALSE
     ),
     Parameter$new(
-      name = "target_band",
-      description = "By default, the dimension of type bands is dropped. To keep the dimension specify a new band name in this parameter so that a new dimension label with the specified name will be added for the computed values.",
+      name = "keep_bands",
+      description = "Indicate wether other bands of the cube should be kept or not.",
       schema = list(
-        type = "string"
+        type = "boolean"
       ),
       optional = TRUE
     )
   ),
   returns = eo_datacube,
-  operation = function(data, nir = "nir", red = "red", target_band = NULL, job) {
-    if ((toString(nir) == "B08") && (toString(red) == "B04")) {
-      cube <- gdalcubes::apply_pixel(data, "(B08-B04)/(B08+B04)", names = "NDVI", keep_bands = FALSE)
-      message("ndvi calculated ....")
-      message(gdalcubes::as_json(cube))
-      return(cube)
-    } else if ((toString(nir) == "B05") && (toString(red) == "B04")) {
-      cube <- gdalcubes::apply_pixel(data, "(B05-B04)/(B05+B04)", names = "NDVI", keep_bands = FALSE)
-      message("ndvi calculated ....")
-      message(gdalcubes::as_json(cube))
-      return(cube)
-    } else {
-      cube <- gdalcubes::apply_pixel(data, "(nir-red)/(nir+red)", names = "NDVI", keep_bands = FALSE)
-      message("ndvi calculated ....")
-      message(gdalcubes::as_json(cube))
-      return(cube)
-    }
+  operation = function(data, nir = "nir", red = "red", keep_bands = FALSE, job)
+    {
+      if ((toString(nir) == "B08") && (toString(red) == "B04"))
+      {
+
+        proxy = gdalcubes::select_bands(data, c("B08", "B04"))
+
+        print("proxy cube")
+        print(gdalcubes::as_json(proxy))
+
+
+        cube <- gdalcubes::apply_pixel(
+          proxy,
+          "(B08-B04)/(B08+B04)",
+          names = "NDVI",
+          keep_bands = FALSE
+          )
+
+        print("ndvi cube")
+        print(gdalcubes::as_json(cube))
+
+
+        cube = gdalcubes::join_bands(list(data, cube))
+
+        print("mixed cube")
+        print(gdalcubes::as_json(cube))
+
+        message("ndvi calculated ...")
+        message(gdalcubes::as_json(cube))
+        return(cube)
+      }
+      else if ((toString(nir) == "B05") && (toString(red) == "B04"))
+      {
+        cube <- gdalcubes::apply_pixel(
+          data,
+          "(B05-B04)/(B05+B04)",
+          names = "NDVI",
+          keep_bands = keep_bands)
+
+        message("ndvi calculated ...")
+        message(gdalcubes::as_json(cube))
+        return(cube)
+
+      }
+      else
+      {
+          cube <- gdalcubes::apply_pixel(
+            data,
+            "(nir-red)/(nir+red)",
+            names = "NDVI",
+            keep_bands = keep_bands)
+
+          message("ndvi calculated ...")
+          message(gdalcubes::as_json(cube))
+          return(cube)
+      }
   }
 )
 
