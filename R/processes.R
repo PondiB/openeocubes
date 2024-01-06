@@ -639,33 +639,21 @@ ndvi <- Process$new(
   returns = eo_datacube,
   operation = function(data, nir = "nir", red = "red", keep_bands = FALSE, job)
     {
+
+      message("\ndvi called...")
+      print(data)
+
       if ((toString(nir) == "B08") && (toString(red) == "B04"))
       {
 
-        proxy = gdalcubes::select_bands(data, c("B08", "B04"))
-
-        print("proxy cube")
-        print(gdalcubes::as_json(proxy))
-
-
         cube <- gdalcubes::apply_pixel(
-          proxy,
-          "(B08-B04)/(B08+B04)",
+          data,
+          "(B05-B04)/(B05+B04)",
           names = "NDVI",
-          keep_bands = FALSE
-          )
-
-        print("ndvi cube")
-        print(gdalcubes::as_json(cube))
-
-
-        cube = gdalcubes::join_bands(list(data, cube))
-
-        print("mixed cube")
-        print(gdalcubes::as_json(cube))
+          keep_bands = keep_bands)
 
         message("ndvi calculated ...")
-        message(gdalcubes::as_json(cube))
+        print(cube)
         return(cube)
       }
       else if ((toString(nir) == "B05") && (toString(red) == "B04"))
@@ -677,7 +665,7 @@ ndvi <- Process$new(
           keep_bands = keep_bands)
 
         message("ndvi calculated ...")
-        message(gdalcubes::as_json(cube))
+        print(cube)
         return(cube)
 
       }
@@ -690,7 +678,7 @@ ndvi <- Process$new(
             keep_bands = keep_bands)
 
           message("ndvi calculated ...")
-          message(gdalcubes::as_json(cube))
+          print(cube)
           return(cube)
       }
   }
