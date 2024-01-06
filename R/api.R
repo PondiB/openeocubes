@@ -246,6 +246,7 @@ NULL
       content_type = plumber:::getContentType(tools::file_ext(file))
       res$setHeader("Content-Type", content_type)
 
+      message("HTTP Result send!")
       return(res)
 
     },
