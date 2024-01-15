@@ -182,11 +182,11 @@ load_collection <- Process$new(
     img.col <- gdalcubes::stac_image_collection(items$features,
       property_filter =
         function(x) {
-          x[["eo:cloud_cover"]] < 40
+          x[["eo:cloud_cover"]] < 30
         }
     )
 
-    # Define cube view with bi weekly aggregation
+    # Define cube view with a monthly aggregation
     crs <- c("EPSG", crs)
     crs <- paste(crs, collapse = ":")
     v.overview <- gdalcubes::cube_view(
@@ -625,23 +625,23 @@ ndvi <- Process$new(
     )
   ),
   returns = eo_datacube,
-  operation = function(data, nir = "nir", red = "red", target_band = NULL, job) {
-    if ((toString(nir) == "B08") && (toString(red) == "B04")) {
-      cube <- gdalcubes::apply_pixel(data, "(B08-B04)/(B08+B04)", names = "NDVI", keep_bands = FALSE)
-      message("ndvi calculated ....")
+  operation = function(data, nir = "nir", red = "red", target_band = NULL, job){
+      # Check if the bands are valid
+      valid_bands <- c("B04", "B05", "B08", "nir", "red")
+      if (!nir %in% valid_bands || !red %in% valid_bands) {
+        stop("Invalid band names")
+      }
+
+      # Construct the NDVI calculation formula
+      ndvi_formula <- sprintf("(%s-%s)/(%s+%s)", nir, red, nir, red)
+
+      # Apply the NDVI calculation
+      cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = "NDVI", keep_bands = FALSE)
+
+      # Log and return the result
+      message("NDVI calculated ....")
       message(gdalcubes::as_json(cube))
       return(cube)
-    } else if ((toString(nir) == "B05") && (toString(red) == "B04")) {
-      cube <- gdalcubes::apply_pixel(data, "(B05-B04)/(B05+B04)", names = "NDVI", keep_bands = FALSE)
-      message("ndvi calculated ....")
-      message(gdalcubes::as_json(cube))
-      return(cube)
-    } else {
-      cube <- gdalcubes::apply_pixel(data, "(nir-red)/(nir+red)", names = "NDVI", keep_bands = FALSE)
-      message("ndvi calculated ....")
-      message(gdalcubes::as_json(cube))
-      return(cube)
-    }
   }
 )
 
