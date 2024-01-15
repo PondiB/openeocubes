@@ -180,17 +180,17 @@ load_collection <- Process$new(
 
     # create image collection from STAC items features
     img.col <- gdalcubes::stac_image_collection(items$features,
-                                                property_filter =
-                                                  function(x) {
-                                                    x[["eo:cloud_cover"]] < 30
-                                                  }
+      property_filter =
+        function(x) {
+          x[["eo:cloud_cover"]] < 40
+        }
     )
 
     # Define cube view with bi weekly aggregation
     crs <- c("EPSG", crs)
     crs <- paste(crs, collapse = ":")
     v.overview <- gdalcubes::cube_view(
-      srs = crs, dx = 30, dy = 30, dt = "P15D",
+      srs = crs, dx = 30, dy = 30, dt = "P1M",
       aggregation = "median", resampling = "average",
       extent = list(
         t0 = t0, t1 = t1,
@@ -294,7 +294,6 @@ load_stac <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(url, spatial_extent, temporal_extent, bands = NULL, properties = NULL, job) {
-
     # temporal extent preprocess
     duration <- paste(temporal_extent[[1]], temporal_extent[[2]], collapse = "/")
 
@@ -787,7 +786,7 @@ resample_spatial <- Process$new(
       name = "resolution",
       description = "Resamples the data cube to the target resolution, which can be specified either as separate values for x and y or as a single value for both axes. Specified in the units of the target projection. Doesn't change the resolution by default (0).",
       schema = list(
-        type = list( "number","array")
+        type = list("number", "array")
       ),
       optional = TRUE
     ),
