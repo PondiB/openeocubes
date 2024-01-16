@@ -543,7 +543,7 @@ filter_spatial <- Process$new(
     geo_data <- geo_data$geometry
     geo_data <- sf::st_transform(geo_data, 3857)
     # filter using geom
-    cube <- gdalcubes::filter_geom(data_cube, geo_data)
+    cube <- gdalcubes::filter_geom(data, geo_data)
     return(cube)
   }
 )
@@ -626,22 +626,29 @@ ndvi <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, nir = "nir", red = "red", target_band = NULL, job){
-      # Check if the bands are valid
-      valid_bands <- c("B04", "B05", "B08", "nir", "red")
-      if (!nir %in% valid_bands || !red %in% valid_bands) {
-        stop("Invalid band names")
+    # Function to ensure band names are properly formatted
+    format_band_name <- function(band) {
+      if (grepl("^B\\d{2}$", band, ignore.case = TRUE)) {
+        return(toupper(band))
+      } else {
+        return(band)
       }
+    }
 
-      # Construct the NDVI calculation formula
-      ndvi_formula <- sprintf("(%s-%s)/(%s+%s)", nir, red, nir, red)
+    # Apply formatting to band names
+    nir_formatted <- format_band_name(nir)
+    red_formatted <- format_band_name(red)
 
-      # Apply the NDVI calculation
-      cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = "NDVI", keep_bands = FALSE)
+    # Construct the NDVI calculation formula
+    ndvi_formula <- sprintf("(%s-%s)/(%s+%s)", nir_formatted, red_formatted, nir_formatted, red_formatted)
 
-      # Log and return the result
-      message("NDVI calculated ....")
-      message(gdalcubes::as_json(cube))
-      return(cube)
+    # Apply the NDVI calculation
+    cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = "NDVI", keep_bands = FALSE)
+
+    # Log and return the result
+    message("NDVI calculated ....")
+    message(gdalcubes::as_json(cube))
+    return(cube)
   }
 )
 
