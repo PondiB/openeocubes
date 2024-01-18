@@ -122,7 +122,7 @@ load_collection <- Process$new(
     )
   ),
   returns = eo_datacube,
-  operation = function(collection_id, spatial_extent, temporal_extent, bands = NULL, job) {
+  operation = function(id, spatial_extent, temporal_extent, bands = NULL, job) {
     # Check if 'crs' is present in spatial_extent and convert it to numeric; if missing, default to 4326
     crs <- ifelse("crs" %in% names(spatial_extent), as.numeric(spatial_extent$crs), 4326)
 
