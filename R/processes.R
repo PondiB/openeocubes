@@ -126,48 +126,49 @@ load_collection <- Process$new(
     # Check if 'crs' is present in spatial_extent and convert it to numeric; if missing, default to 4326
     crs <- ifelse("crs" %in% names(spatial_extent), as.numeric(spatial_extent$crs), 4326)
 
-    # Preprocess temporal extent
-    start_date <- temporal_extent[[1]]
-    end_date <- temporal_extent[[2]]
-    time_range <- paste(start_date, end_date, sep = "/")
-    message("Processed Temporal Extent")
+    # Temporal extent preprocess
+    t0 <- temporal_extent[[1]]
+    t1 <- temporal_extent[[2]]
+    duration <- c(t0, t1)
+    time_range <- paste(duration, collapse = "/")
+    message("....After Temporal extent")
 
-    # Extract spatial extent for cube view
-    west_bound <- as.numeric(spatial_extent$west)
-    south_bound <- as.numeric(spatial_extent$south)
-    east_bound <- as.numeric(spatial_extent$east)
-    north_bound <- as.numeric(spatial_extent$north)
-    message("Processed Spatial Extent for Cube View")
+    # Spatial extent for cube view
+    xmin <- as.numeric(spatial_extent$west)
+    ymin <- as.numeric(spatial_extent$south)
+    xmax <- as.numeric(spatial_extent$east)
+    ymax <- as.numeric(spatial_extent$north)
+    message("...After Spatial extent")
 
-    # Initialize STAC API spatial extent with the same values
-    xmin_stac <- west_bound
-    ymin_stac <- south_bound
-    xmax_stac <- east_bound
-    ymax_stac <- north_bound
-    message("Initialized Spatial Extent for STAC API")
+    # Spatial extent for STAC API call
+    xmin_stac <- xmin
+    ymin_stac <- ymin
+    xmax_stac <- xmax
+    ymax_stac <- ymax
+    message("....After default Spatial extent for STAC")
 
-    # Transform CRS if not EPSG:4326
     if (crs != 4326) {
-      message("Transforming CRS to EPSG:4326")
-      min_point <- sf::st_sfc(sf::st_point(c(west_bound, south_bound)), crs = crs)
-      min_point_transformed <- sf::st_transform(min_point, crs = 4326)
-      min_bbox <- sf::st_bbox(min_point_transformed)
-      xmin_stac <- min_bbox$xmin
-      ymin_stac <- min_bbox$ymin
+      message("....crs is not 4326")
+      min_pt <- sf::st_sfc(st_point(c(xmin, ymin)), crs = crs)
+      min_pt <- sf::st_transform(min_pt, crs = 4326)
+      min_bbx <- sf::st_bbox(min_pt)
+      xmin_stac <- min_bbx$xmin
+      ymin_stac <- min_bbx$ymin
+      max_pt <- sf::st_sfc(st_point(c(xmax, ymax)), crs = crs)
+      max_pt <- sf::st_transform(max_pt, crs = 4326)
+      max_bbx <- sf::st_bbox(max_pt)
+      xmax_stac <- max_bbx$xmax
+      ymax_stac <- max_bbx$ymax
 
-      max_point <- sf::st_sfc(sf::st_point(c(east_bound, north_bound)), crs = crs)
-      max_point_transformed <- sf::st_transform(max_point, crs = 4326)
-      max_bbox <- sf::st_bbox(max_point_transformed)
-      xmax_stac <- max_bbox$xmax
-      ymax_stac <- max_bbox$ymax
+      message("....transformed to 4326")
     }
 
-    # Connect to STAC API and get satellite data
-    message("Connecting to STAC API")
+    # Connect to STAC API using rstac and get satellite data
+    message("STAC API call.....")
     stac_object <- rstac::stac("https://earth-search.aws.element84.com/v0")
     items <- stac_object %>%
       stac_search(
-        collections = collection_id,
+        collections = id,
         bbox = c(xmin_stac, ymin_stac, xmax_stac, ymax_stac),
         datetime = time_range,
         limit = 10000
@@ -176,32 +177,36 @@ load_collection <- Process$new(
       items_fetch()
 
     # Create image collection from STAC items features
-    image_collection <- gdalcubes::stac_image_collection(
-      items$features,
-      property_filter = function(x) x[["eo:cloud_cover"]] < 30
+    img.col <- gdalcubes::stac_image_collection(items$features,
+                                                property_filter =
+                                                  function(x) {
+                                                    x[["eo:cloud_cover"]] < 30
+                                                  }
     )
+    message('Image collection created: ', img.col)
 
-    # Define cube view with monthly aggregation
-    view_crs <- paste("EPSG", crs, sep = ":")
-    cube_view <- gdalcubes::cube_view(
-      srs = view_crs, dx = 30, dy = 30, dt = "P1M",
+    # Define cube view with a monthly aggregation
+    crs <- c("EPSG", crs)
+    crs <- paste(crs, collapse = ":")
+    v.overview <- gdalcubes::cube_view(
+      srs = crs, dx = 30, dy = 30, dt = "P1M",
       aggregation = "median", resampling = "average",
       extent = list(
-        t0 = start_date, t1 = end_date,
-        left = west_bound, right = east_bound,
-        top = north_bound, bottom = south_bound
+        t0 = t0, t1 = t1,
+        left = xmin, right = xmax,
+        top = ymax, bottom = ymin
       )
     )
 
-    # Create data cube
-    cube <- gdalcubes::raster_cube(image_collection, cube_view)
+    # Data cube creation
+    cube <- gdalcubes::raster_cube(img.col, v.overview)
 
-    # Select bands if provided
     if (!is.null(bands)) {
       cube <- gdalcubes::select_bands(cube, bands)
     }
 
-    message("Data Cube Created")
+    message("The data cube is created....")
+    message(gdalcubes::as_json(cube))
     return(cube)
   }
 )
@@ -402,7 +407,7 @@ aggregate_temporal_period <- Process$new(
     )
 
     message("Aggregate temporal period ...")
-    message("Aggregate temporal period:", dt_period, "using reducer:", reducer)
+    message("Aggregate temporal period: ", dt_period, ", using reducer: ", reducer)
 
     cube <- gdalcubes::aggregate_time(cube = data, dt = dt_period, method = reducer)
     message(gdalcubes::as_json(cube))
