@@ -26,11 +26,11 @@ p = processes()
 
 # load the initial data collection and limit the amount of data loaded
 datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
-                                  spatial_extent = list(west=416812.2,
-                                                        south=5803577.5,
-                                                        east=422094.8,
-                                                        north=5807036.1),
-                                                        crs = 32633,
+                                  spatial_extent = list(west = 416812.2,
+                                                        south = 5803577.5,
+                                                        east = 422094.8,
+                                                        north = 5807036.1,
+                                                        crs = 32633),
                                   temporal_extent = c("2016-01-01", "2020-12-31"))
 
 # filter the data cube for the desired bands
