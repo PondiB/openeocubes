@@ -177,7 +177,7 @@ load_collection <- Process$new(
     # create image collection from stac items features
     img.col <- stac_image_collection(items$features, property_filter =
                                        function(x) {x[["eo:cloud_cover"]] < 30})
-    message("Image collection: ", img.col)
+    message("Image collection created...")
     # Define cube view with monthly aggregation
     crs <- c("EPSG", crs)
     crs <- paste(crs, collapse = ":")
