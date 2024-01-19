@@ -651,6 +651,92 @@ ndvi <- Process$new(
   }
 )
 
+#EVI
+evi <- Process$new(
+  id = "evi",
+  description = "Computes the Enhanced Vegetation Index (EVI). The EVI is computed as 2.5 * (NIR - RED) / ((NIR + 6*RED - 7.5*BLUE) + 1)",
+  categories = as.array("cubes"),
+  summary = "Enhanced Vegetation Index",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A data cube with bands.",
+      schema = list(
+        type = "object",
+        subtype = "raster-cube"
+      )
+    ),
+    Parameter$new(
+      name = "nir",
+      description = "The name of the NIR band. Defaults to the band that has the common name nir assigned. For Sentinel 2 'B08' is used.",
+      schema = list(
+        type = "string"
+      ),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "shortwl_nir",
+      description = "The name of the VNIR band which has a shorter wavelength than the nir band. For Sentinel 2 'B06' is used.",
+      schema = list(
+        type = "string"
+      ),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "red",
+      description = "The name of the red band. Defaults to the band that has the common name red assigned. For Sentinel 2 'B04' is used.",
+      schema = list(
+        type = "string"
+      ),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "blue",
+      description = "The name of the blue band. Defaults to the band that has the common name blue assigned. For Sentinel 2 'B02' is used.",
+      schema = list(
+        type = "string"
+      ),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "target_band",
+      description = "By default, the dimension of type bands is dropped. To keep the dimension specify a new band name in this parameter so that a new dimension label with the specified name will be added for the computed values.",
+      schema = list(
+        type = "string"
+      ),
+      optional = TRUE
+    )
+  ),
+  returns = eo_datacube,
+  operation = function(data, nir = "nir",shortwl_nir="shortwl_nir", red = "red", blue = "blue", target_band = NULL, job){
+    # Function to ensure band names are properly formatted
+    format_band_name <- function(band) {
+      if (grepl("^B\\d{2}$", band, ignore.case = TRUE)) {
+        return(toupper(band))
+      } else {
+        return(band)
+      }
+    }
+
+    # Apply formatting to band names
+    nir_formatted <- format_band_name(nir)
+    red_formatted <- format_band_name(red)
+    blue_formatted <- format_band_name(blue)
+    shortwl_nir_formatted <- format_band_name(shortwl_nir)
+
+    # Construct the NDVI calculation formula
+    evi_formula <- sprintf("2.5*((%s-%s)/(%s+6*%s-7.5*%s)+1)", nir_formatted, red_formatted, nir_formatted, shortwl_nir_formatted,blue_formatted)
+
+    # Apply the NDVI calculation
+    cube <- gdalcubes::apply_pixel(data, evi_formula, names = "EVI", keep_bands = FALSE)
+
+    # Log and return the result
+    message("EVI calculated ....")
+    message(gdalcubes::as_json(cube))
+    return(cube)
+  }
+)
+
 
 #' rename_dimension
 rename_dimension <- Process$new(
