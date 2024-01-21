@@ -314,5 +314,6 @@ addEndpoint = function() {
   Session$assignProcess(subtract)
   Session$assignProcess(multiply)
   Session$assignProcess(divide)
+  Session$assignProcess(evi)
 
 }
