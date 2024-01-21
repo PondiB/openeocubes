@@ -725,7 +725,7 @@ evi <- Process$new(
     shortwl_nir_formatted <- format_band_name(shortwl_nir)
 
     # Construct the NDVI calculation formula
-    evi_formula <- sprintf("2.5*((%s-%s)/(%s+6*%s-7.5*%s)+1)", nir_formatted, red_formatted, nir_formatted, shortwl_nir_formatted,blue_formatted)
+    evi_formula <- sprintf("2.5*((%s-%s)/(%s+6*(%s)-7.5*(%s))+1)", nir_formatted, red_formatted, nir_formatted, shortwl_nir_formatted,blue_formatted)
 
     # Apply the NDVI calculation
     cube <- gdalcubes::apply_pixel(data, evi_formula, names = "EVI", keep_bands = FALSE)
