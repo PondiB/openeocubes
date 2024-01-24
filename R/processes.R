@@ -1002,6 +1002,13 @@ run_udf <- Process$new(
     if (runtime != "R") {
       stop("Only R runtime is supported.")
     }
+
+    # Security check: Disallow certain potentially harmful functions
+    forbidden_patterns <- c("system", "file", "write", "read", "parse", "eval", "source", "system2", "Sys.", "processx")
+    if (any(sapply(forbidden_patterns, grepl, udf))) {
+      stop("UDF contains forbidden functions or commands.")
+    }
+
     # NB : more reducer keywords can be added
     message("run UDF called")
     reducer_keywords <- c("sum", "bfast", "sd", "mean", "median", "min", "reduce", "product", "max", "count", "var")
