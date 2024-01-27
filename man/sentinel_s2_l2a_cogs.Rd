@@ -5,7 +5,7 @@
 \alias{sentinel_s2_l2a_cogs}
 \title{sentinel-s2-l2a-cogs}
 \format{
-An object of class \code{Collection} (inherits from \code{R6}) of length 13.
+An object of class \code{Collection} (inherits from \code{R6}) of length 12.
 }
 \usage{
 sentinel_s2_l2a_cogs
