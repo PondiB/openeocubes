@@ -1,7 +1,7 @@
 
 # OpenEOcubes: openEO Compliant Lightweight R Platform for Processing Satellite Image Time Series 
 
-The service integrates STAC API (using Rstac package), the OpenEO standardized API, and data cubes concepts (using gdalcubes R package) to be a lightweight platform to enable analysis of time series satellite images via OpenEO Compliant RESTful endpoints using R-Client. It also supports users to run their custom R functions.
+The service integrates STAC API (using Rstac package), the OpenEO standardized API, and data cubes concepts (using gdalcubes R package) to be a lightweight platform to enable analysis of time series satellite images via OpenEO Compliant RESTful endpoints using R, Python and JavaScript Clients. It also supports users to run their custom R functions.
 
 ####  Motivation for the platform:
 The service tries to improve on the limitations of  established EO data management platforms like Google Earth Engine and Sentinel Hub by supporting:
@@ -11,7 +11,7 @@ The service tries to improve on the limitations of  established EO data manageme
 * Open Governance
 * No Need for User Management
 * User-Defined R Functions
-* Flexibility - Custom CRS, and Quick Resampling of Massive EO Data
+* Flexibility - Custom CRS,Quick Resampling of 'Large' EO Data
 
 
 ![](docs/openeocubes.png)
@@ -22,9 +22,9 @@ After processing the data , one can  download and explore on open source tools l
 ####  Future developments:
 Geospatial Machine Learning APIs for time-series EO Data:
 * ML APIs e.g. Random Forest, SVM, XGBoost, etc.
-* DL APIs e.g. TempCNN, ResNet, etc.
+* DL APIs e.g. TempCNN, ResNet, LSTM etc.
 
-Currently PoC is being worked on at [this reposity](https://github.com/Open-Earth-Monitor/openeosits) on the  [Open Earth Monitor Cyberinfrastructure](https://earthmonitor.org/) EU funded project.
+Currently, PoC for ML APIs is being worked under the [Open Earth Monitor Cyberinfrastructure](https://earthmonitor.org/) EU funded project.
 ## Easy Deployment from DockerHub
 Assuming you have Docker installed. This is the easiest approach.
 You can get a hosted Docker image of the platform on DockerHub

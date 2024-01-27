@@ -14,6 +14,6 @@ if (aws.host == "") {
 
 
 config <- SessionConfig(api.port = 8000, host = "0.0.0.0", aws.ipv4 = aws.host)
-config$workspace.path <- "/var/openeo/workspace"
+config$workspace.path = paste0(getwd(), "/test_workspace")
 createSessionInstance(config)
 Session$startSession()
