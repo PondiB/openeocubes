@@ -1,7 +1,7 @@
 Package: openeocubes
 Type: Package
 Title: OpenEO Compliant R Backend
-Version: 0.1.0
+Version: 1.0.0
 Authors@R:
     person(given = "Brian",
            family = "Pondi",
