@@ -157,45 +157,113 @@ NULL
 
 
 .executeSynchronous = function(req, res) {
- tryCatch({
-  sent_job = jsonlite::fromJSON(req$rook.input$read_lines(),simplifyDataFrame = FALSE)
-  process_graph = sent_job$process
-  newJob = Job$new(process = process_graph)
+  tryCatch(
+    {
+      sent_job = jsonlite::fromJSON(req$rook.input$read_lines(),simplifyDataFrame = FALSE)
+      process_graph = sent_job$process
+      newJob = Job$new(process = process_graph)
 
-  job = newJob$run()
-  format = job$output
+      job = newJob$run()
+      format = job$output
 
-  if (class(format) == "list") {
-    if (format$title == "Network Common Data Form") {
-      file = gdalcubes::write_ncdf(job$results)
-    }
-    else if (format$title == "GeoTiff") {
-      file = gdalcubes::write_tif(job$results)
-    }
-    else {
-      throwError("FormatUnsupported")
-    }
-  }
-  else {
-    if (format == "NetCDF") {
-      file = gdalcubes::write_ncdf(job$results)
-    }
-    else if (format == "GTiff") {
-      file = gdalcubes::write_tif(job$results)
-    }
-    else {
-      throwError("FormatUnsupported")
-    }
-  }
+      if(job$status == "error")
+      {
+        # throw error stored in job$results
+        stop(job$results)
+      }
 
-  first = file[1]
-  res$status = 200
-  res$body = readBin(first, "raw", n = file.info(first)$size)
-  content_type = plumber:::getContentType(tools::file_ext(first))
-  res$setHeader("Content-Type", content_type)
+      # Only support naming short names of output formats do remove redundant code
+      # to add a new supported class, just add a new else if Statement in the desired file format
+      message("\nStart file saving...")
 
-  return(res)
-},error=handleError)
+      # just one try catch were all evaluations happen
+      tryCatch(
+        {
+          if (format == "NetCDF")
+          {
+            # check class of the result
+            if ("cube" %in% class(job$results))
+            {
+              # result is a datacube
+              # write datacube as NetCDF and take first file path (see gdalcubes reference: https://gdalcubes.github.io/source/reference/ref/write_ncdf.html#value)
+              file = gdalcubes::write_ncdf(job$results)[1]
+            }
+            else if (all(c("sf", "data.frame") %in% class(job$results)))
+            {
+              # result is a sf data.frame
+              file = base::tempfile()
+
+              # save whole file
+              sf::st_write(job$results, file, driver = "netCDF")
+            }
+          }
+          else if (format == "GTiff")
+          {
+            # check class of the result
+            if ("cube" %in% class(job$results))
+            {
+              # result is a datacube
+              # write datacube as Tiff and take first file path (see gdalcubes reference: https://gdalcubes.github.io/source/reference/ref/write_tif.html#value)
+              file = gdalcubes::write_tif(job$results)[1]
+            }
+          }
+          else if (format == "RDS")
+          {
+            file = base::tempfile()
+
+            # check class of the result
+            if ("cube" %in% class(job$results))
+            {
+              # result is a datacube
+
+              # save proxy cube as json
+              base::saveRDS(gdalcubes:::as_json(job$results), file)
+            }
+            else if (all(c("train", "train.formula") %in% class(job$results)))
+            {
+              # result is a caret model
+
+              base::saveRDS(job$results, file)
+            }
+            else if (all(c("sf", "data.frame") %in% class(job$results)))
+            {
+              # result is a sf data.frame
+
+              base::saveRDS(job$results, file)
+            }
+          }
+          else
+          {
+            throwError("FormatUnsupported")
+          }
+        },
+        error = function(error)
+        {
+          message('An Error Occurred.')
+          message(toString(error))
+          stop("FormatUnsupported")
+        },
+        warning = function(warning) {
+          message('A Warning Occurred')
+          message(toString(warning))
+        })
+      # handle creation of http result
+
+      message("File saving finished!")
+
+      message("\nPreparing HTTP result...")
+
+      res$status = 200
+      res$body = readBin(file, "raw", n = file.info(file)$size)
+
+      content_type = plumber:::getContentType(tools::file_ext(file))
+      res$setHeader("Content-Type", content_type)
+
+      message("HTTP Result send!")
+      return(res)
+
+    },
+    error = handleError)
 }
 
 .cors_filter = function(req,res) {
