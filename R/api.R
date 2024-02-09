@@ -315,5 +315,7 @@ addEndpoint = function() {
   Session$assignProcess(multiply)
   Session$assignProcess(divide)
   Session$assignProcess(evi)
+  Session$assignProcess(train_model)
+  Session$assignProcess(apply_prediction)
 
 }
