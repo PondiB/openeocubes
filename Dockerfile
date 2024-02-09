@@ -14,7 +14,7 @@ RUN R -e "install.packages('gdalcubes')"
 
 # install other necessary packages
 RUN apt-get install -y libsodium-dev libudunits2-dev
-RUN Rscript -e "install.packages(c('plumber', 'useful', 'ids', 'R6', 'sf', 'rstac','bfast'))"
+RUN Rscript -e "install.packages(c('plumber', 'useful', 'ids', 'R6', 'sf', 'rstac','bfast', 'caret', randomForest', 'stringr'))"
 
 # create directories
 RUN mkdir -p /opt/dockerfiles/ && mkdir -p /var/openeo/workspace/ && mkdir -p /var/openeo/workspace/data/
