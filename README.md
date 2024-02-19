@@ -250,3 +250,28 @@ print("End of processes")
 Visualization of the output from the above process:
 
 ![bfast change detection](docs/change_over_period.png)
+
+
+## Citation:
+
+If you use this codebase, or otherwise found our work valuable, please cite:
+
+```bibtex
+@Article{Pondi2024,
+author={Pondi, Brian
+and Appel, Marius
+and Pebesma, Edzer},
+title={OpenEOcubes: an open-source and lightweight R-based RESTful web service for analyzing earth observation data cubes},
+journal={Earth Science Informatics},
+year={2024},
+month={Feb},
+day={19},
+abstract={In recent decades, Earth Observation (EO) systems have seen remarkable technological advancements, leading to a surge in Earth-orbiting satellites capturing EO data. Cloud-based storage solutions have been adopted to manage the increasing data volume. Although numerous EO data management and analysis platforms have emerged to accommodate this growth, many suffer from limitations like closed-source software, leading to platform lock-in and restricted functionalities, restricting the scientific community from conducting open and reproducible research. To tackle these issues, we present OpenEOcubes, a lightweight EO data cubes analysis service that embraces open-source tools, standardized APIs, and containerized deployment, we demonstrate the service's capabilities in two user scenarios: performing vegetation analysis in Amazonia, Brazil for one year, and detecting changes in a forested area in Brandenburg, Germany based on five years of EO data.OpenEOcubes is an easy-to-deploy service that empowers the scientific community to reproduce small and medium-sized EO scientific analysis while aggregating over a potentially huge amount of data. It enables the extension of functionalities and validation of analysis carried out on different EO data processing platforms.},
+issn={1865-0481},
+doi={10.1007/s12145-024-01249-y},
+url={https://doi.org/10.1007/s12145-024-01249-y}
+}
+
+
+
+```
