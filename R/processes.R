@@ -121,8 +121,25 @@ load_collection <- Process$new(
       optional = TRUE
     )
   ),
+  Parameter$new(
+    name = "resolution",
+    description = "Specify resolution for spatial resampling.",
+    schema = list(
+      type = "integer"
+    ),
+    optional = TRUE
+  ),
   returns = eo_datacube,
-  operation = function(id, spatial_extent, temporal_extent, bands = NULL, job) {
+  operation = function(id, spatial_extent, temporal_extent, resolution = 30, bands = NULL, job) {
+
+    # check if "resolution" is correct
+    if (resolution <= 0)
+    {
+      message("resolution can't be 0 or smaller!")
+      stop("IllegalArgument")
+    }
+
+
     # Check if 'crs' is present in spatial_extent and convert it to numeric; if missing, default to 4326
     crs <- ifelse("crs" %in% names(spatial_extent), as.numeric(spatial_extent$crs), 4326)
     message("crs is : ", crs)
@@ -181,7 +198,7 @@ load_collection <- Process$new(
     # Define cube view with monthly aggregation
     crs <- c("EPSG", crs)
     crs <- paste(crs, collapse = ":")
-    v.overview <- cube_view(srs = crs, dx = 30, dy = 30, dt = "P1M",
+    v.overview <- cube_view(srs = crs, dx = resolution, dy = resolution, dt = "P1M",
                             aggregation = "median", resampling = "average",
                             extent = list(t0 = t0, t1 = t1,
                                         left = xmin, right = xmax,
