@@ -119,7 +119,7 @@ Job <- R6Class(
      },
         error=function (e) {
         self$status = "error"
-        self$results = NULL
+        self$results = e
         writeJobInfo(self)
       },
       finally = {

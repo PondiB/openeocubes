@@ -42,6 +42,8 @@ Collate:
     'Job-class.R'
     'ProcessGraph-class.R'
     'SessionConfig-Class.R'
+    'apply_prediction.R'
     'error.R'
+    'train_model.R'
 Depends:
     R (>= 4.3.0)
