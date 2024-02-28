@@ -316,4 +316,7 @@ addEndpoint = function() {
   Session$assignProcess(divide)
   Session$assignProcess(evi)
 
+
+  Session$assignProcess(fill_missing_values)
+
 }
