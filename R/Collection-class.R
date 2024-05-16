@@ -4,6 +4,9 @@
 #' @field id Id of the collection
 #' @field title Collection title
 #' @field description Short description of the collection
+#' @field spatialExtent Spatial extent of the collection
+#' @field temporalExtent Temporal extent of the collection
+#' @field bands Bands of the collection
 #'
 #' @include Session-Class.R
 #' @importFrom R6 R6Class

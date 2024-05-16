@@ -19,6 +19,12 @@ This class represents the collections, which contain a set of Granules.
 \item{\code{title}}{Collection title}
 
 \item{\code{description}}{Short description of the collection}
+
+\item{\code{spatialExtent}}{Spatial extent of the collection}
+
+\item{\code{temporalExtent}}{Temporal extent of the collection}
+
+\item{\code{bands}}{Bands of the collection}
 }
 \if{html}{\out{</div>}}
 }
