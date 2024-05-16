@@ -25,6 +25,8 @@ This class represents the collections, which contain a set of Granules.
 \item{\code{temporalExtent}}{Temporal extent of the collection}
 
 \item{\code{bands}}{Bands of the collection}
+
+\item{\code{constellation}}{Constellation of the collection}
 }
 \if{html}{\out{</div>}}
 }
@@ -68,6 +70,8 @@ Initialize collection
 \item{\code{temporalExtent}}{Temporal extent of the collection}
 
 \item{\code{bands}}{Bands of the collection}
+
+\item{\code{constellation}}{Constellation of the collection}
 }
 \if{html}{\out{</div>}}
 }
@@ -76,19 +80,27 @@ Initialize collection
 \if{html}{\out{<a id="method-Collection-collectionInfo"></a>}}
 \if{latex}{\out{\hypertarget{method-Collection-collectionInfo}{}}}
 \subsection{Method \code{collectionInfo()}}{
+Get collection information
 \subsection{Usage}{
 \if{html}{\out{<div class="r">}}\preformatted{Collection$collectionInfo()}\if{html}{\out{</div>}}
 }
 
+\subsection{Returns}{
+A list containing collection information
+}
 }
 \if{html}{\out{<hr>}}
 \if{html}{\out{<a id="method-Collection-collectionInfoExtended"></a>}}
 \if{latex}{\out{\hypertarget{method-Collection-collectionInfoExtended}{}}}
 \subsection{Method \code{collectionInfoExtended()}}{
+Get extended collection information
 \subsection{Usage}{
 \if{html}{\out{<div class="r">}}\preformatted{Collection$collectionInfoExtended()}\if{html}{\out{</div>}}
 }
 
+\subsection{Returns}{
+A list containing extended collection information
+}
 }
 \if{html}{\out{<hr>}}
 \if{html}{\out{<a id="method-Collection-clone"></a>}}

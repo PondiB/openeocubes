@@ -7,6 +7,7 @@
 #' @field spatialExtent Spatial extent of the collection
 #' @field temporalExtent Temporal extent of the collection
 #' @field bands Bands of the collection
+#' @field constellation Constellation of the collection
 #'
 #' @include Session-Class.R
 #' @importFrom R6 R6Class
@@ -30,6 +31,7 @@ Collection <- R6Class(
     #' @param spatialExtent Spatial extent of the collection
     #' @param temporalExtent Temporal extent of the collection
     #' @param bands Bands of the collection
+    #' @param constellation Constellation of the collection
     #'
     initialize = function(id = NA, title = NA, description = NA, spatialExtent = NA, temporalExtent = NA, bands = NA, constellation = NA) {
       self$id = id
@@ -41,6 +43,9 @@ Collection <- R6Class(
       self$constellation = constellation
     },
 
+    #' @description Get collection information
+    #'
+    #' @return A list containing collection information
     collectionInfo = function() {
       list(
         stac_version = Session$getConfig()$stac_version,
@@ -69,6 +74,9 @@ Collection <- R6Class(
       )
     },
 
+    #' @description Get extended collection information
+    #'
+    #' @return A list containing extended collection information
     collectionInfoExtended = function() {
       list(
         stac_version = Session$getConfig()$stac_version,
