@@ -1178,6 +1178,43 @@ load_stac <- Process$new(
   }
 )
 
+#' array interpolate linear
+array_interpolate_linear  <- Process$new(
+  id = "array_interpolate_linear",
+  description = "Performs a linear interpolation for each of the no-data values (null) in the array given, except for leading and trailing no-data values.",
+  categories = as.array("arrays", "reducer"),
+  summary = "Get an element from an array",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "An array",
+      schema = list(type = "array")
+    )
+  ),
+  returns = list(
+    description = "The value of the requested element.",
+    schema = list(description = "Any data type is allowed.")
+  ),
+  operation = function(data, job) {
+    method <-  "linear"
+    tryCatch({
+      message("\nFill NA values...")
+
+      gdalcubes::fill_time(data, method)
+
+      message("NA values filled!")
+
+    },
+    error = function(err)
+    {
+      message("An Error occured!")
+      message(toString(err))
+      stop(toString(err$message))
+    })
+
+    return(data)
+})
+
 #' save result
 save_result <- Process$new(
   id = "save_result",

@@ -295,6 +295,7 @@ addEndpoint = function() {
   Session$assignProcess(save_result)
   Session$assignProcess(aggregate_temporal_period)
   Session$assignProcess(array_element)
+  Session$assignProcess(array_interpolate_linear)
   Session$assignProcess(filter_bands)
   Session$assignProcess(filter_bbox)
   Session$assignProcess(filter_spatial)
@@ -315,5 +316,6 @@ addEndpoint = function() {
   Session$assignProcess(multiply)
   Session$assignProcess(divide)
   Session$assignProcess(evi)
+
 
 }
