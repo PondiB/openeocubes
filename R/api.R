@@ -3,6 +3,7 @@
 #' @include Session-Class.R
 #' @include Router.R
 #' @include math-processes.R
+#' @include ml-processes.R
 #' @include processes.R
 #' @include api_job.R
 #' @include api_process_graphs.R
