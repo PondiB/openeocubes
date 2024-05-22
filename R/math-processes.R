@@ -136,7 +136,7 @@ add = Process$new(
   operation = function(x, y, job) {
 
     classes = c("number", "null")
-    if(class(x) %in% names(classes) && class(y) %in% names(classes)) {
+    if (class(x) %in% names(classes) && class(y) %in% names(classes)) {
       return(x + y)
     }
     else {
@@ -171,7 +171,7 @@ subtract = Process$new(
   operation = function(x, y, job) {
 
     classes = c("number", "null")
-    if(class(x) %in% names(classes) && class(y) %in% names(classes)) {
+    if (class(x) %in% names(classes) && class(y) %in% names(classes)) {
       return(x - y)
     }
     else {
@@ -205,7 +205,7 @@ multiply = Process$new(
     schema = list(type = c("number", "null"))),
   operation = function(x, y, job) {
     classes = c("number", "null")
-    if(class(x) %in% names(classes) && class(y) %in% names(classes)) {
+    if (class(x) %in% names(classes) && class(y) %in% names(classes)) {
       return(x * y)
     }
     else {

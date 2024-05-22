@@ -149,12 +149,12 @@ load_collection <- Process$new(
     message("After default Spatial extent for stac..")
     if (crs != 4326) {
       message("crs is not 4326...")
-      min_pt <- sf::st_sfc(st_point(c(xmin, ymin)), crs = crs)
+      min_pt <- sf::st_sfc(sf::st_point(c(xmin, ymin)), crs = crs)
       min_pt <- sf::st_transform(min_pt, crs = 4326)
       min_bbx <- sf::st_bbox(min_pt)
       xmin_stac <- min_bbx$xmin
       ymin_stac <- min_bbx$ymin
-      max_pt <- sf::st_sfc(st_point(c(xmax, ymax)), crs = crs)
+      max_pt <- sf::st_sfc(sf::st_point(c(xmax, ymax)), crs = crs)
       max_pt <- sf::st_transform(max_pt, crs = 4326)
       max_bbx <- sf::st_bbox(max_pt)
       xmax_stac <- max_bbx$xmax
@@ -181,16 +181,16 @@ load_collection <- Process$new(
     # Define cube view with monthly aggregation
     crs <- c("EPSG", crs)
     crs <- paste(crs, collapse = ":")
-    v.overview <- cube_view(srs = crs, dx = 30, dy = 30, dt = "P1M",
+    v.overview <- gdalcubes::cube_view(srs = crs, dx = 30, dy = 30, dt = "P1M",
                             aggregation = "median", resampling = "average",
                             extent = list(t0 = t0, t1 = t1,
                                         left = xmin, right = xmax,
                                         top = ymax, bottom = ymin))
     # gdalcubes creation
-    cube <- raster_cube(img.col, v.overview)
+    cube <- gdalcubes::raster_cube(img.col, v.overview)
 
     if (!is.null(bands)) {
-      cube = select_bands(cube, bands)
+      cube = gdalcubes::select_bands(cube, bands)
     }
     message("data cube is created: ")
     message(as_json(cube))
@@ -1023,7 +1023,7 @@ run_udf <- Process$new(
         user_function <- eval(func_parse)
         # reducer udf
         message("reducer function -> time")
-        data <- reduce_time(data, names = context, FUN = user_function)
+        data <- gdalcubes::reduce_time(data, names = context, FUN = user_function)
         return(data)
       } else {
         # convert parsed string function to class function
@@ -1031,12 +1031,12 @@ run_udf <- Process$new(
         func_parse <- parse(text = udf)
         user_function <- eval(func_parse)
         # apply per pixel udf
-        data <- apply_pixel(data, FUN = user_function)
+        data <- gdalcubes::apply_pixel(data, FUN = user_function)
         return(data)
       }
     } else {
       message("simple reducer udf")
-      data <- reduce_time(data, udf)
+      data <- gdalcubes::reduce_time(data, udf)
       return(data)
     }
   }
@@ -1192,8 +1192,8 @@ array_interpolate_linear  <- Process$new(
     )
   ),
   returns = list(
-    description = "The value of the requested element.",
-    schema = list(description = "Any data type is allowed.")
+    description = "An array with no-data values being replaced with interpolated values. If not at least 2 numerical values are available in the array, the array stays the same.",
+    schema = list(type = "array")
   ),
   operation = function(data, job) {
     method <-  "linear"
@@ -1253,7 +1253,8 @@ save_result <- Process$new(
     schema = list(type = "boolean")
   ),
   operation = function(data, format, options = NULL, job) {
-    gdalcubes_options(parallel = 8)
+    CORES <- parallel::detectCores()
+    gdalcubes::gdalcubes_options(parallel = CORES)
     message("Data is being saved in format :")
     message(format)
     message("The above format is being saved")
