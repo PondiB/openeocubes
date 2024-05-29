@@ -70,19 +70,18 @@ SessionConfig = function(api.port = NULL, host = NULL, aws.ipv4 = NULL) {
       )
     ),
     inputFormats = list(
-      ImageCollection = list(
-        title = "ImageCollection",
-        description = "Import from image collection",
+      GTiff = list(
+        title = "GeoTiff",
+        description = "Geotiff is one of the most widely supported formats. This backend allows reading from Geotiff to create raster data cubes.",
         gis_data_types = list("raster"),
         parameters = list(
           format = list(
             type = "string",
-            description = "gdalcubes collection formats"
+            description = "GeoTiff"
           )
         )
-
       )
-    ),
+      ),
 
     OGC_conformanceLink = "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core"
   )
