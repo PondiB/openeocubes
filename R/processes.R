@@ -648,30 +648,11 @@ reduce_dimension <- Process$new(
     ),
     Parameter$new(
       name = "reducer",
-      description = "A reducer to apply on the specified dimension.",
+      description = "A reducer to apply on the specified dimension. Must be one of: 'min', 'max', 'sum', 'prod', 'count', 'mean', 'median', 'var', 'sd', 'which_min', 'which_max', 'Q1', 'Q3'.",
       schema = list(
-        type = "object",
-        subtype = "process-graph",
-        parameters = list(
-          Parameter$new(
-            name = "data",
-            description = "A labeled array with elements of any type.",
-            schema = list(
-              type = "array",
-              subtype = "labeled-array",
-              items = list(description = "Any data type")
-            )
-          ),
-          Parameter$new(
-            name = "context",
-            description = "Additional data passed by the user.",
-            schema = list(
-              description = "Any data type"
-            ),
-            optional = TRUE
-          )
-        )
-      )
+        type = "string"
+      ),
+      optional = TRUE
     ),
     Parameter$new(
       name = "dimension",
@@ -681,31 +662,121 @@ reduce_dimension <- Process$new(
       )
     ),
     Parameter$new(
-      name = "context",
-      description = "Additional data to be passed to the reducer.",
+      name = "FUN",
+      description = "Custom reducer function. If FUN is given, any reducer given in 'reducer' will be ignored. FUN has to be defined as specified in: https://gdalcubes.github.io/source/reference/ref/reduce_time.cube.html#details",
       schema = list(
-        description = "Any data type"
+        type = "string"
+      ),
+      optional = TRUE
+    ),
+    Parameter$new(
+      name = "names",
+      description = "If 'FUN' is defined, 'names' can be used to define new names for the bands. 'names' has to have the same length as bands are inside the datacube passeb by 'data'.",
+      schema = list(
+        type = "vector",
+        subtype = "string"
       ),
       optional = TRUE
     )
   ),
   returns = eo_datacube,
-  operation = function(data, reducer, dimension, job) {
-    if (dimension == "t" || dimension == "time") {
-      bands <- bands(data)$name
-      bandStr <- c()
+  operation = function(data, reducer = NULL, dimension, FUN = NULL, names = NULL, job) {
+    message("\n reduce_dimension called...")
 
-      for (i in 1:length(bands)) {
-        bandStr <- append(bandStr, sprintf("%s(%s)", reducer, bands[i]))
+    if (dimension == "time")
+    {
+      message("\nPerform temporal reduction...")
+
+      if (is.null(FUN) && is.null(reducer))
+      {
+        message("No reducer was passed. Aborting...")
+        stop()
       }
 
-      cube <- gdalcubes::reduce_time(data, bandStr)
-      return(cube)
-    } else if (dimension == "bands") {
+      # use custom reducer function
+      if (!is.null(FUN))
+      {
+        tryCatch(
+          {
+            # Security check: Disallow certain potentially harmful functions
+            forbidden_patterns <- c("system", "file", "write", "read", "parse", "eval", "source", "system2", "Sys.", "processx")
+            if (any(sapply(forbidden_patterns, grepl, FUN))) {
+              message("Forbidden patterns used!")
+              stop("UDF contains forbidden functions or commands.")
+            }
+
+
+            # parse and eval function from passed string. THIS IS EXTREMLY UNSAFE!!!!
+            # TODO: Do some kind of string sanitazation
+            FUN = base::eval(base::parse(text = FUN))
+
+            cube = gdalcubes::reduce_time(x = data, names = names, FUN = FUN)
+
+          },
+          error = function(err)
+          {
+            message("An Error occured!")
+            message(toString(err))
+            stop()
+          })
+
+
+        message("\nCube after temporal reduction: ")
+        print(cube)
+
+        return(cube)
+      }
+
+      # use pre-defined reducer
+      if (!is.null(reducer))
+      {
+        # check if correct reducer is passed
+        valid_reducers <- c('min', 'max', 'sum', 'prod', 'count', 'mean', 'median', 'var', 'sd', 'which_min', 'which_max', 'Q1', 'Q3')
+
+        if (!(reducer %in% valid_reducers))
+        {
+          stop(paste("Invalid reducer. Please choose one of", toString(valid_reducers)))
+        }
+
+        # create band string for reducer strings
+        bands <- bands(data)$name
+        bandStr <- c()
+
+        # create character vector with reducers per band
+        for (i in 1:length(bands))
+        {
+          bandStr <- append(bandStr, sprintf("%s(%s)", reducer, bands[i]))
+        }
+
+        tryCatch(
+          {
+            # perform time dimension reduction
+            cube <- gdalcubes::reduce_time(x = data, expr = bandStr)
+          },
+          error = function(err)
+          {
+            message("An Error occured!")
+            message(toString(err))
+            stop()
+          })
+
+        message("\nCube after temporal reduction: ")
+        print(cube)
+
+        return(cube)
+      }
+
+    }
+    else if (dimension == "bands")
+    {
+      message("\nPerform spatial reduction...")
+
       cube <- gdalcubes::apply_pixel(data, reducer, keep_bands = FALSE)
       return(cube)
-    } else {
-      stop('Please select "t", "time" or "bands" as dimension')
+    }
+    else
+    {
+      stop('Please select "time" or "bands" as dimension!')
     }
   }
 )
