@@ -317,6 +317,8 @@ addEndpoint = function() {
   Session$assignProcess(multiply)
   Session$assignProcess(divide)
   Session$assignProcess(evi)
+# assign ml processes
+  Session$assignProcess(ml_predict)
 
 
 }
