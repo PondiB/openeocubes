@@ -23,5 +23,5 @@ jobs:
           push: true
           tags: brianpondi/openeocubes:latest
 
-      - name: Run docker-compose
-        run: docker-compose up -d
+      - name: Run docker compose
+        run: docker compose up -d
