@@ -35,7 +35,7 @@ ml_model <- ml_model_schema()
 
 
 #' TO DO : Implement machine learning processes
-#' 
+#'
 
 
 #' ml_predict
@@ -75,7 +75,7 @@ ml_predict <- Process$new(
       print(prediction)
       message("Prediction calculated ....")
       message(gdalcubes::as_json(prediction))
-      
+
       return(prediction)
     },
     error = function(e){
@@ -84,3 +84,74 @@ ml_predict <- Process$new(
     })
   }
 )
+
+
+
+
+#' save_ml_model
+save_ml_model <- Process$new(
+  id = "save_ml_model",
+  description = "Saves Machine Learning Model as ONNX.",
+  categories = as.array("cubes", "Machine Learning"),
+  summary = "Save trained ML",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A trained ML model",
+      schema = list(
+        type = "object"
+      )
+    ),
+    Parameter$new(
+      name = "name",
+      description = "The unique identifer of the model.",
+      schema = list(
+        type = "string"
+      ),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "task",
+      description = "The use case(s) of the model.",
+      schema = list(
+        type = "list"
+      ),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "options",
+      description = "Additional options for saving the model.",
+      schema = list(
+        type = list("dict")
+      ),
+      optional = TRUE
+    )
+  ),
+  returns = ml_model,
+  operation = function(data, name, task, options) {
+
+    # TO DO : Demo, Jonas S will refactor this code.
+      # if ("nn_module" %in% class(model) || !is.null(model$conv_layers)) {
+      #   message("Erkannte ein Torch-Modell. Verwende Deep-Learning-Konvertierung...")
+      #   onnx_path <- convert_r_torch_to_onnx(model, name)
+      #
+      # } else if ("train" %in% class(model)) {
+      #   model_type <- detect_model_type(model)
+      #   message("Erkannter Modelltyp: ", model_type)
+      #   convert_model_to_pkl(model, model_type, name)
+      #   onnx_path <- save_ml_model_as_onnx(model_type, name)
+      #
+      # } else {
+      #   stop("Unbekannter Modelltyp: Bitte überprüfen Sie das übergebene Modell.")
+      # }
+      #
+      # if (length(options) > 0) {
+      #   add_metadata_to_onnx(onnx_path, options)
+      # }
+      #
+      # message("Modell wurde erfolgreich exportiert: ", onnx_path)
+      # return(onnx_path)
+
+  }
+)
+
