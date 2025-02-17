@@ -319,6 +319,7 @@ addEndpoint = function() {
   Session$assignProcess(evi)
 # assign ml processes
   Session$assignProcess(ml_predict)
+  Session$assignProcess(save_ml_model)
 
 
 }
