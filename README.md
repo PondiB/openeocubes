@@ -42,6 +42,16 @@ For light tasks and processes you can host the service on pc and therefore you d
 docker run -p 8000:8000  brianpondi/openeocubes
 ```
 
+## Development Notes:
+While developing, you can skip rebuilding the docker container everytime. Instead you can run the server locally. 
+Just run "Rscript startLocal.R" inside this directory.
+```bash
+Rscript startLocal.R
+
+```
+
+This will compile this Repository as a R Package and start the server.
+
 ## Easy Deployment with Docker
 If you want to change the source code then this approach is recommended.
 You first need to clone the repository via this command:
@@ -88,11 +98,6 @@ docker-compose build --no-cache && docker-compose up
 
 ```
 
-## Development Notes:
-While developing, you can skip rebuilding the docker container everytime. Instead you can run the server locally. 
-Just run "Rscript startLocal.R" inside this directory.
-
-This will compile this Repository as a R Package and start the server.
 
 ## Getting Started:
 
