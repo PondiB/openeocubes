@@ -36,7 +36,7 @@ schema_format <- function(type, subtype = NULL, items = NULL) {
 datacube_schema <- function() {
   info <- list(
     description = "A data cube for further processing",
-    schema = list(type = "object", subtype = "raster-cube")
+    schema = list(type = "object", subtype = "datacube")
   )
   return(info)
 }
@@ -128,24 +128,24 @@ load_collection <- Process$new(
     message("crs is : ", crs)
 
     # Temporal extent preprocess
-    t0 = temporal_extent[[1]]
-    t1 = temporal_extent[[2]]
-    duration = c(t0, t1)
-    time_range = paste(duration, collapse = "/")
+    t0 <- temporal_extent[[1]]
+    t1 <- temporal_extent[[2]]
+    duration <- c(t0, t1)
+    time_range <- paste(duration, collapse = "/")
     message("After Temporal extent: ", time_range)
 
     # spatial extent for cube view
-    xmin = as.numeric(spatial_extent$west)
-    ymin = as.numeric(spatial_extent$south)
-    xmax = as.numeric(spatial_extent$east)
-    ymax = as.numeric(spatial_extent$north)
+    xmin <- as.numeric(spatial_extent$west)
+    ymin <- as.numeric(spatial_extent$south)
+    xmax <- as.numeric(spatial_extent$east)
+    ymax <- as.numeric(spatial_extent$north)
     message("After Spatial extent ...")
 
     # spatial extent for stac call
-    xmin_stac = xmin
-    ymin_stac = ymin
-    xmax_stac = xmax
-    ymax_stac = ymax
+    xmin_stac <- xmin
+    ymin_stac <- ymin
+    xmax_stac <- xmax
+    ymax_stac <- ymax
     message("After default Spatial extent for stac..")
     if (crs != 4326) {
       message("crs is not 4326...")
@@ -169,28 +169,36 @@ load_collection <- Process$new(
       stac_search(
         collections = id,
         bbox = c(xmin_stac, ymin_stac, xmax_stac, ymax_stac),
-        datetime =  time_range,
+        datetime = time_range,
         limit = 10000
       ) %>%
       post_request() %>%
       items_fetch()
     # create image collection from stac items features
-    img.col <- stac_image_collection(items$features, property_filter =
-                                       function(x) {x[["eo:cloud_cover"]] < 30})
+    img.col <- stac_image_collection(items$features,
+      property_filter =
+        function(x) {
+          x[["eo:cloud_cover"]] < 30
+        }
+    )
     message("Image collection created...")
     # Define cube view with monthly aggregation
     crs <- c("EPSG", crs)
     crs <- paste(crs, collapse = ":")
-    v.overview <- gdalcubes::cube_view(srs = crs, dx = 30, dy = 30, dt = "P1M",
-                            aggregation = "median", resampling = "average",
-                            extent = list(t0 = t0, t1 = t1,
-                                        left = xmin, right = xmax,
-                                        top = ymax, bottom = ymin))
+    v.overview <- gdalcubes::cube_view(
+      srs = crs, dx = 30, dy = 30, dt = "P1M",
+      aggregation = "median", resampling = "average",
+      extent = list(
+        t0 = t0, t1 = t1,
+        left = xmin, right = xmax,
+        top = ymax, bottom = ymin
+      )
+    )
     # gdalcubes creation
     cube <- gdalcubes::raster_cube(img.col, v.overview)
 
     if (!is.null(bands)) {
-      cube = gdalcubes::select_bands(cube, bands)
+      cube <- gdalcubes::select_bands(cube, bands)
     }
     message("data cube is created: ")
     message(as_json(cube))
@@ -210,7 +218,7 @@ aggregate_temporal_period <- Process$new(
       description = "The source data cube.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -278,7 +286,7 @@ filter_bands <- Process$new(
       description = "A data cube with bands.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -313,7 +321,7 @@ filter_bbox <- Process$new(
       description = "A data cube.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -374,7 +382,7 @@ filter_spatial <- Process$new(
       description = "A data cube.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -412,7 +420,7 @@ filter_temporal <- Process$new(
       description = "A data cube with temporal dimensions.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -446,7 +454,7 @@ ndvi <- Process$new(
       description = "A data cube with bands.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -475,7 +483,7 @@ ndvi <- Process$new(
     )
   ),
   returns = eo_datacube,
-  operation = function(data, nir = "nir", red = "red", target_band = NULL, job){
+  operation = function(data, nir = "nir", red = "red", target_band = NULL, job) {
     # Function to ensure band names are properly formatted
     format_band_name <- function(band) {
       if (grepl("^B\\d{2}$", band, ignore.case = TRUE)) {
@@ -502,7 +510,7 @@ ndvi <- Process$new(
   }
 )
 
-#EVI
+# EVI
 evi <- Process$new(
   id = "evi",
   description = "Computes the Enhanced Vegetation Index (EVI). The EVI is computed as 2.5 * (NIR - RED) / ((NIR + 6*RED - 7.5*BLUE) + 1)",
@@ -514,7 +522,7 @@ evi <- Process$new(
       description = "A data cube with bands.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -559,7 +567,7 @@ evi <- Process$new(
     )
   ),
   returns = eo_datacube,
-  operation = function(data, nir = "nir",shortwl_nir="shortwl_nir", red = "red", blue = "blue", target_band = NULL, job){
+  operation = function(data, nir = "nir", shortwl_nir = "shortwl_nir", red = "red", blue = "blue", target_band = NULL, job) {
     # Function to ensure band names are properly formatted
     format_band_name <- function(band) {
       if (grepl("^B\\d{2}$", band, ignore.case = TRUE)) {
@@ -576,7 +584,7 @@ evi <- Process$new(
     shortwl_nir_formatted <- format_band_name(shortwl_nir)
 
     # Construct the NDVI calculation formula
-    evi_formula <- sprintf("2.5*((%s-%s)/(%s+6*(%s)-7.5*(%s))+1)", nir_formatted, red_formatted, nir_formatted, shortwl_nir_formatted,blue_formatted)
+    evi_formula <- sprintf("2.5*((%s-%s)/(%s+6*(%s)-7.5*(%s))+1)", nir_formatted, red_formatted, nir_formatted, shortwl_nir_formatted, blue_formatted)
 
     # Apply the NDVI calculation
     cube <- gdalcubes::apply_pixel(data, evi_formula, names = "EVI", keep_bands = FALSE)
@@ -601,7 +609,7 @@ rename_dimension <- Process$new(
       description = "A data cube with bands.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -643,7 +651,7 @@ reduce_dimension <- Process$new(
       description = "A data cube with bands.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -722,7 +730,7 @@ resample_spatial <- Process$new(
       description = "A raster data cube.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -797,7 +805,7 @@ merge_cubes <- Process$new(
       description = "A data cube.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -805,7 +813,7 @@ merge_cubes <- Process$new(
       description = "A data cube.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -898,7 +906,7 @@ rename_labels <- Process$new(
       description = "The data cube.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -960,7 +968,7 @@ run_udf <- Process$new(
       description = "A data cube.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
@@ -1179,7 +1187,7 @@ load_stac <- Process$new(
 )
 
 #' array interpolate linear
-array_interpolate_linear  <- Process$new(
+array_interpolate_linear <- Process$new(
   id = "array_interpolate_linear",
   description = "Performs a linear interpolation for each of the no-data values (null) in the array given, except for leading and trailing no-data values.",
   categories = as.array("arrays", "reducer"),
@@ -1196,24 +1204,25 @@ array_interpolate_linear  <- Process$new(
     schema = list(type = "array")
   ),
   operation = function(data, job) {
-    method <-  "linear"
-    tryCatch({
-      message("\nFill NA values...")
+    method <- "linear"
+    tryCatch(
+      {
+        message("\nFill NA values...")
 
-      gdalcubes::fill_time(data, method)
+        data <- gdalcubes::fill_time(data, method)
 
-      message("NA values filled!")
-
-    },
-    error = function(err)
-    {
-      message("An Error occured!")
-      message(toString(err))
-      stop(toString(err$message))
-    })
+        message("NA values filled!")
+      },
+      error = function(err) {
+        message("An Error occured!")
+        message(toString(err))
+        stop(toString(err$message))
+      }
+    )
 
     return(data)
-})
+  }
+)
 
 #' save result
 save_result <- Process$new(
@@ -1227,7 +1236,7 @@ save_result <- Process$new(
       description = "The data to save.",
       schema = list(
         type = "object",
-        subtype = "raster-cube"
+        subtype = "datacube"
       )
     ),
     Parameter$new(
