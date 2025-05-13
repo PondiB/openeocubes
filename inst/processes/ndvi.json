@@ -60,7 +60,7 @@
           "type": "null"
         }
       ],
-      "default": {},
+      "default": null,
       "optional": true
     }
   ],
