@@ -1,0 +1,67 @@
+{
+  "id": "evi",
+  "summary": "Enhanced Vegetation Index",
+  "description": "Computes the Enhanced Vegetation Index (EVI). The EVI is computed as 2.5 * (NIR - RED) / ((NIR + 6*RED - 7.5*BLUE) + 1)",
+  "categories": ["cubes"],
+  "parameters": [
+    {
+      "name": "data",
+      "description": "A data cube with bands.",
+      "schema": {
+        "type": "object",
+        "subtype": "datacube"
+      }
+    },
+    {
+      "name": "nir",
+      "description": "The name of the NIR band. Defaults to the band that has the common name nir assigned. For Sentinel 2 'B08' is used.",
+      "schema": {
+        "type": "string"
+      }
+    },
+    {
+      "name": "shortwl_nir",
+      "description": "The name of the VNIR band which has a shorter wavelength than the nir band. For Sentinel 2 'B06' is used.",
+      "schema": {
+        "type": "string"
+      }
+    },
+    {
+      "name": "red",
+      "description": "The name of the red band. Defaults to the band that has the common name red assigned. For Sentinel 2 'B04' is used.",
+      "schema": {
+        "type": "string"
+      }
+    },
+    {
+      "name": "blue",
+      "description": "The name of the blue band. Defaults to the band that has the common name blue assigned. For Sentinel 2 'B02' is used.",
+      "schema": {
+        "type": "string"
+      }
+    },
+    {
+      "name": "target_band",
+      "description": "By default, the dimension of type bands is dropped. To keep the dimension specify a new band name in this parameter so that a new dimension label with the specified name will be added for the computed values.",
+      "schema": {
+        "type": "string"
+      },
+      "optional": true
+    }
+  ],
+  "returns": {
+    "description": "A data cube with the computed EVI values.",
+    "schema": {
+      "type": "object",
+      "subtype": "datacube"
+    }
+  },
+  "exceptions": {
+    "BandNotFound": {
+      "message": "A band with the specified name could not be found."
+    },
+    "InvalidBandCombination": {
+      "message": "The specified band combination is not valid for EVI calculation."
+    }
+  }
+} 
