@@ -38,18 +38,29 @@ load_process_metadata <- function(process_id) {
     params <- list()
     for (i in seq_along(metadata$parameters)) {
       param <- metadata$parameters[[i]]
-      # Convert JSON schema to Parameter object
-      param_obj <- Parameter$new(
-        name = param$name,
-        description = param$description,
-        schema = param$schema,
-        optional = if (!is.null(param$optional)) {
-          param$optional
+      # Only process if param is a list and has a name field
+      if (is.list(param) && !is.null(param$name)) {
+        # Handle default: treat {} (empty list) as NULL
+        param_default <- if (!is.null(param$default) && is.list(param$default) && length(param$default) == 0) {
+          NULL
         } else {
-          FALSE
+          param$default
         }
-      )
-      params[[i]] <- param_obj
+        param_obj <- Parameter$new(
+          name = param$name,
+          description = param$description,
+          schema = param$schema,
+          optional = if (!is.null(param$optional)) {
+            param$optional
+          } else {
+            FALSE
+          },
+          default = param_default
+        )
+        params[[length(params) + 1]] <- param_obj
+      } else {
+        warning(sprintf("Skipping parameter at index %d: not a valid parameter object", i))
+      }
     }
     result$parameters <- params
   }
@@ -109,7 +120,6 @@ eo_datacube <- datacube_schema()
 load_collection <- do.call(Process$new, c(
   load_process_metadata("load_collection"),
   list(
-    returns = eo_datacube,
     operation = function(id,
                          spatial_extent,
                          temporal_extent,
@@ -208,7 +218,6 @@ load_collection <- do.call(Process$new, c(
 aggregate_temporal_period <- do.call(Process$new, c(
   load_process_metadata("aggregate_temporal_period"),
   list(
-    returns = eo_datacube,
     operation = function(data,
                          period,
                          reducer,
@@ -247,7 +256,6 @@ aggregate_temporal_period <- do.call(Process$new, c(
 filter_bands <- do.call(Process$new, c(
   load_process_metadata("filter_bands"),
   list(
-    returns = eo_datacube,
     operation = function(data, bands, job) {
       if (!is.null(bands)) {
         cube <- gdalcubes::select_bands(data, bands)
@@ -263,7 +271,6 @@ filter_bands <- do.call(Process$new, c(
 filter_bbox <- do.call(Process$new, c(
   load_process_metadata("filter_bbox"),
   list(
-    returns = eo_datacube,
     operation = function(data, extent, job) {
       crs <- gdalcubes::srs(data)
       nw <- c(extent$west, extent$north)
@@ -284,7 +291,6 @@ filter_bbox <- do.call(Process$new, c(
 filter_spatial <- do.call(Process$new, c(
   load_process_metadata("filter_spatial"),
   list(
-    returns = eo_datacube,
     operation = function(data, geometries, job) {
       geo_data <- sf::read_sf(geometries)
       geo_data <- geo_data$geometry
@@ -299,7 +305,6 @@ filter_spatial <- do.call(Process$new, c(
 filter_temporal <- do.call(Process$new, c(
   load_process_metadata("filter_temporal"),
   list(
-    returns = eo_datacube,
     operation = function(data, extent, dimension = NULL, job) {
       if (is.null(extent)) {
         stop("The extent cannot be null.")
@@ -314,7 +319,6 @@ filter_temporal <- do.call(Process$new, c(
 ndvi <- do.call(Process$new, c(
   load_process_metadata("ndvi"),
   list(
-    returns = eo_datacube,
     operation = function(data,
                          nir = "nir",
                          red = "red",
@@ -348,7 +352,6 @@ ndvi <- do.call(Process$new, c(
 evi <- do.call(Process$new, c(
   load_process_metadata("evi"),
   list(
-    returns = eo_datacube,
     operation = function(data,
                          nir = "nir",
                          shortwl_nir = "shortwl_nir",
@@ -387,7 +390,6 @@ evi <- do.call(Process$new, c(
 rename_dimension <- do.call(Process$new, c(
   load_process_metadata("rename_dimension"),
   list(
-    returns = eo_datacube,
     operation = function(data, ..., job) {
       arguments <- list(data, ...)
       cube <- do.call(rename_bands, arguments)
@@ -402,7 +404,6 @@ rename_dimension <- do.call(Process$new, c(
 reduce_dimension <- do.call(Process$new, c(
   load_process_metadata("reduce_dimension"),
   list(
-    returns = eo_datacube,
     operation = function(data, reducer, dimension, job) {
       if (dimension == "t" || dimension == "time") {
         bands <- bands(data)$name
@@ -426,7 +427,6 @@ reduce_dimension <- do.call(Process$new, c(
 resample_spatial <- do.call(Process$new, c(
   load_process_metadata("resample_spatial"),
   list(
-    returns = eo_datacube,
     operation = function(data,
                          resolution = 0,
                          projection = NULL,
@@ -476,7 +476,6 @@ resample_spatial <- do.call(Process$new, c(
 merge_cubes <- do.call(Process$new, c(
   load_process_metadata("merge_cubes"),
   list(
-    returns = eo_datacube,
     operation = function(data1, data2, context, job) {
       if ("cube" %in% class(data1) && "cube" %in% class(data2)) {
         compare <- compare.list(dimensions(data1), dimensions(data2))
@@ -497,10 +496,6 @@ merge_cubes <- do.call(Process$new, c(
 array_element <- do.call(Process$new, c(
   load_process_metadata("array_element"),
   list(
-    returns = list(
-      description = "The value of the requested element.",
-      schema = list(description = "Any data type is allowed.")
-    ),
     operation = function(data,
                          index = NULL,
                          label = NULL,
@@ -527,7 +522,6 @@ array_element <- do.call(Process$new, c(
 rename_labels <- do.call(Process$new, c(
   load_process_metadata("rename_labels"),
   list(
-    returns = eo_datacube,
     operation = function(data, dimension, target, source = NULL, job) {
       if (dimension == "bands") {
         if (!is.null(source)) {
@@ -556,7 +550,6 @@ rename_labels <- do.call(Process$new, c(
 run_udf <- do.call(Process$new, c(
   load_process_metadata("run_udf"),
   list(
-    returns = list(description = "The computed result.", schema = list(type = c("number", "null"))),
     operation = function(data,
                          udf,
                          runtime = "R",
@@ -625,7 +618,6 @@ run_udf <- do.call(Process$new, c(
 load_stac <- do.call(Process$new, c(
   load_process_metadata("load_stac"),
   list(
-    returns = eo_datacube,
     operation = function(url,
                          spatial_extent,
                          temporal_extent,
