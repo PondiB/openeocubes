@@ -45,4 +45,5 @@ Collate:
     'SessionConfig-Class.R'
     'error.R'
 Depends:
-    R (>= 4.3.0)
+    R (>= 4.5.0)
+Suggests: testthat
