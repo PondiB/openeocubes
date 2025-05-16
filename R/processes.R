@@ -76,45 +76,6 @@ load_process_metadata <- function(process_id) {
   return(result)
 }
 
-#' schema_format
-#' @description format for the schema
-#'
-#' @param type data type
-#' @param subtype subtype of the data
-#'
-#' @return list with type and subtype(optional)
-#' @export
-schema_format <- function(type,
-                          subtype = NULL,
-                          items = NULL) {
-  schema <- list()
-  schema <- append(schema, list(type = type))
-
-  if (!is.null(subtype) && !is.na(subtype)) {
-    schema <- append(schema, list(subtype = subtype))
-  }
-  if (!is.null(items) && !is.na(items)) {
-    schema <- append(schema, list(items = items))
-  }
-  return(schema)
-}
-
-
-#' datacube_schema
-#' @description Return a list with datacube description and schema
-#'
-#' @return datacube list
-datacube_schema <- function() {
-  info <- list(
-    description = "A data cube for further processing",
-    schema = list(type = "object", subtype = "datacube")
-  )
-  return(info)
-}
-
-#' return object for the processes
-eo_datacube <- datacube_schema()
-
 
 #' load collection
 load_collection <- do.call(Process$new, c(

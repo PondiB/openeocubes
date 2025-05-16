@@ -1,0 +1,4 @@
+# serve the plumber API over HTTPS
+localhost:443 {
+    reverse_proxy localhost:8000
+}
