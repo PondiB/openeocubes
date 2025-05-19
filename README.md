@@ -22,7 +22,7 @@ After processing the data , one can  download and explore on open source tools l
 ####  Future developments:
 Geospatial Machine Learning APIs for time-series EO Data:
 * ML APIs e.g. Random Forest, SVM, XGBoost, etc.
-* DL APIs e.g. TempCNN, ResNet, LSTM etc.
+* DL APIs e.g. TempCNN, LightTAE, etc.
 
 Currently, PoC for ML APIs is being worked under the [Open Earth Monitor Cyberinfrastructure](https://earthmonitor.org/) EU funded project.
 ## Easy Deployment from DockerHub
@@ -43,10 +43,31 @@ docker run -p 8000:8000  brianpondi/openeocubes
 ```
 
 ## Development Notes:
+
+### Easy Deployment for LocalDevelopment
 While developing, you can skip rebuilding the docker container everytime. Instead you can run the server locally. 
-Just run "Rscript startLocal.R" inside this directory.
+
+You first need to clone the repository via this command:
+
+```bash
+git clone https://github.com/PondiB/openeocubes.git
+```
+
+then you can change to that directory
+
+```bash
+cd openeocubes
+```
+
+You can run the server locally by running the following command:
 ```bash
 Rscript startLocal.R
+
+```
+Via HTTPs with Caddy:
+
+```bash
+Rscript startLocal.R & caddy run
 
 ```
 
