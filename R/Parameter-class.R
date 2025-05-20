@@ -32,34 +32,32 @@ Parameter <- R6Class(
                           description = NA,
                           schema = NA,
                           optional = FALSE) {
-
-      self$name = name
-      self$description = description
-      self$schema = schema
-      self$optional = optional
-   },
+      self$name <- name
+      self$description <- description
+      self$schema <- schema
+      self$optional <- optional
+    },
 
     #' @description Get the information of the parameter
     #'
     #' @return list of information
     #'
     parameterInfo = function() {
-      info = list()
+      info <- list()
 
       if ("parameters" %in% names(self$schema)) {
-        schema = list()
-        schema$type = self$schema$type
-        schema$subtype = self$schema$subtype
+        schema <- list()
+        schema$type <- self$schema$type
+        schema$subtype <- self$schema$subtype
 
-        schema$parameters = lapply(self$schema$parameters, function(x) {
+        schema$parameters <- lapply(self$schema$parameters, function(x) {
           return(x$parameterInfo())
         })
-      }
-      else {
-        schema = self$schema
+      } else {
+        schema <- self$schema
       }
 
-      info = appendInfo(
+      info <- appendInfo(
         name = self$name,
         description = self$description,
         schema = schema,
@@ -81,15 +79,14 @@ Parameter <- R6Class(
 #'
 #' @return list with appended parameter
 #'
-appendInfo = function(name, description, schema, optional = NA) {
+appendInfo <- function(name, description, schema, optional = NA) {
+  info <- list()
+  info <- append(info, list(name = name))
+  info <- append(info, list(description = description))
+  info <- append(info, list(schema = schema))
 
-  info = list()
-  info = append(info, list(name = name))
-  info = append(info, list(description = description))
-  info = append(info, list(schema = schema))
-
-  if (! is.na(optional)) {
-    info = append(info, list(optional = optional))
+  if (!is.na(optional)) {
+    info <- append(info, list(optional = optional))
   }
   return(info)
 }
