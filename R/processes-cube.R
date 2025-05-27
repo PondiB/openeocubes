@@ -37,10 +37,8 @@ schema_format <- function(type,
 #'
 #' @return datacube list
 datacube_schema <- function() {
-  info <- list(
-    description = "A data cube for further processing",
-    schema = list(type = "object", subtype = "datacube")
-  )
+  info <- list(description = "A data cube for further processing",
+               schema = list(type = "object", subtype = "datacube"))
   return(info)
 }
 
@@ -54,10 +52,8 @@ eo_datacube <- datacube_schema()
 #'
 #' @return datacube list
 datacube_schema <- function() {
-  info <- list(
-    description = "A vector data cube with the computed results.",
-    schema = list(type = "object", subtype = "datacube")
-  )
+  info <- list(description = "A vector data cube with the computed results.",
+               schema = list(type = "object", subtype = "datacube"))
   return(info)
 }
 
@@ -127,9 +123,8 @@ load_collection <- Process$new(
                        job) {
     # Check if 'crs' is present in spatial_extent and convert it to numeric; if missing, default to 4326
     crs <- ifelse("crs" %in% names(spatial_extent),
-      as.numeric(spatial_extent$crs),
-      4326
-    )
+                  as.numeric(spatial_extent$crs),
+                  4326)
     message("crs is : ", crs)
 
     # Temporal extent preprocess
@@ -264,22 +259,19 @@ aggregate_spatial <- Process$new(
                        job) {
     # Convert geometries to sf object if it's a GeoJSON
     if (is.character(geometries)) {
-      tryCatch(
-        {
-          geometries <- geojsonsf::geojson_sf(geometries)
-        },
-        error = function(e) {
-          # If geojsonsf fails, try reading as a file
-          tryCatch(
-            {
-              geometries <- sf::read_sf(geometries)
-            },
-            error = function(e2) {
-              stop("Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ", e2$message)
-            }
+      tryCatch({
+        geometries <- geojsonsf::geojson_sf(geometries)
+      }, error = function(e) {
+        # If geojsonsf fails, try reading as a file
+        tryCatch({
+          geometries <- sf::read_sf(geometries)
+        }, error = function(e2) {
+          stop(
+            "Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ",
+            e2$message
           )
-        }
-      )
+        })
+      })
     }
 
     # Ensure geometries is an sf object
@@ -289,7 +281,8 @@ aggregate_spatial <- Process$new(
 
     # Get the reducer function if specified
     reducer_type <- if (!is.null(reducer)) {
-      switch(reducer,
+      switch(
+        reducer,
         "mean" = mean,
         "median" = median,
         "min" = min,
@@ -364,7 +357,8 @@ aggregate_temporal_period <- Process$new(
                        dimension = NULL,
                        context = NULL,
                        job) {
-    dt_period <- switch(period,
+    dt_period <- switch(
+      period,
       week = "P7D",
       dekad = "P10D",
       month = "P1M",
@@ -374,18 +368,14 @@ aggregate_temporal_period <- Process$new(
     )
 
     message("Aggregate temporal period ...")
-    message(
-      "Aggregate temporal period: ",
-      dt_period,
-      ", using reducer: ",
-      reducer
-    )
+    message("Aggregate temporal period: ",
+            dt_period,
+            ", using reducer: ",
+            reducer)
 
-    cube <- gdalcubes::aggregate_time(
-      cube = data,
-      dt = dt_period,
-      method = reducer
-    )
+    cube <- gdalcubes::aggregate_time(cube = data,
+                                      dt = dt_period,
+                                      method = reducer)
     message(gdalcubes::as_json(cube))
     return(cube)
   }
@@ -580,13 +570,11 @@ ndvi <- Process$new(
     red_formatted <- format_band_name(red)
 
     # Construct the NDVI calculation formula
-    ndvi_formula <- sprintf(
-      "(%s-%s)/(%s+%s)",
-      nir_formatted,
-      red_formatted,
-      nir_formatted,
-      red_formatted
-    )
+    ndvi_formula <- sprintf("(%s-%s)/(%s+%s)",
+                            nir_formatted,
+                            red_formatted,
+                            nir_formatted,
+                            red_formatted)
 
     # Apply the NDVI calculation
     cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = "NDVI", keep_bands = FALSE)
@@ -838,17 +826,15 @@ resample_spatial <- Process$new(
       stop("At least resolution or projection must be specified.")
     }
 
-    valid_methods <- c(
-      "mean",
-      "min",
-      "max",
-      "median",
-      "count",
-      "sum",
-      "prod",
-      "var",
-      "sd"
-    )
+    valid_methods <- c("mean",
+                       "min",
+                       "max",
+                       "median",
+                       "count",
+                       "sum",
+                       "prod",
+                       "var",
+                       "sd")
     if (!(method %in% valid_methods)) {
       stop(paste(
         "Invalid method. Please choose one of",
@@ -1013,7 +999,7 @@ rename_labels <- Process$new(
           band <- as.character(bands(data)$name[source])
           cube <- gdalcubes::apply_pixel(data, band, names = target)
         } else if (class(source) == "string" ||
-          class(source) == "character") {
+                   class(source) == "character") {
           cube <- gdalcubes::apply_pixel(data, source, names = target)
         } else {
           stop("Source is not a number or string")
@@ -1280,20 +1266,17 @@ array_interpolate_linear <- Process$new(
   returns = list(description = "An array with no-data values being replaced with interpolated values. If not at least 2 numerical values are available in the array, the array stays the same.", schema = list(type = "array")),
   operation = function(data, job) {
     method <- "linear"
-    tryCatch(
-      {
-        message("\nFill NA values...")
+    tryCatch({
+      message("\nFill NA values...")
 
-        gdalcubes::fill_time(data, method)
+      gdalcubes::fill_time(data, method)
 
-        message("NA values filled!")
-      },
-      error = function(err) {
-        message("An Error occured!")
-        message(toString(err))
-        stop(toString(err$message))
-      }
-    )
+      message("NA values filled!")
+    }, error = function(err) {
+      message("An Error occured!")
+      message(toString(err))
+      stop(toString(err$message))
+    })
 
     return(data)
   }
