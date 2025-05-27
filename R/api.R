@@ -334,6 +334,7 @@ addEndpoint <- function() {
   Session$assignProcess(load_collection)
   Session$assignProcess(load_stac)
   Session$assignProcess(save_result)
+  Session$assignProcess(aggregate_spatial)
   Session$assignProcess(aggregate_temporal_period)
   Session$assignProcess(array_element)
   Session$assignProcess(array_interpolate_linear)

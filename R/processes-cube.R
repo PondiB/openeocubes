@@ -5,6 +5,7 @@
 #' @import rstac
 #' @import useful
 #' @import sf
+#' @import geojsonsf
 NULL
 
 #' schema_format
@@ -15,7 +16,9 @@ NULL
 #'
 #' @return list with type and subtype(optional)
 #' @export
-schema_format <- function(type, subtype = NULL, items = NULL) {
+schema_format <- function(type,
+                          subtype = NULL,
+                          items = NULL) {
   schema <- list()
   schema <- append(schema, list(type = type))
 
@@ -36,13 +39,31 @@ schema_format <- function(type, subtype = NULL, items = NULL) {
 datacube_schema <- function() {
   info <- list(
     description = "A data cube for further processing",
-    schema = list(type = "object", subtype = "raster-cube")
+    schema = list(type = "object", subtype = "datacube")
   )
   return(info)
 }
 
 #' return object for the processes
 eo_datacube <- datacube_schema()
+
+
+
+#' Vector datacube_schema
+#' @description Return a list with datacube description and schema
+#'
+#' @return datacube list
+datacube_schema <- function() {
+  info <- list(
+    description = "A vector data cube with the computed results.",
+    schema = list(type = "object", subtype = "datacube")
+  )
+  return(info)
+}
+
+#' return object for the processes
+vec_datacube <- datacube_schema()
+
 
 
 #' load collection
@@ -55,10 +76,7 @@ load_collection <- Process$new(
     Parameter$new(
       name = "id",
       description = "The collection id",
-      schema = list(
-        type = "string",
-        subtype = "collection-id"
-      )
+      schema = list(type = "string", subtype = "collection-id")
     ),
     Parameter$new(
       name = "spatial_extent",
@@ -69,26 +87,11 @@ load_collection <- Process$new(
           type = "object",
           subtype = "bounding-box",
           properties = list(
-            east = list(
-              description = "East (upper right corner, coordinate axis 1).",
-              type = "number"
-            ),
-            west = list(
-              description = "West lower left corner, coordinate axis 1).",
-              type = "number"
-            ),
-            north = list(
-              description = "North (upper right corner, coordinate axis 2).",
-              type = "number"
-            ),
-            south = list(
-              description = "South (lower left corner, coordinate axis 2).",
-              type = "number"
-            ),
-            crs = list(
-              description = "Coordinate Reference System, default = 4326 .",
-              type = "number"
-            )
+            east = list(description = "East (upper right corner, coordinate axis 1).", type = "number"),
+            west = list(description = "West lower left corner, coordinate axis 1).", type = "number"),
+            north = list(description = "North (upper right corner, coordinate axis 2).", type = "number"),
+            south = list(description = "South (lower left corner, coordinate axis 2).", type = "number"),
+            crs = list(description = "Coordinate Reference System, default = 4326 .", type = "number")
           ),
           required = c("east", "west", "south", "north")
         ),
@@ -107,24 +110,26 @@ load_collection <- Process$new(
     Parameter$new(
       name = "temporal_extent",
       description = "Limits the data to load from the collection to the specified left-closed temporal interval.",
-      schema = list(
-        type = "array",
-        subtype = "temporal-interval"
-      )
+      schema = list(type = "array", subtype = "temporal-interval")
     ),
     Parameter$new(
       name = "bands",
       description = "Only adds the specified bands into the data cube so that bands that don't match the list of band names are not available.",
-      schema = list(
-        type = "array"
-      ),
+      schema = list(type = "array"),
       optional = TRUE
     )
   ),
   returns = eo_datacube,
-  operation = function(id, spatial_extent, temporal_extent, bands = NULL, job) {
+  operation = function(id,
+                       spatial_extent,
+                       temporal_extent,
+                       bands = NULL,
+                       job) {
     # Check if 'crs' is present in spatial_extent and convert it to numeric; if missing, default to 4326
-    crs <- ifelse("crs" %in% names(spatial_extent), as.numeric(spatial_extent$crs), 4326)
+    crs <- ifelse("crs" %in% names(spatial_extent),
+      as.numeric(spatial_extent$crs),
+      4326
+    )
     message("crs is : ", crs)
 
     # Temporal extent preprocess
@@ -175,7 +180,8 @@ load_collection <- Process$new(
       post_request() %>%
       items_fetch()
     # create image collection from stac items features
-    img.col <- stac_image_collection(items$features,
+    img.col <- stac_image_collection(
+      items$features,
       property_filter =
         function(x) {
           x[["eo:cloud_cover"]] < 30
@@ -186,12 +192,19 @@ load_collection <- Process$new(
     crs <- c("EPSG", crs)
     crs <- paste(crs, collapse = ":")
     v.overview <- gdalcubes::cube_view(
-      srs = crs, dx = 30, dy = 30, dt = "P1M",
-      aggregation = "median", resampling = "average",
+      srs = crs,
+      dx = 30,
+      dy = 30,
+      dt = "P1M",
+      aggregation = "median",
+      resampling = "average",
       extent = list(
-        t0 = t0, t1 = t1,
-        left = xmin, right = xmax,
-        top = ymax, bottom = ymin
+        t0 = t0,
+        t1 = t1,
+        left = xmin,
+        right = xmax,
+        top = ymax,
+        bottom = ymin
       )
     )
     # gdalcubes creation
@@ -207,6 +220,107 @@ load_collection <- Process$new(
 )
 
 #' aggregate temporal period
+aggregate_spatial <- Process$new(
+  id = "aggregate_spatial",
+  description = "Aggregates statistics for one or more geometries (e.g. zonal statistics for polygons) over the spatial dimensions. The given data cube can have multiple additional dimensions and for all these dimensions results will be computed individually.",
+  categories = as.array("aggregate", "cubes"),
+  summary = "Temporal aggregations based on calendar hierarchies",
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "The source data cube.",
+      schema = list(type = "object", subtype = "datacube")
+    ),
+    Parameter$new(
+      name = "geometries",
+      description = "Geometries for which the aggregation will be computed. Feature properties are preserved for vector data cubes and all GeoJSON Features.",
+      schema = list(type = "object", subtype = "datacube")
+    ),
+    Parameter$new(
+      name = "reducer",
+      description = "A reducer to be applied on all values of each geometry. A reducer is a single process such as mean or a set of processes, which computes a single value for a list of values, see the category 'reducer' for such processes.",
+      schema = list(type = "any"),
+      optional = FALSE
+    ),
+    Parameter$new(
+      name = "target_dimension",
+      description = "By default (which is null), the process only computes the results and doesn't add a new dimension.",
+      schema = list(type = list("string", "null")),
+      optional = TRUE
+    ),
+    Parameter$new(
+      name = "context",
+      description = "Additional data to be passed to the reducer",
+      schema = list(type = "any"),
+      optional = TRUE
+    )
+  ),
+  returns = vec_datacube,
+  operation = function(data,
+                       geometries,
+                       reducer = NULL,
+                       target_dimension = NULL,
+                       context = NULL,
+                       job) {
+    # Convert geometries to sf object if it's a GeoJSON
+    if (is.character(geometries)) {
+      tryCatch(
+        {
+          geometries <- geojsonsf::geojson_sf(geometries)
+        },
+        error = function(e) {
+          # If geojsonsf fails, try reading as a file
+          tryCatch(
+            {
+              geometries <- sf::read_sf(geometries)
+            },
+            error = function(e2) {
+              stop("Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ", e2$message)
+            }
+          )
+        }
+      )
+    }
+
+    # Ensure geometries is an sf object
+    if (!inherits(geometries, "sf")) {
+      stop("Geometries must be either a GeoJSON string or an sf object")
+    }
+
+    # Get the reducer function if specified
+    reducer_type <- if (!is.null(reducer)) {
+      switch(reducer,
+        "mean" = mean,
+        "median" = median,
+        "min" = min,
+        "max" = max,
+        "sum" = sum,
+        "count" = length,
+        "sd" = sd,
+        "var" = var,
+        stop("The specified reducer is not supported")
+      )
+    } else {
+      NULL
+    }
+
+
+    # Extract values using gdalcubes::extract_geom
+    vec_cube <- gdalcubes::extract_geom(
+      cube = data,
+      sf = geometries,
+      FUN = reducer_type,
+      reduce_time = FALSE,
+      merge = TRUE,
+      # Combine with original geometries
+      drop_geom = FALSE # Keep geometries in output
+    )
+    return(vec_cube)
+
+  }
+)
+
+#' aggregate temporal period
 aggregate_temporal_period <- Process$new(
   id = "aggregate_temporal_period",
   description = "Computes a temporal aggregation based on calendar hierarchies such as years, months or seasons.",
@@ -216,46 +330,40 @@ aggregate_temporal_period <- Process$new(
     Parameter$new(
       name = "data",
       description = "The source data cube.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "period",
       description = "The time intervals to aggregate",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = FALSE
     ),
     Parameter$new(
       name = "reducer",
       description = "A reducer to be applied for the values contained in each interval. A reducer is a single process such as mean or a set of processes, which computes a single value for a list of values",
-      schema = list(
-        type = "any"
-      ),
+      schema = list(type = "any"),
       optional = FALSE
     ),
     Parameter$new(
       name = "dimension",
       description = "The name of the temporal dimension for aggregation",
-      schema = list(
-        type = "any"
-      ),
+      schema = list(type = "any"),
       optional = TRUE
     ),
     Parameter$new(
       name = "context",
       description = "Additional data to be passed to the reducer",
-      schema = list(
-        type = "any"
-      ),
+      schema = list(type = "any"),
       optional = TRUE
     )
   ),
   returns = eo_datacube,
-  operation = function(data, period, reducer, dimension = NULL, context = NULL, job) {
+  operation = function(data,
+                       period,
+                       reducer,
+                       dimension = NULL,
+                       context = NULL,
+                       job) {
     dt_period <- switch(period,
       week = "P7D",
       dekad = "P10D",
@@ -266,9 +374,18 @@ aggregate_temporal_period <- Process$new(
     )
 
     message("Aggregate temporal period ...")
-    message("Aggregate temporal period: ", dt_period, ", using reducer: ", reducer)
+    message(
+      "Aggregate temporal period: ",
+      dt_period,
+      ", using reducer: ",
+      reducer
+    )
 
-    cube <- gdalcubes::aggregate_time(cube = data, dt = dt_period, method = reducer)
+    cube <- gdalcubes::aggregate_time(
+      cube = data,
+      dt = dt_period,
+      method = reducer
+    )
     message(gdalcubes::as_json(cube))
     return(cube)
   }
@@ -284,17 +401,12 @@ filter_bands <- Process$new(
     Parameter$new(
       name = "data",
       description = "A data cube with bands.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "bands",
       description = "A list of band names.",
-      schema = list(
-        type = "array"
-      ),
+      schema = list(type = "array"),
       optional = TRUE
     )
   ),
@@ -319,10 +431,7 @@ filter_bbox <- Process$new(
     Parameter$new(
       name = "data",
       description = "A data cube.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "extent",
@@ -332,22 +441,10 @@ filter_bbox <- Process$new(
         type = "object",
         subtype = "bounding-box",
         properties = list(
-          east = list(
-            description = "East (upper right corner, coordinate axis 1).",
-            type = "number"
-          ),
-          west = list(
-            description = "West lower left corner, coordinate axis 1).",
-            type = "number"
-          ),
-          north = list(
-            description = "North (upper right corner, coordinate axis 2).",
-            type = "number"
-          ),
-          south = list(
-            description = "South (lower left corner, coordinate axis 2).",
-            type = "number"
-          )
+          east = list(description = "East (upper right corner, coordinate axis 1).", type = "number"),
+          west = list(description = "West lower left corner, coordinate axis 1).", type = "number"),
+          north = list(description = "North (upper right corner, coordinate axis 2).", type = "number"),
+          south = list(description = "South (lower left corner, coordinate axis 2).", type = "number")
         ),
         required = c("east", "west", "south", "north")
       )
@@ -380,17 +477,12 @@ filter_spatial <- Process$new(
     Parameter$new(
       name = "data",
       description = "A data cube.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "geometries",
       description = "One or more geometries used for filtering, specified as GeoJSON. NB: pass on a url e.g.. \"http....geojson\".",
-      schema = list(
-        type = "object"
-      ),
+      schema = list(type = "object"),
       optional = FALSE
     )
   ),
@@ -418,17 +510,12 @@ filter_temporal <- Process$new(
     Parameter$new(
       name = "data",
       description = "A data cube with temporal dimensions.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "extent",
       description = "Left-closed temporal interval, i.e. an array with exactly two elements. e.g. c(\"2015-01-01\", \"2016-01-01\")",
-      schema = list(
-        type = "array"
-      ),
+      schema = list(type = "array"),
       optional = FALSE
     )
   ),
@@ -452,38 +539,33 @@ ndvi <- Process$new(
     Parameter$new(
       name = "data",
       description = "A data cube with bands.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "nir",
       description = "The name of the NIR band. Defaults to the band that has the common name nir assigned..",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = FALSE
     ),
     Parameter$new(
       name = "red",
       description = "The name of the red band. Defaults to the band that has the common name red assigned.",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = FALSE
     ),
     Parameter$new(
       name = "target_band",
       description = "By default, the dimension of type bands is dropped. To keep the dimension specify a new band name in this parameter so that a new dimension label with the specified name will be added for the computed values.",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = TRUE
     )
   ),
   returns = eo_datacube,
-  operation = function(data, nir = "nir", red = "red", target_band = NULL, job) {
+  operation = function(data,
+                       nir = "nir",
+                       red = "red",
+                       target_band = NULL,
+                       job) {
     # Function to ensure band names are properly formatted
     format_band_name <- function(band) {
       if (grepl("^B\\d{2}$", band, ignore.case = TRUE)) {
@@ -498,7 +580,13 @@ ndvi <- Process$new(
     red_formatted <- format_band_name(red)
 
     # Construct the NDVI calculation formula
-    ndvi_formula <- sprintf("(%s-%s)/(%s+%s)", nir_formatted, red_formatted, nir_formatted, red_formatted)
+    ndvi_formula <- sprintf(
+      "(%s-%s)/(%s+%s)",
+      nir_formatted,
+      red_formatted,
+      nir_formatted,
+      red_formatted
+    )
 
     # Apply the NDVI calculation
     cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = "NDVI", keep_bands = FALSE)
@@ -520,54 +608,47 @@ evi <- Process$new(
     Parameter$new(
       name = "data",
       description = "A data cube with bands.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "nir",
       description = "The name of the NIR band. Defaults to the band that has the common name nir assigned. For Sentinel 2 'B08' is used.",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = FALSE
     ),
     Parameter$new(
       name = "shortwl_nir",
       description = "The name of the VNIR band which has a shorter wavelength than the nir band. For Sentinel 2 'B06' is used.",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = FALSE
     ),
     Parameter$new(
       name = "red",
       description = "The name of the red band. Defaults to the band that has the common name red assigned. For Sentinel 2 'B04' is used.",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = FALSE
     ),
     Parameter$new(
       name = "blue",
       description = "The name of the blue band. Defaults to the band that has the common name blue assigned. For Sentinel 2 'B02' is used.",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = FALSE
     ),
     Parameter$new(
       name = "target_band",
       description = "By default, the dimension of type bands is dropped. To keep the dimension specify a new band name in this parameter so that a new dimension label with the specified name will be added for the computed values.",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = TRUE
     )
   ),
   returns = eo_datacube,
-  operation = function(data, nir = "nir", shortwl_nir = "shortwl_nir", red = "red", blue = "blue", target_band = NULL, job) {
+  operation = function(data,
+                       nir = "nir",
+                       shortwl_nir = "shortwl_nir",
+                       red = "red",
+                       blue = "blue",
+                       target_band = NULL,
+                       job) {
     # Function to ensure band names are properly formatted
     format_band_name <- function(band) {
       if (grepl("^B\\d{2}$", band, ignore.case = TRUE)) {
@@ -584,7 +665,14 @@ evi <- Process$new(
     shortwl_nir_formatted <- format_band_name(shortwl_nir)
 
     # Construct the NDVI calculation formula
-    evi_formula <- sprintf("2.5*((%s-%s)/(%s+6*(%s)-7.5*(%s))+1)", nir_formatted, red_formatted, nir_formatted, shortwl_nir_formatted, blue_formatted)
+    evi_formula <- sprintf(
+      "2.5*((%s-%s)/(%s+6*(%s)-7.5*(%s))+1)",
+      nir_formatted,
+      red_formatted,
+      nir_formatted,
+      shortwl_nir_formatted,
+      blue_formatted
+    )
 
     # Apply the NDVI calculation
     cube <- gdalcubes::apply_pixel(data, evi_formula, names = "EVI", keep_bands = FALSE)
@@ -607,25 +695,18 @@ rename_dimension <- Process$new(
     Parameter$new(
       name = "data",
       description = "A data cube with bands.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "source",
       description = "The current name of the dimension.",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = FALSE
     ),
     Parameter$new(
       name = "target",
       description = "A new Name for the dimension.",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = FALSE
     )
   ),
@@ -649,10 +730,7 @@ reduce_dimension <- Process$new(
     Parameter$new(
       name = "data",
       description = "A data cube with bands.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "reducer",
@@ -673,9 +751,7 @@ reduce_dimension <- Process$new(
           Parameter$new(
             name = "context",
             description = "Additional data passed by the user.",
-            schema = list(
-              description = "Any data type"
-            ),
+            schema = list(description = "Any data type"),
             optional = TRUE
           )
         )
@@ -684,16 +760,12 @@ reduce_dimension <- Process$new(
     Parameter$new(
       name = "dimension",
       description = "The name of the dimension over which to reduce.",
-      schema = list(
-        type = "string"
-      )
+      schema = list(type = "string")
     ),
     Parameter$new(
       name = "context",
       description = "Additional data to be passed to the reducer.",
-      schema = list(
-        description = "Any data type"
-      ),
+      schema = list(description = "Any data type"),
       optional = TRUE
     )
   ),
@@ -728,53 +800,60 @@ resample_spatial <- Process$new(
     Parameter$new(
       name = "data",
       description = "A raster data cube.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "resolution",
       description = "Resamples the data cube to the target resolution, which can be specified either as separate values for x and y or as a single value for both axes. Specified in the units of the target projection. Doesn't change the resolution by default (0).",
-      schema = list(
-        type = list("number", "array")
-      ),
+      schema = list(type = list("number", "array")),
       optional = TRUE
     ),
     Parameter$new(
       name = "projection",
       description = "Warps the data cube to the target projection, specified as as EPSG code or WKT2 CRS string. By default (null), the projection is not changed",
-      schema = list(
-        type = "integer"
-      ),
+      schema = list(type = "integer"),
       optional = TRUE
     ),
     Parameter$new(
       name = "method",
       description = "Resampling method to use",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = TRUE
     ),
     Parameter$new(
       name = "align",
       description = "Specifies to which corner of the spatial extent the new resampled data is aligned to",
-      schema = list(
-        type = "string"
-      ),
+      schema = list(type = "string"),
       optional = TRUE
     )
   ),
   returns = eo_datacube,
-  operation = function(data, resolution = 0, projection = NULL, method = "mean", align = "upper-left", job) {
+  operation = function(data,
+                       resolution = 0,
+                       projection = NULL,
+                       method = "mean",
+                       align = "upper-left",
+                       job) {
     if (resolution == 0 && is.null(projection)) {
       stop("At least resolution or projection must be specified.")
     }
 
-    valid_methods <- c("mean", "min", "max", "median", "count", "sum", "prod", "var", "sd")
+    valid_methods <- c(
+      "mean",
+      "min",
+      "max",
+      "median",
+      "count",
+      "sum",
+      "prod",
+      "var",
+      "sd"
+    )
     if (!(method %in% valid_methods)) {
-      stop(paste("Invalid method. Please choose one of", toString(valid_methods)))
+      stop(paste(
+        "Invalid method. Please choose one of",
+        toString(valid_methods)
+      ))
     }
 
     if (!is.null(projection)) {
@@ -782,7 +861,12 @@ resample_spatial <- Process$new(
     }
 
     cube <- if (resolution != 0) {
-      gdalcubes::aggregate_space(cube = data, dx = resolution, dy = resolution, method = method)
+      gdalcubes::aggregate_space(
+        cube = data,
+        dx = resolution,
+        dy = resolution,
+        method = method
+      )
     } else {
       stop("Currently, only resampling spatial resolution is implemented.")
     }
@@ -803,18 +887,12 @@ merge_cubes <- Process$new(
     Parameter$new(
       name = "data1",
       description = "A data cube.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "data2",
       description = "A data cube.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "context",
@@ -875,7 +953,11 @@ array_element <- Process$new(
     description = "The value of the requested element.",
     schema = list(description = "Any data type is allowed.")
   ),
-  operation = function(data, index = NULL, label = NULL, return_nodata = FALSE, job) {
+  operation = function(data,
+                       index = NULL,
+                       label = NULL,
+                       return_nodata = FALSE,
+                       job) {
     if (class(data) == "list") {
       bands <- bands(data$data)$name
     } else {
@@ -904,10 +986,7 @@ rename_labels <- Process$new(
     Parameter$new(
       name = "data",
       description = "The data cube.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "dimension",
@@ -917,18 +996,12 @@ rename_labels <- Process$new(
     Parameter$new(
       name = "target",
       description = "The new names for the labels.",
-      schema = list(
-        type = "array",
-        items = list(type = c("number", "string"))
-      )
+      schema = list(type = "array", items = list(type = c("number", "string")))
     ),
     Parameter$new(
       name = "source",
       description = "The names of the labels as they are currently in the data cube.",
-      schema = list(
-        type = "array",
-        items = list(type = c("number", "string"))
-      ),
+      schema = list(type = "array", items = list(type = c("number", "string"))),
       optional = TRUE
     )
   ),
@@ -939,7 +1012,8 @@ rename_labels <- Process$new(
         if (class(source) == "number" || class(source) == "integer") {
           band <- as.character(bands(data)$name[source])
           cube <- gdalcubes::apply_pixel(data, band, names = target)
-        } else if (class(source) == "string" || class(source) == "character") {
+        } else if (class(source) == "string" ||
+          class(source) == "character") {
           cube <- gdalcubes::apply_pixel(data, source, names = target)
         } else {
           stop("Source is not a number or string")
@@ -966,34 +1040,22 @@ run_udf <- Process$new(
     Parameter$new(
       name = "data",
       description = "A data cube.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "udf",
       description = "The multi-line source code of a UDF.",
-      schema = list(
-        type = "string",
-        subtype = "string"
-      )
+      schema = list(type = "string", subtype = "string")
     ),
     Parameter$new(
       name = "runtime",
       description = "A UDF runtime identifier available at the back-end.",
-      schema = list(
-        type = "string",
-        subtype = "string"
-      )
+      schema = list(type = "string", subtype = "string")
     ),
     Parameter$new(
       name = "version",
       description = "An UDF runtime version. Default set to null.",
-      schema = list(
-        type = "string",
-        subtype = "string"
-      )
+      schema = list(type = "string", subtype = "string")
     ),
     Parameter$new(
       name = "context",
@@ -1002,24 +1064,49 @@ run_udf <- Process$new(
       optional = TRUE
     )
   ),
-  returns = list(
-    description = "The computed result.",
-    schema = list(type = c("number", "null"))
-  ),
-  operation = function(data, udf, runtime = "R", version = NULL, context = NULL, job) {
+  returns = list(description = "The computed result.", schema = list(type = c("number", "null"))),
+  operation = function(data,
+                       udf,
+                       runtime = "R",
+                       version = NULL,
+                       context = NULL,
+                       job) {
     if (runtime != "R") {
       stop("Only R runtime is supported.")
     }
 
     # Security check: Disallow certain potentially harmful functions
-    forbidden_patterns <- c("system", "file", "write", "read", "parse", "eval", "source", "system2", "Sys.", "processx")
+    forbidden_patterns <- c(
+      "system",
+      "file",
+      "write",
+      "read",
+      "parse",
+      "eval",
+      "source",
+      "system2",
+      "Sys.",
+      "processx"
+    )
     if (any(sapply(forbidden_patterns, grepl, udf))) {
       stop("UDF contains forbidden functions or commands.")
     }
 
     # NB : more reducer keywords can be added
     message("run UDF called")
-    reducer_keywords <- c("sum", "bfast", "sd", "mean", "median", "min", "reduce", "product", "max", "count", "var")
+    reducer_keywords <- c(
+      "sum",
+      "bfast",
+      "sd",
+      "mean",
+      "median",
+      "min",
+      "reduce",
+      "product",
+      "max",
+      "count",
+      "var"
+    )
     if (!("cube" %in% class(data))) {
       stop('Provided cube is not of class "cube"')
     }
@@ -1061,9 +1148,7 @@ load_stac <- Process$new(
     Parameter$new(
       name = "url",
       description = "The URL to a static STAC catalog (STAC Item, STAC Collection, or STAC Catalog) or a specific STAC API Collection that allows to filter items and to download assets",
-      schema = list(
-        type = "string"
-      )
+      schema = list(type = "string")
     ),
     Parameter$new(
       name = "spatial_extent",
@@ -1074,22 +1159,10 @@ load_stac <- Process$new(
           type = "object",
           subtype = "bounding-box",
           properties = list(
-            east = list(
-              description = "East (upper right corner, coordinate axis 1).",
-              type = "number"
-            ),
-            west = list(
-              description = "West lower left corner, coordinate axis 1).",
-              type = "number"
-            ),
-            north = list(
-              description = "North (upper right corner, coordinate axis 2).",
-              type = "number"
-            ),
-            south = list(
-              description = "South (lower left corner, coordinate axis 2).",
-              type = "number"
-            )
+            east = list(description = "East (upper right corner, coordinate axis 1).", type = "number"),
+            west = list(description = "West lower left corner, coordinate axis 1).", type = "number"),
+            north = list(description = "North (upper right corner, coordinate axis 2).", type = "number"),
+            south = list(description = "South (lower left corner, coordinate axis 2).", type = "number")
           ),
           required = c("east", "west", "south", "north")
         ),
@@ -1108,30 +1181,28 @@ load_stac <- Process$new(
     Parameter$new(
       name = "temporal_extent",
       description = "Limits the data to load from the collection to the specified left-closed temporal interval.",
-      schema = list(
-        type = "array",
-        subtype = "temporal-interval"
-      )
+      schema = list(type = "array", subtype = "temporal-interval")
     ),
     Parameter$new(
       name = "bands",
       description = "Only adds the specified bands into the data cube so that bands that don't match the list of band names are not available.",
-      schema = list(
-        type = "array"
-      ),
+      schema = list(type = "array"),
       optional = TRUE
     ),
     Parameter$new(
       name = "properties",
       description = "Limits the data by metadata properties to include only data in the data cube which all given conditions return true for (AND operation).",
-      schema = list(
-        type = "array"
-      ),
+      schema = list(type = "array"),
       optional = TRUE
     )
   ),
   returns = eo_datacube,
-  operation = function(url, spatial_extent, temporal_extent, bands = NULL, properties = NULL, job) {
+  operation = function(url,
+                       spatial_extent,
+                       temporal_extent,
+                       bands = NULL,
+                       properties = NULL,
+                       job) {
     # temporal extent preprocess
     duration <- paste(temporal_extent[[1]], temporal_extent[[2]], collapse = "/")
 
@@ -1165,12 +1236,19 @@ load_stac <- Process$new(
 
     # define cube view with monthly aggregation
     cube_view <- gdalcubes::cube_view(
-      srs = "EPSG:4326", dx = 30, dy = 30, dt = "P1M",
-      aggregation = "median", resampling = "average",
+      srs = "EPSG:4326",
+      dx = 30,
+      dy = 30,
+      dt = "P1M",
+      aggregation = "median",
+      resampling = "average",
       extent = list(
-        t0 = temporal_extent[[1]], t1 = temporal_extent[[2]],
-        left = xmin, right = xmax,
-        top = ymax, bottom = ymin
+        t0 = temporal_extent[[1]],
+        t1 = temporal_extent[[2]],
+        left = xmin,
+        right = xmax,
+        top = ymax,
+        bottom = ymin
       )
     )
 
@@ -1199,10 +1277,7 @@ array_interpolate_linear <- Process$new(
       schema = list(type = "array")
     )
   ),
-  returns = list(
-    description = "An array with no-data values being replaced with interpolated values. If not at least 2 numerical values are available in the array, the array stays the same.",
-    schema = list(type = "array")
-  ),
+  returns = list(description = "An array with no-data values being replaced with interpolated values. If not at least 2 numerical values are available in the array, the array stays the same.", schema = list(type = "array")),
   operation = function(data, job) {
     method <- "linear"
     tryCatch(
@@ -1234,33 +1309,21 @@ save_result <- Process$new(
     Parameter$new(
       name = "data",
       description = "The data to save.",
-      schema = list(
-        type = "object",
-        subtype = "raster-cube"
-      )
+      schema = list(type = "object", subtype = "datacube")
     ),
     Parameter$new(
       name = "format",
       description = "The file format to save to.",
-      schema = list(
-        type = "string",
-        subtype = "output-format"
-      )
+      schema = list(type = "string", subtype = "output-format")
     ),
     Parameter$new(
       name = "options",
       description = "The file format parameters to be used to create the file(s).",
-      schema = list(
-        type = "object",
-        subtype = "output-format-options"
-      ),
+      schema = list(type = "object", subtype = "output-format-options"),
       optional = TRUE
     )
   ),
-  returns = list(
-    description = "false if saving failed, true otherwise.",
-    schema = list(type = "boolean")
-  ),
+  returns = list(description = "false if saving failed, true otherwise.", schema = list(type = "boolean")),
   operation = function(data, format, options = NULL, job) {
     CORES <- parallel::detectCores()
     gdalcubes::gdalcubes_options(parallel = CORES)
