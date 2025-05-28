@@ -16,7 +16,7 @@ NULL
 ml_datacube_schema <- function() {
     info <- list(
         description = "A data cube with the predicted values. It removes the specified dimensions and adds new dimension for the predicted values.",
-        schema = list(type = "object", subtype = "raster-cube")
+        schema = list(type = "object", subtype = "datacube")
     )
     return(info)
 }
@@ -65,7 +65,7 @@ ml_predict <- Process$new(
             description = "A data cube with bands.",
             schema = list(
                 type = "object",
-                subtype = "raster-cube"
+                subtype = "datacube"
             )
         ),
         Parameter$new(

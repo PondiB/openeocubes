@@ -1,21 +1,66 @@
 FROM r-base:4.5.0
 
-# Install software dependencies
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    software-properties-common \
+# Configure apt and install software dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install build essentials and basic tools
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     cmake \
     g++ \
     git \
-    supervisor \
     wget \
+    make \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install development tools
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     automake \
     libtool \
     autoconf \
     pkg-config \
-    make
+    supervisor \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV TZ=Etc/UTC
-RUN apt-get install  -y libnetcdf-dev libcurl4-openssl-dev libcpprest-dev doxygen graphviz  libsqlite3-dev libboost-all-dev
-RUN apt-get update && apt-get install -y libproj-dev libgdal-dev
+
+# Install scientific and development libraries
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    libnetcdf-dev \
+    libcurl4-openssl-dev \
+    libcpprest-dev \
+    doxygen \
+    graphviz \
+    libsqlite3-dev \
+    libboost-all-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install GDAL dependencies
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    libproj-dev \
+    libgdal-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# install other necessary packages
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    libsodium-dev \
+    libudunits2-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install devtools package
 RUN R -e "install.packages('devtools')"
@@ -23,9 +68,7 @@ RUN R -e "install.packages('devtools')"
 # Install gdalcubes package
 RUN R -e "install.packages('gdalcubes')"
 
-# install other necessary packages
-RUN apt-get install -y libsodium-dev libudunits2-dev
-RUN Rscript -e "install.packages(c('plumber', 'useful', 'ids', 'R6', 'sf', 'rstac','bfast'))"
+RUN Rscript -e "install.packages(c('plumber', 'useful', 'ids', 'R6', 'sf', 'rstac','bfast','geojsonsf'))"
 
 # create directories
 RUN mkdir -p /opt/dockerfiles/ && mkdir -p /var/openeo/workspace/ && mkdir -p /var/openeo/workspace/data/

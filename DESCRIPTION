@@ -24,7 +24,8 @@ Imports:
     sf,
     useful,
     gdalcubes,
-    rstac
+    rstac,
+    geojsonsf
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 Collate: 
