@@ -438,8 +438,8 @@ ml_fit <- Process$new(
 #' @return
 #' A raster-cube object containing the predicted values in a new "prediction" band.
 #'
-ml_predict1 <- Process$new(
-  id = "ml_predict1",
+ml_predict <- Process$new(
+  id = "ml_predict",
   description = "Applies a machine learning model to a data cube and returns the predicted values.",
   categories = as.array("machine-learning", "prediction"),
   summary = "Predicts the aoi (area of interest) with the model",
@@ -1828,8 +1828,8 @@ load_ml_model <- Process$new(
 #'   \item{rds}{Path to the saved RDS (or raw RDS) file}
 #'   \item{json}{Path to the saved MLM-STAC JSON metadata file}
 #' }
-save_ml_model1 <- Process$new(
-  id = "save_ml_model1",
+save_ml_model <- Process$new(
+  id = "save_ml_model",
   description = "Saves a trained machine learning model in ONNX, JSON (MLM-STAC) and RDS formats. For Torch models, a TorchScript version is also produced.",
   categories = as.array("cubes", "Machine Learning"),
   summary = "Save trained ML model as ONNX, JSON, and RDS",
