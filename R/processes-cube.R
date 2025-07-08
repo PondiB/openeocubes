@@ -257,12 +257,20 @@ aggregate_spatial <- Process$new(
                        target_dimension = NULL,
                        context = NULL,
                        job) {
-    # Convert geometries to sf object if it's a GeoJSON
+
+    add_fid_if_missing <- function(sf_obj) {
+      if (! "fid" %in% names(sf_obj)) {
+        sf_obj$fid <- seq.int(nrow(sf_obj))
+      }
+      message("fid set")
+      return(sf_obj)
+    }
+    message("Training data is loaded")
+    
     if (is.character(geometries)) {
       tryCatch({
         geometries <- geojsonsf::geojson_sf(geometries)
       }, error = function(e) {
-        # If geojsonsf fails, try reading as a file
         tryCatch({
           geometries <- sf::read_sf(geometries)
         }, error = function(e2) {
@@ -278,17 +286,18 @@ aggregate_spatial <- Process$new(
     if (!inherits(geometries, "sf")) {
       stop("Geometries must be either a GeoJSON string or an sf object")
     }
-
+    print(sf::st_crs(geometries))
+    
     # Get the reducer function if specified
     reducer_type <- if (!is.null(reducer)) {
       switch(
         reducer,
-        "mean" = mean,
-        "median" = median,
-        "min" = min,
-        "max" = max,
-        "sum" = sum,
-        "count" = length,
+        "mean" = base::mean,
+        "median" = stats::median,
+        "min" = base::min,
+        "max" = base::max,
+        "sum" = base::sum,
+        "count" = count,
         "sd" = sd,
         "var" = var,
         stop("The specified reducer is not supported")
@@ -296,16 +305,65 @@ aggregate_spatial <- Process$new(
     } else {
       NULL
     }
-
-
-    # Extract values using gdalcubes::extract_geom
+    geometries <- add_fid_if_missing(geometries)
+    geometries$fid <- as.integer(geometries$fid)
+    message(colnames(geometries))
+    message("✅ Checking type of 'data' before calling gdalcubes::extent()")
+    print(class(data))
+    str(data)
+    
+    dims <- gdalcubes::dimensions(data)
+    cube_extent <- list(
+      left = dims$x$low,
+      right = dims$x$high,
+      bottom = dims$y$low,
+      top = dims$y$high
+    )
+    
+    message(glue::glue(
+      "✅ Extracted cube extent via dimensions():\n",
+      "Left: {cube_extent$left}, Right: {cube_extent$right}, ",
+      "Bottom: {cube_extent$bottom}, Top: {cube_extent$top}"
+    ))
+    
+    
+    cube_crs <- gdalcubes::srs(data)  
+    message(cube_crs)
+    # 2. Geometrien in dieses CRS reprojizieren
+    geometries <- sf::st_transform(geometries, cube_crs)
+    
+    
+    cube_bbox <- sf::st_bbox(c(
+      xmin = cube_extent$left,
+      ymin = cube_extent$bottom,
+      xmax = cube_extent$right,
+      ymax = cube_extent$top
+    ), crs = sf::st_crs(geometries)) %>% 
+      sf::st_as_sfc()
+    
+    message(glue::glue("✅ Cube bbox geometry: {sf::st_as_text(cube_bbox)}"))
+    within_idx <- lengths(
+      sf::st_within(geometries, cube_bbox, sparse = FALSE)
+    ) > 0
+    
+    geometries_in_bbox <- geometries[within_idx, ]
+    message(
+      "There remain ",
+      nrow(geometries_in_bbox),
+      " training features that are completely contained in the BBOX."
+    )
+    
+    if (nrow(geometries_in_bbox) == 0) {
+      stop("No training geometries are completely in the data cube!")
+    }
+    
+    message("Go to extraction now...")
     vec_cube <- gdalcubes::extract_geom(
       cube = data,
       sf = geometries,
       FUN = reducer_type,
       reduce_time = FALSE,
       merge = TRUE,
-      # Combine with original geometries
       drop_geom = FALSE # Keep geometries in output
     )
     return(vec_cube)
