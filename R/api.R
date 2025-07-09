@@ -340,10 +340,13 @@ addEndpoint = function() {
   # assign ml processes
   Session$assignProcess(ml_fit)
   Session$assignProcess(ml_predict)
-  Session$assignProcess(mlm_random_forest)
+  Session$assignProcess(mlm_class_random_forest)
+  Session$assignProcess(mlm_regr_random_forest)
   Session$assignProcess(mlm_class_tempcnn)
   Session$assignProcess(save_ml_model)
-  Session$assignProcess(mlm_svm_process)
-  Session$assignProcess(mlm_xgboost_process)
+  Session$assignProcess(mlm_class_svm)
+  Session$assignProcess(mlm_regr_svm)
+  Session$assignProcess(mlm_class_xgboost)
+  Session$assignProcess(mlm_regr_xgboost)
   Session$assignProcess(load_ml_model)
 }
