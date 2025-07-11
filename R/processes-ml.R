@@ -120,34 +120,24 @@ ml_fit <- Process$new(
   operation = function(model, training_set, target_column, job) {
     
     ############# help functions ##############
-    extract_time_series_features <- function(training_set, time_steps, features_data) {
-      message("Extracting from long-format with ", time_steps, " time steps.")
-      
-          n_per_fid <- table(training_set$fid)
-      if (length(unique(n_per_fid)) != 1 || unique(n_per_fid) != time_steps) {
-        stop("Inconsistent number of times per fid - each polygon must be exactly ", time_steps, " Have time steps.")
+    extract_time_series_features <- function(training_set, features_data, time_steps) {
+      if (time_steps > 1) {
+        message("multi time steps")
+        features <- array(
+          data = as.matrix(training_set[, grep("_T\\d+$", colnames(training_set))]),
+          dim = c(nrow(training_set), length(features_data), time_steps)
+        )
+      } else {
+        message("one time step")
+        features <- array(
+          data = as.matrix(training_set[, features_data]),
+          dim = c(nrow(training_set), length(features_data), time_steps)
+        )
       }
-            training_set <- training_set %>% arrange(fid, time)
-      
-      predictor_names <- features_data
-      message("Automatically recognized predictors: ", paste(predictor_names, collapse = ", "))
-      
-      if (length(predictor_names) == 0) {
-        stop("No valid predictors detected. Please check.")
-      }
-      
-      x <- as.data.frame(lapply(training_set[, predictor_names, drop = FALSE], as.numeric))
-      
-      n_fids <- length(unique(training_set$fid))
-      n_features <- length(predictor_names)
-      
-      features <- array(
-        data = as.matrix(x),
-        dim = c(n_fids, n_features, time_steps)
-      )
-      
       return(features)
     }
+    
+    
     
     
     identify_predictors <- function(training_set, pattern = "^(B\\d+|(?i)NDVI(_T\\d+)?)$") {
@@ -161,7 +151,7 @@ ml_fit <- Process$new(
       }
       return(predictor_names)
     }
-   
+    
     
     convert_to_wide_format <- function(train_data, target_column) {
       library(tidyr)
@@ -185,7 +175,7 @@ ml_fit <- Process$new(
           values_from = all_of(bands_to_use),
           names_glue = "{.value}_T{match(time, sort(unique(time)))}"
         )
-
+      
       time_order <- sort(unique(train_data$time))
       cols_sorted <- unlist(lapply(seq_along(time_order), function(i) {
         paste0(bands_to_use, "_T", i)
@@ -195,13 +185,13 @@ ml_fit <- Process$new(
       
       train_data_clean <- train_data_wide %>%
         filter(complete.cases(.))
-
+      
       target_data <- train_data %>%
         select(fid, !!sym(target_column)) %>%
         distinct(fid, .keep_all = TRUE)
       
       train_data_clean <- left_join(train_data_clean, target_data, by = "fid")
-
+      
       message("Wide format done")
       return(train_data_clean)
     }
@@ -212,7 +202,7 @@ ml_fit <- Process$new(
     
     ##################################################################################
     message("ml_fit is being prepared...")
-
+    
     if (!is.null(model$parameters$cnn_layer)) {
       message("Deep learning model recognized. Start DL calculation...")
       
@@ -220,16 +210,17 @@ ml_fit <- Process$new(
       if (any(grepl("^X\\d+\\.", names(training_set)))) {
         names(training_set) <- gsub("^X\\d+\\.", "", names(training_set))
       }
-      message(names(training_set))
-      message(time_steps)
-      message(colnames(training_set))
+      message("Detection of multiple time steps: ",time_steps)
+      
       if (!"fid" %in% colnames(training_set)) {
         stop("The column 'fid' is missing in training_set. Please check your input data or preprocessing.")
       }
       
       fid_counts <- table(training_set$fid)
+      n_samples <- length(unique(training_set$fid))
+      message(n_samples)
       valid_fids <- as.integer(names(fid_counts[fid_counts == time_steps]))
-
+      
       training_set <- training_set[training_set$fid %in% valid_fids, ]
       
       training_set <- training_set[order(training_set$fid, training_set$time), ]
@@ -238,27 +229,33 @@ ml_fit <- Process$new(
       if ("NDVI" %in% names(training_set)) {
         features_data <- c(features_data, "NDVI")
       }
-
-      features <- extract_time_series_features(training_set, time_steps, features_data)
-
-      library(torch)
+      message(features_data)
+      training_data <- convert_to_wide_format(train_data = training_set, target_column = target_column)
+      features <- extract_time_series_features(training_set = training_data,features_data = features_data,time_steps = time_steps  )
       
-      labels <- as.numeric(as.factor(training_set[[target_column]]))[!duplicated(training_set$fid)]
-      library(torch)
+
+
+      labels <- as.numeric(as.factor(training_data[[target_column]]))
       
+      library(torch)
       x_train <- torch::torch_tensor(features, dtype = torch_float())
-      y_train <- torch_tensor(labels, dtype = torch_long())
+      y_train <- torch::torch_tensor(labels, dtype = torch_long())
+        
       class_count <- length(unique(labels))
-      
+      message("Anzahl Klassen: ", class_count)
       dl_model <- model$create_model(
         input_data_columns = features_data,
         time_steps = time_steps,
         class_count = class_count
       )
-      
-      optimizer <- optim_adam(dl_model$parameters, lr = model$parameters$learning_rate, weight_decay = model$parameters$weight_decay)
+        
+      optimizer <- optim_adam(
+        dl_model$parameters,
+        lr = model$parameters$learning_rate,
+        weight_decay = model$parameters$weight_decay
+      )
       loss_fn <- nn_cross_entropy_loss()
-      
+        
       for (epoch in 1:model$parameters$epochs) {
         dl_model$train()
         optimizer$zero_grad()
@@ -268,7 +265,7 @@ ml_fit <- Process$new(
         optimizer$step()
         print(sprintf("Epoch: %d, Loss: %.4f", epoch, loss$item()))
       }
-      
+        
       dl_model$eval()
       with_no_grad({
         predictions <- dl_model(x_train)
@@ -276,16 +273,19 @@ ml_fit <- Process$new(
         accuracy <- mean(as.numeric(predicted_classes == y_train))
         message(sprintf("Accuracy: %.2f%%", accuracy * 100))
       })
-      
-      confusion_matrix <- table(Predicted = as.numeric(predicted_classes), Actual = as.numeric(y_train))
-      message(confusion_matrix)
-      
+        
+      confusion_matrix <- table(
+        Predicted = as.numeric(predicted_classes),
+        Actual = as.numeric(y_train)
+      )
+      message("Confusion Matrix:")
+      print(confusion_matrix)
       model_file <- tempfile(fileext = ".pt")
       torch_save(dl_model, model_file)
       message("Model saved in Torch file: ", model_file)
-      
+        
       return(model_file)
-    }
+      }
     
     
     message("Machine learning model recognized. Start ML calculation...")
@@ -293,32 +293,27 @@ ml_fit <- Process$new(
     if (any(grepl("^X\\d+\\.", names(training_set)))) {
       names(training_set) <- gsub("^X\\d+\\.", "", names(training_set))
     }
-
+    
     #### wide format########
     time_steps<- length(unique(training_set$time))
     if(time_steps > 1){
-      message("Detection of multiple time steps",time_steps)
+      message("Detection of multiple time steps: ", time_steps)
       
       training_set <- convert_to_wide_format(train_data = training_set, target_column = target_column)
-
+      
     }else{
       message("Recognizing a time step")
       band_names <- grep("^B0?\\d{1,2}$", names(training_set), value = TRUE)
       has_ndvi <- "NDVI" %in% colnames(training_set)
       predictors_name <- c(band_names, if (has_ndvi) "NDVI")
-
+      
       
       train_ids <- caret::createDataPartition(training_set$fid, p = 1.0, list = FALSE)
       train_data <- training_set[train_ids, ]
       train_data <- train_data %>% sf::st_drop_geometry()
-    
       
-
-      
-      
-
       tryCatch({
-        message("Prüfe auf vollständige Zeilen basierend auf Prädiktoren...")
+        message("Check for complete rows based on predictors...")
         train_data_numeric <- train_data[, predictors_name, drop = FALSE]
         complete_rows <- complete.cases(train_data_numeric)
         train_data <- train_data[complete_rows, ]
@@ -328,10 +323,10 @@ ml_fit <- Process$new(
       
       training_set <- base::as.data.frame(train_data)
     }
-
+    
     y <- training_set[[target_column]]
     is_classification <- !is.null(model$classification) && isTRUE(model$classification)
-
+    
     if (is_classification) {
       if (!is.factor(y)) {
         message("Classification is carried out...")
@@ -350,12 +345,12 @@ ml_fit <- Process$new(
       }
     }
     
-
+    
     
     ##############################
     
     predictor_names <- identify_predictors(training_set)
-
+    
     
     if (length(predictor_names) == 0) {
       stop("No valid predictors detected. Please check.")
@@ -363,7 +358,7 @@ ml_fit <- Process$new(
     message("Automatically recognized predictors: ", paste(predictor_names, collapse = ", "))
     
     x <- as.data.frame(lapply(training_set[, predictor_names, drop = FALSE], as.numeric))
-
+    
     if (ncol(x) == 0) {
       stop("No predictors detected.")
     }
@@ -438,8 +433,8 @@ ml_fit <- Process$new(
 #' @return
 #' A raster-cube object containing the predicted values in a new "prediction" band.
 #'
-ml_predict1 <- Process$new(
-  id = "ml_predict1",
+ml_predict <- Process$new(
+  id = "ml_predict",
   description = "Applies a machine learning model to a data cube and returns the predicted values.",
   categories = as.array("machine-learning", "prediction"),
   summary = "Predicts the aoi (area of interest) with the model",
@@ -460,7 +455,7 @@ ml_predict1 <- Process$new(
   returns = eo_datacube,
   operation = function(cube, model, job) {
     ################################################################################################
-
+    
     is_torch_model <- function(model) {
       inherits(model, "nn_module") ||
         "nn_module" %in% class(model) ||
@@ -589,6 +584,7 @@ ml_predict1 <- Process$new(
       
       cube_band_names <- gdalcubes::bands(data_cube)$name
       band_names_file <- file.path(tmp, "band_names.rds")
+      message(cube_band_names)
       tryCatch({
         saveRDS(cube_band_names, band_names_file)
       }, error = function(e) {
@@ -627,8 +623,8 @@ ml_predict1 <- Process$new(
         
         
         
-        library(torch)
         if (endsWith(model_file, ".pt")) {
+          library(torch)
           local_model <- torch::torch_load(model_file)
         } else {
           local_model <- readRDS(model_file)
@@ -636,6 +632,7 @@ ml_predict1 <- Process$new(
         
         if(is_torch_model(local_model)){
           message("Deep Learning model detected")
+          library(torch)
           pixel_tensor <- torch::torch_tensor(x, dtype = torch_float())
           pixel_tensor <- pixel_tensor$view(c(1, n_bands, local_nsteps))
           
@@ -650,13 +647,15 @@ ml_predict1 <- Process$new(
           message("Classic machine learning detected")
           wide_vec <- as.vector(x)
           wide_mat <- matrix(wide_vec, nrow = 1)
-          
           wide_names <- unlist(lapply(seq_len(local_nsteps), function(i) {
             paste0(local_bands, "_T", i)
           }))
-          if (ncol(wide_mat) != length(wide_names)) {
-            stop("Mismatch: number of columns is ", ncol(wide_mat), " but expected ", length(wide_names))
+          message("Wide names: ", paste(wide_names, collapse = ", "))
+          
+          if (length(wide_vec) != length(wide_names)) {
+            stop("Mismatch: vector length is ", length(wide_vec), " but expected ", length(wide_names))
           }
+          
           colnames(wide_mat) <- wide_names
           
           pixel_df <- as.data.frame(wide_mat)
@@ -665,6 +664,8 @@ ml_predict1 <- Process$new(
           
           pred_value <- as.numeric(pred)
           result_matrix <- matrix(rep(pred_value, local_nsteps), nrow = 1)
+          
+
           
           return(result_matrix)
         }
@@ -715,7 +716,7 @@ ml_predict1 <- Process$new(
       stop("The transferred model is not an ONNX model.")
     }
     
-  
+    
     mlm_single_onnx <- function(data_cube, model) {
       #ensure_python_env(required_modules = c("numpy", "onnxruntime", "torch"))
       message("Preparing ONNX prediction (single time step) using apply_pixel()...")
@@ -748,7 +749,6 @@ ml_predict1 <- Process$new(
       message("Now go to the predict_pixel_fun (ONNX)")
       
       predict_pixel_fun <- function(x) {
-        message("predict_pixel_fun (ONNX) gestartet")
         local_tmp <- Sys.getenv("TMPDIRPATH")
         nsteps <- as.numeric(Sys.getenv("NSTEPS"))
         model_file <- Sys.getenv("MODEL_FILE")
@@ -812,7 +812,6 @@ ml_predict1 <- Process$new(
     }
     
     mlm_multi_onnx <- function(data_cube, model) {
-      #ensure_python_env(required_modules = c("numpy", "onnxruntime", "torch"))
       message("Preparing ONNX prediction (multiple time steps) using apply_time()...")
       tmp <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
       
@@ -1030,146 +1029,113 @@ ml_predict1 <- Process$new(
 #'
 #' @examples
 #' # Classification with radial kernel
-#' params <- mlm_svm_process(kernel = "radial", C = 1, sigma = 0.1, classification = TRUE)
+#' params <- mlm_class_svm(kernel = "radial", C = 1, sigma = 0.1)
 #'
 #' # Regression with polynomial kernel
-#' params <- mlm_svm_process(kernel = "polynomial", C = 0.5, degree = 4, gamma = 0.01, coef0 = 1, classification = FALSE)
+#' params <- mlm_regr_svm_(kernel = "polynomial", C = 0.5, degree = 4, gamma = 0.01, coef0 = 1)
 #'
 
-mlm_svm_process <- Process$new(
-  id = "mlm_svm",
-  description = "Model case for support vector machines.",
+#### help-function
+mlm_svm_envelope <- function(kernel,
+                             C,
+                             sigma = NULL,
+                             gamma = NULL,
+                             degree = 3,
+                             coef0 = 0,
+                             random_state = NULL,
+                             classification) {
+  
+  if (kernel == "radial") {
+    tuneGrid <- expand.grid(C = C, sigma = sigma)
+    method <- "svmRadial"
+  } else if (kernel == "linear") {
+    tuneGrid <- expand.grid(C = C)
+    method <- "svmLinear"
+  } else if (kernel == "polynomial") {
+    tuneGrid <- expand.grid(C = C, degree = degree, scale = gamma, coef0 = coef0)
+    method <- "svmPoly"
+  } else {
+    stop("Unsupported kernel type.")
+  }
+  
+  return(list(
+    method = method,
+    tuneGrid = tuneGrid,
+    trControl = caret::trainControl(method = "cv", number = 5),
+    seed = random_state,
+    classification = classification
+  ))
+}
+
+
+mlm_class_svm <- Process$new(
+  id = "mlm_class_svm",
+  description = "Support Vector Machine for classification.",
   categories = c("machine-learning"),
-  summary = "Support Vector Machine for classification or regression",
-  
+  summary = "Support Vector Machine for classification with radial, linear, or polynomial kernel.",
   parameters = list(
-    Parameter$new(
-      name = "kernel",
-      description = "Kernel type ('radial', 'linear', 'polynomial')",
-      schema = list(type = "string")
-    ),
-    Parameter$new(
-      name = "C",
-      description = "Regularization parameter",
-      schema = list(type = "number")
-    ),
-    Parameter$new(
-      name = "sigma",
-      description = "Kernel coefficient for radial basis function",
-      schema = list(type = "number"),
-      optional = TRUE
-    ),
-    Parameter$new(
-      name = "gamma",
-      description = "Kernel coefficient for polynomial kernel",
-      schema = list(type = "number"),
-      optional = TRUE
-    ),
-    Parameter$new(
-      name = "degree",
-      description = "Degree for polynomial kernel",
-      schema = list(type = "integer"),
-      optional = TRUE
-    ),
-    Parameter$new(
-      name = "coef0",
-      description = "Independent term in polynomial kernel",
-      schema = list(type = "number"),
-      optional = TRUE
-    ),
-    Parameter$new(
-      name = "random_state",
-      description = "Random seed for reproducibility",
-      schema = list(type = "integer"),
-      optional = TRUE
-    ),
-    Parameter$new(
-      name = "classification",
-      description = "TRUE for classification; FALSE for regression",
-      schema = list(type = "boolean")
-    )
+    Parameter$new("kernel", "Kernel type ('radial', 'linear', 'polynomial')", list(type = "string")),
+    Parameter$new("C", "Regularization parameter", list(type = "number")),
+    Parameter$new("sigma", "Kernel coefficient for radial basis function", list(type = "number"), optional = TRUE),
+    Parameter$new("gamma", "Kernel coefficient for polynomial kernel", list(type = "number"), optional = TRUE),
+    Parameter$new("degree", "Degree for polynomial kernel", list(type = "integer"), optional = TRUE),
+    Parameter$new("coef0", "Independent term in polynomial kernel", list(type = "number"), optional = TRUE),
+    Parameter$new("random_state", "Random seed for reproducibility", list(type = "integer"), optional = TRUE)
   ),
-  
   returns = list(
-    description = "Model parameters as a list for the SVM model",
-    schema = list(
-      type = "object",
-      subtype = "mlm-model"
-    )
+    description = "Model parameters for SVM classification",
+    schema = list(type = "object", subtype = "mlm-model")
   ),
-  
-  operation = function(kernel,
-                       C,
-                       sigma = NULL,
-                       gamma = NULL,
-                       degree = 3,
-                       coef0 = 0,
-                       random_state = NULL,
-                       classification,
-                       job) {
-    message("SVM envelope is created")
-    
-    mlm_class_svm <- function(kernel, C, sigma, gamma, degree, coef0, random_state) {
-      if (kernel == "radial") {
-        tuneGrid <- expand.grid(C = C, sigma = sigma)
-        method <- "svmRadial"
-      } else if (kernel == "linear") {
-        tuneGrid <- expand.grid(C = C)
-        method <- "svmLinear"
-      } else if (kernel == "polynomial") {
-        tuneGrid <- expand.grid(C = C, degree = degree, scale = gamma, coef0 = coef0)
-        method <- "svmPoly"
-      } else {
-        stop("Unsupported kernel type.")
-      }
-      
-      return(list(
-        method = method,
-        tuneGrid = tuneGrid,
-        trControl = caret::trainControl(
-          method = "cv",
-          number = 5
-        ),
-        seed = random_state,
-        classification = TRUE
-      ))
-    }
-    
-    mlm_regr_svm <- function(kernel, C, sigma, gamma, degree, coef0, random_state) {
-      if (kernel == "radial") {
-        tuneGrid <- expand.grid(C = C, sigma = sigma)
-        method <- "svmRadial"
-      } else if (kernel == "linear") {
-        tuneGrid <- expand.grid(C = C)
-        method <- "svmLinear"
-      } else if (kernel == "polynomial") {
-        tuneGrid <- expand.grid(C = C, degree = degree, scale = gamma, coef0 = coef0)
-        method <- "svmPoly"
-      } else {
-        stop("Unsupported kernel type.")
-      }
-      
-      return(list(
-        method = method,
-        tuneGrid = tuneGrid,
-        trControl = caret::trainControl(
-          method = "cv",
-          number = 5
-        ),
-        seed = random_state, 
-        classification = FALSE
-      ))
-    }
-    
-    if (classification) {
-      message("SVM envelope successfully created (classification)")
-      return(mlm_class_svm(kernel, C, sigma, gamma, degree, coef0, random_state))
-    } else {
-      message("SVM envelope successfully created (regression)")
-      return(mlm_regr_svm(kernel, C, sigma, gamma, degree, coef0, random_state))
-    }
+  operation = function(kernel, C, sigma = NULL, gamma = NULL, degree = 3,
+                       coef0 = 0, random_state = NULL, job) {
+    message("Creating SVM classification model.")
+    mlm_svm_envelope(
+      kernel = kernel,
+      C = C,
+      sigma = sigma,
+      gamma = gamma,
+      degree = degree,
+      coef0 = coef0,
+      random_state = random_state,
+      classification = TRUE
+    )
   }
 )
+
+mlm_regr_svm <- Process$new(
+  id = "mlm_regr_svm",
+  description = "Support Vector Machine for regression.",
+  categories = c("machine-learning"),
+  summary = "Support Vector Machine for regression with radial, linear, or polynomial kernel.",
+  parameters = list(
+    Parameter$new("kernel", "Kernel type ('radial', 'linear', 'polynomial')", list(type = "string")),
+    Parameter$new("C", "Regularization parameter", list(type = "number")),
+    Parameter$new("sigma", "Kernel coefficient for radial basis function", list(type = "number"), optional = TRUE),
+    Parameter$new("gamma", "Kernel coefficient for polynomial kernel", list(type = "number"), optional = TRUE),
+    Parameter$new("degree", "Degree for polynomial kernel", list(type = "integer"), optional = TRUE),
+    Parameter$new("coef0", "Independent term in polynomial kernel", list(type = "number"), optional = TRUE),
+    Parameter$new("random_state", "Random seed for reproducibility", list(type = "integer"), optional = TRUE)
+  ),
+  returns = list(
+    description = "Model parameters for SVM regression",
+    schema = list(type = "object", subtype = "mlm-model")
+  ),
+  operation = function(kernel, C, sigma = NULL, gamma = NULL, degree = 3,
+                       coef0 = 0, random_state = NULL, job) {
+    message("Creating SVM regression model.")
+    mlm_svm_envelope(
+      kernel = kernel,
+      C = C,
+      sigma = sigma,
+      gamma = gamma,
+      degree = degree,
+      coef0 = coef0,
+      random_state = random_state,
+      classification = FALSE
+    )
+  }
+)
+
 
 ########################################################
 #' Random forest for classification or regression
@@ -1197,120 +1163,114 @@ mlm_svm_process <- Process$new(
 #'
 #' @examples
 #' # Classification with 100 trees, sqrt(max_features)
-#' params <- mlm_random_forest(num_trees = 100,
+#' params <- mlm_class_random_forest(num_trees = 100,
 #'                             min_samples_split = 2,
 #'                             min_samples_leaf = 1,
 #'                             max_features = "sqrt",
 #'                             classification = TRUE)
 #'
 #' # Regression with 200 trees, 5 features per split
-#' params <- mlm_random_forest(num_trees = 200,
+#' params <- mlm_regr_random_forest(num_trees = 200,
 #'                             min_samples_split = 5,
 #'                             min_samples_leaf = 2,
 #'                             max_features = "5",
 #'                             random_state = 42,
 #'                             classification = FALSE)
 #'
-mlm_random_forest <- Process$new(
-  id = "mlm_random_forest",
-  description = "Model case for the random forest .",
+
+### help function ###
+mlm_random_forest_envelope <- function(num_trees,
+                                       min_samples_split,
+                                       min_samples_leaf,
+                                       max_features,
+                                       random_state = NULL,
+                                       classification) {
+  
+  mtry_value <- if (max_features == "sqrt") NA else as.numeric(max_features)
+  
+  model_params <- list(
+    method = "rf",
+    tuneGrid = expand.grid(mtry = mtry_value),
+    trControl = caret::trainControl(method = "cv", number = 5),
+    ntree = num_trees,
+    seed = random_state,
+    min_samples_split = min_samples_split,
+    min_samples_leaf = min_samples_leaf,
+    classification = classification
+  )
+  
+  return(model_params)
+}
+### Process
+mlm_class_random_forest <- Process$new(
+  id = "mlm_class_random_forest",
+  description = "Random forest for classification.",
   categories = c("machine-learning"),
-  summary = "Random forest for classification or regression",
-  
+  summary = "Random forest for classification with specified parameters.",
   parameters = list(
-    Parameter$new(
-      name = "num_trees",
-      description = "number of trees",
-      schema = list(type = "integer")
-    ),
-    Parameter$new(
-      name = "min_samples_split",
-      description = "Minimum number of observations to divide a node",
-      schema = list(type = "integer")
-    ),
-    Parameter$new(
-      name = "min_samples_leaf",
-      description = "Minimum number of observations that must be present in a sheet",
-      schema = list(type = "integer")
-    ),
-    Parameter$new(
-      name = "max_features",
-      description = "Number of characteristics to be considered for the best split (e.g. 'sqrt' or a number)",
-      schema = list(type = "string")
-    ),
-    Parameter$new(
-      name = "random_state",
-      description = "Random seed for reproducibility",
-      schema = list(type = "integer"),
-      optional = TRUE
-    ),
-    Parameter$new(
-      name = "classification",
-      description = "TRUE, falls Klassifikation; FALSE für Regression",
-      schema = list(type = "boolean")
-    )
+    Parameter$new("num_trees", "Number of trees in the forest.", list(type = "integer")),
+    Parameter$new("min_samples_split", "Minimum samples required to split an internal node.", list(type = "integer")),
+    Parameter$new("min_samples_leaf", "Minimum samples required to be at a leaf node.", list(type = "integer")),
+    Parameter$new("max_features", "Features to consider when looking for best split ('sqrt' or a number).", list(type = "string")),
+    Parameter$new("random_state", "Random seed for reproducibility.", list(type = "integer"), optional = TRUE)
   ),
-  
   returns = list(
-    description = "Model parameters as a list for the Random Forest model",
-    schema = list(
-      type = "object",
-      subtype = "mlm-model"
-    )
+    description = "Model parameters for Random Forest classification.",
+    schema = list(type = "object", subtype = "mlm-model")
   ),
-  
   operation = function(num_trees,
                        min_samples_split,
                        min_samples_leaf,
                        max_features,
                        random_state = NULL,
-                       classification,
                        job) {
-    message("Cover for the random forest is created")
-    
-    mlm_class_random_forest <- function(num_trees, min_samples_split, min_samples_leaf, max_features, random_state) {
-      model_params <- list(
-        method = "rf",
-        tuneGrid = expand.grid(mtry = if (max_features == "sqrt") NA else max_features),
-        trControl = caret::trainControl(
-          method = "cv",
-          number = 5
-        ),
-        ntree = num_trees,
-        seed = random_state,
-        min_samples_split = min_samples_split,
-        min_samples_leaf = min_samples_leaf, 
-        classification = TRUE
-      )
-      return(model_params)
-    }
-    
-    mlm_regr_random_forest <- function(num_trees, min_samples_split, min_samples_leaf, max_features, random_state) {
-      model_params <- list(
-        method = "rf",
-        tuneGrid = expand.grid(mtry = if (max_features == "sqrt") NA else max_features),
-        trControl = caret::trainControl(
-          method = "cv",
-          number = 5
-        ),
-        ntree = num_trees,
-        seed = random_state,
-        min_samples_split = min_samples_split,
-        min_samples_leaf = min_samples_leaf, 
-        classification = FALSE
-      )
-      return(model_params)
-    }
-    
-    if (classification) {
-      message("RF envelope successfully created (classification)")
-      return(mlm_class_random_forest(num_trees, min_samples_split, min_samples_leaf, max_features, random_state))
-    } else {
-      message("RF envelope successfully created (regression)")
-      return(mlm_regr_random_forest(num_trees, min_samples_split, min_samples_leaf, max_features, random_state))
-    }
+    message("Creating Random Forest classification model.")
+    mlm_random_forest_envelope(
+      num_trees = num_trees,
+      min_samples_split = min_samples_split,
+      min_samples_leaf = min_samples_leaf,
+      max_features = max_features,
+      random_state = random_state,
+      classification = TRUE
+    )
   }
 )
+
+mlm_regr_random_forest <- Process$new(
+  id = "mlm_regr_random_forest",
+  description = "Random forest for regression.",
+  categories = c("machine-learning"),
+  summary = "Random forest for regression with specified parameters.",
+  parameters = list(
+    Parameter$new("num_trees", "Number of trees in the forest.", list(type = "integer")),
+    Parameter$new("min_samples_split", "Minimum samples required to split an internal node.", list(type = "integer")),
+    Parameter$new("min_samples_leaf", "Minimum samples required to be at a leaf node.", list(type = "integer")),
+    Parameter$new("max_features", "Features to consider when looking for best split ('sqrt' or a number).", list(type = "string")),
+    Parameter$new("random_state", "Random seed for reproducibility.", list(type = "integer"), optional = TRUE)
+  ),
+  returns = list(
+    description = "Model parameters for Random Forest regression.",
+    schema = list(type = "object", subtype = "mlm-model")
+  ),
+  operation = function(num_trees,
+                       min_samples_split,
+                       min_samples_leaf,
+                       max_features,
+                       random_state = NULL,
+                       job) {
+    message("Creating Random Forest regression model.")
+    mlm_random_forest_envelope(
+      num_trees = num_trees,
+      min_samples_split = min_samples_split,
+      min_samples_leaf = min_samples_leaf,
+      max_features = max_features,
+      random_state = random_state,
+      classification = FALSE
+    )
+  }
+)
+
+
 ########################################################
 #' Extreme Gradient Boosting for classification or regression
 #'
@@ -1337,7 +1297,7 @@ mlm_random_forest <- Process$new(
 #'
 #' @examples
 #' # Classification example
-#' params <- mlm_xgboost_process(
+#' params <- mlm_class_xgboost(
 #'   learning_rate    = 0.1,
 #'   max_depth        = 6,
 #'   min_child_weight = 1,
@@ -1349,7 +1309,7 @@ mlm_random_forest <- Process$new(
 #' )
 #'
 #' # Regression example
-#' params <- mlm_xgboost_process(
+#' params <- mlm_regr_xgboost(
 #'   learning_rate    = 0.05,
 #'   max_depth        = 4,
 #'   min_child_weight = 3,
@@ -1360,69 +1320,59 @@ mlm_random_forest <- Process$new(
 #'   random_state     = 42,
 #'   classification   = FALSE
 #' )
-mlm_xgboost_process <- Process$new(
-  id = "mlm_xgboost",
-  description = "Model case for XGBoost.",
+#' 
+
+### help function ###
+mlm_xgboost_envelope <- function(learning_rate,
+                                 max_depth,
+                                 min_child_weight,
+                                 subsample,
+                                 colsample_bytree,
+                                 gamma,
+                                 nrounds,
+                                 random_state = NULL,
+                                 classification) {
+  list(
+    method = "xgbTree",
+    tuneGrid = expand.grid(
+      nrounds = nrounds,
+      max_depth = max_depth,
+      eta = learning_rate,
+      gamma = gamma,
+      colsample_bytree = colsample_bytree,
+      min_child_weight = min_child_weight,
+      subsample = subsample
+    ),
+    trControl = caret::trainControl(
+      method = "cv",
+      number = 5,
+      search = "grid"
+    ),
+    random_state = random_state,
+    classification = classification
+  )
+}
+#### Process
+
+mlm_class_xgboost <- Process$new(
+  id = "mlm_class_xgboost",
+  description = "XGBoost for classification.",
   categories = c("machine-learning"),
-  summary = "Extreme Gradient Boosting for classification or regression",
-  
+  summary = "Extreme Gradient Boosting for classification with specified hyperparameters.",
   parameters = list(
-    Parameter$new(
-      name = "learning_rate",
-      description = "Step size shrinkage used in update to prevents overfitting",
-      schema = list(type = "number")
-    ),
-    Parameter$new(
-      name = "max_depth",
-      description = "Maximum depth of a tree",
-      schema = list(type = "integer")
-    ),
-    Parameter$new(
-      name = "min_child_weight",
-      description = "Minimum sum of instance weight (hessian) needed in a child",
-      schema = list(type = "number")
-    ),
-    Parameter$new(
-      name = "subsample",
-      description = "Subsample ratio of the training instances",
-      schema = list(type = "number")
-    ),
-    Parameter$new(
-      name = "colsample_bytree",
-      description = "Subsample ratio of columns when constructing each tree",
-      schema = list(type = "number")
-    ),
-    Parameter$new(
-      name = "gamma",
-      description = "Minimum loss reduction required to make a further partition",
-      schema = list(type = "number")
-    ),
-    Parameter$new(
-      name = "nrounds",
-      description = "Number of boosting iterations",
-      schema = list(type = "integer")
-    ),
-    Parameter$new(
-      name = "random_state",
-      description = "Random seed for reproducibility",
-      schema = list(type = "integer"),
-      optional = TRUE
-    ),
-    Parameter$new(
-      name = "classification",
-      description = "TRUE for classification; FALSE for regression",
-      schema = list(type = "boolean")
-    )
+    Parameter$new("learning_rate", "Step size shrinkage (eta) to prevent overfitting.", list(type = "number")),
+    Parameter$new("max_depth", "Maximum depth of each tree.", list(type = "integer")),
+    Parameter$new("min_child_weight", "Minimum sum of instance weight needed in a child.", list(type = "number")),
+    Parameter$new("subsample", "Subsample ratio of training instances.", list(type = "number")),
+    Parameter$new("colsample_bytree", "Subsample ratio of columns when constructing each tree.", list(type = "number")),
+    Parameter$new("gamma", "Minimum loss reduction required to make a further partition.", list(type = "number")),
+    Parameter$new("nrounds", "Number of boosting iterations.", list(type = "integer")),
+    Parameter$new("random_state", "Random seed for reproducibility.", list(type = "integer"), optional = TRUE)
   ),
-  
   returns = list(
-    description = "Model parameters as a list for the XGBoost model",
-    schema = list(
-      type = "object",
-      subtype = "mlm-model"
-    )
+    description = "Model parameters for XGBoost classification.",
+    schema = list(type = "object", subtype = "mlm-model")
   ),
-  
   operation = function(learning_rate,
                        max_depth,
                        min_child_weight,
@@ -1431,67 +1381,65 @@ mlm_xgboost_process <- Process$new(
                        gamma,
                        nrounds,
                        random_state = NULL,
-                       classification,
                        job) {
-    message("XGBoost envelope is created")
-    
-    mlm_class_xgboost <- function(learning_rate, max_depth, min_child_weight,
-                                  subsample, colsample_bytree, gamma, nrounds, random_state) {
-      return(list(
-        method = "xgbTree",
-        tuneGrid = expand.grid(
-          nrounds = nrounds,
-          max_depth = max_depth,
-          eta = learning_rate,
-          gamma = gamma,
-          colsample_bytree = colsample_bytree,
-          min_child_weight = min_child_weight,
-          subsample = subsample
-        ),
-        trControl = caret::trainControl(
-          method = "cv",
-          number = 5,
-          search = "grid"
-        ),
-        random_state = random_state, 
-        classification = TRUE
-      ))
-    }
-    
-    mlm_regr_xgboost <- function(learning_rate, max_depth, min_child_weight,
-                                 subsample, colsample_bytree, gamma, nrounds, random_state) {
-      return(list(
-        method = "xgbTree",
-        tuneGrid = expand.grid(
-          nrounds = nrounds,
-          max_depth = max_depth,
-          eta = learning_rate,
-          gamma = gamma,
-          colsample_bytree = colsample_bytree,
-          min_child_weight = min_child_weight,
-          subsample = subsample
-        ),
-        trControl = caret::trainControl(
-          method = "cv",
-          number = 5,
-          search = "grid"
-        ),
-        random_state = random_state, 
-        classification = FALSE
-      ))
-    }
-    
-    if (classification) {
-      message("XGBoost envelope successfully created (classification)")
-      return(mlm_class_xgboost(learning_rate, max_depth, min_child_weight,
-                               subsample, colsample_bytree, gamma, nrounds, random_state))
-    } else {
-      message("XGBoost envelope successfully created (regression)")
-      return(mlm_regr_xgboost(learning_rate, max_depth, min_child_weight,
-                              subsample, colsample_bytree, gamma, nrounds, random_state))
-    }
+    message("Creating XGBoost classification model.")
+    mlm_xgboost_envelope(
+      learning_rate = learning_rate,
+      max_depth = max_depth,
+      min_child_weight = min_child_weight,
+      subsample = subsample,
+      colsample_bytree = colsample_bytree,
+      gamma = gamma,
+      nrounds = nrounds,
+      random_state = random_state,
+      classification = TRUE
+    )
   }
 )
+
+mlm_regr_xgboost <- Process$new(
+  id = "mlm_regr_xgboost",
+  description = "XGBoost for regression.",
+  categories = c("machine-learning"),
+  summary = "Extreme Gradient Boosting for regression with specified hyperparameters.",
+  parameters = list(
+    Parameter$new("learning_rate", "Step size shrinkage (eta) to prevent overfitting.", list(type = "number")),
+    Parameter$new("max_depth", "Maximum depth of each tree.", list(type = "integer")),
+    Parameter$new("min_child_weight", "Minimum sum of instance weight needed in a child.", list(type = "number")),
+    Parameter$new("subsample", "Subsample ratio of training instances.", list(type = "number")),
+    Parameter$new("colsample_bytree", "Subsample ratio of columns when constructing each tree.", list(type = "number")),
+    Parameter$new("gamma", "Minimum loss reduction required to make a further partition.", list(type = "number")),
+    Parameter$new("nrounds", "Number of boosting iterations.", list(type = "integer")),
+    Parameter$new("random_state", "Random seed for reproducibility.", list(type = "integer"), optional = TRUE)
+  ),
+  returns = list(
+    description = "Model parameters for XGBoost regression.",
+    schema = list(type = "object", subtype = "mlm-model")
+  ),
+  operation = function(learning_rate,
+                       max_depth,
+                       min_child_weight,
+                       subsample,
+                       colsample_bytree,
+                       gamma,
+                       nrounds,
+                       random_state = NULL,
+                       job) {
+    message("Creating XGBoost regression model.")
+    mlm_xgboost_envelope(
+      learning_rate = learning_rate,
+      max_depth = max_depth,
+      min_child_weight = min_child_weight,
+      subsample = subsample,
+      colsample_bytree = colsample_bytree,
+      gamma = gamma,
+      nrounds = nrounds,
+      random_state = random_state,
+      classification = FALSE
+    )
+  }
+)
+
 
 ####################################################
 #' TempCNN for classification or regression
@@ -1828,8 +1776,8 @@ load_ml_model <- Process$new(
 #'   \item{rds}{Path to the saved RDS (or raw RDS) file}
 #'   \item{json}{Path to the saved MLM-STAC JSON metadata file}
 #' }
-save_ml_model1 <- Process$new(
-  id = "save_ml_model1",
+save_ml_model <- Process$new(
+  id = "save_ml_model",
   description = "Saves a trained machine learning model in ONNX, JSON (MLM-STAC) and RDS formats. For Torch models, a TorchScript version is also produced.",
   categories = as.array("cubes", "Machine Learning"),
   summary = "Save trained ML model as ONNX, JSON, and RDS",
@@ -1862,12 +1810,11 @@ save_ml_model1 <- Process$new(
     # ensure_python_env(required_modules = c("torch", "onnxruntime", "numpy", "joblib", "scikit-learn", "xgboost", "onnxmltools", "skl2onnx"))
     message("Save model is started...")
     
-    # Richte shared_dir *hier* korrekt ein – NICHT: shared_dir <- shared_dir
     shared_dir <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
     message("shared_dir gesetzt: ", shared_dir)
     
     base_name <- name
-
+    
     find_python_bin <- function() {
       bin_env <- Sys.getenv("PYTHON_BIN", Sys.getenv("RETICULATE_PYTHON", ""))
       if (nzchar(bin_env) && file.exists(bin_env)) {
@@ -2010,7 +1957,7 @@ return(onnx_path)
       sklearn_svm <- import("sklearn.svm")
       xgboost <- import("xgboost")
       
-
+      
       if (!("train" %in% class(model))) {
         stop("Please pass a caret train object")
       }
@@ -2019,7 +1966,7 @@ return(onnx_path)
         stop("The caret model does not contain any trainingData. Please save the model with trainingData")
       }
       train_data <- model$trainingData
-
+      
       if (!(".outcome" %in% colnames(train_data))) {
         stop("The trainingData does not contain an '.outcome' column")
       }
@@ -2101,7 +2048,7 @@ return(onnx_path)
         onnx          <- import("onnx")
         joblib        <- import("joblib")
         FloatTensorType <- import("skl2onnx.common.data_types")$FloatTensorType
-
+        
         n_features <- NULL
         
         if (model_type == "xgbTree") {
@@ -2132,7 +2079,7 @@ return(onnx_path)
         }
         
         initial_type <- list(list("float_input", FloatTensorType(list(NULL, as.integer(n_features)))))
-
+        
         if (model_type == "xgbTree") {
           onnx_model <- onnxmltools$convert_xgboost(model_py, initial_types = initial_type)
         } else {
@@ -2406,7 +2353,7 @@ return(onnx_path)
         model, 
         file.path(shared_dir, paste0(base_name, ".pt"))
       )
-
+      
       result$onnx <- convert_torch_to_onnx_from_pt(
         script_pt   = pt_meta$pt_path,
         input_chan  = pt_meta$input_chan,
