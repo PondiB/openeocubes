@@ -68,7 +68,7 @@ RUN R -e "install.packages('devtools')"
 # Install gdalcubes package
 RUN R -e "install.packages('gdalcubes')"
 
-RUN Rscript -e "install.packages(c('plumber', 'useful', 'ids', 'R6', 'sf', 'rstac','bfast','geojsonsf'))"
+RUN Rscript -e "install.packages(c('plumber', 'useful', 'ids', 'R6','s2', 'sf', 'rstac','bfast','geojsonsf'))"
 
 # create directories
 RUN mkdir -p /opt/dockerfiles/ && mkdir -p /var/openeo/workspace/ && mkdir -p /var/openeo/workspace/data/
