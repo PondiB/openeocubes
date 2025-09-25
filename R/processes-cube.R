@@ -265,7 +265,9 @@ aggregate_spatial <- Process$new(
       message("fid set")
       return(sf_obj)
     }
+    
     message("Training data is loaded")
+
     
     if (is.character(geometries)) {
       tryCatch({
@@ -281,13 +283,20 @@ aggregate_spatial <- Process$new(
         })
       })
     }
+    srs <- gdalcubes::srs(data)
+    if (is.list(geometries) && !inherits(geometries, "sf")) {
+      # serialize list to JSON string, then parse with sf
+      geometries <- jsonlite::toJSON(geometries, auto_unbox = TRUE)
+      geometries <- geojsonsf::geojson_sf(geometries)
 
+      
+    }
+  
+    
     # Ensure geometries is an sf object
     if (!inherits(geometries, "sf")) {
       stop("Geometries must be either a GeoJSON string or an sf object")
     }
-    print(sf::st_crs(geometries))
-    
     # Get the reducer function if specified
     reducer_type <- if (!is.null(reducer)) {
       switch(
@@ -305,31 +314,38 @@ aggregate_spatial <- Process$new(
     } else {
       NULL
     }
+    
+    message('geomeotreies adding fid to it')
     geometries <- add_fid_if_missing(geometries)
     geometries$fid <- as.integer(geometries$fid)
-    message(colnames(geometries))
-    message("✅ Checking type of 'data' before calling gdalcubes::extent()")
-    print(class(data))
-    str(data)
+    library(gdalcubes)
+
     
-    dims <- gdalcubes::dimensions(data)
-    cube_extent <- list(
-      left = dims$x$low,
-      right = dims$x$high,
-      bottom = dims$y$low,
-      top = dims$y$high
-    )
+    cube_info <- tryCatch({
+      cube_crs <- gdalcubes::srs(data)
+
+      dims <- gdalcubes::dimensions(data)
+
+      cube_extent <- list(
+        left = dims$x$low,
+        right = dims$x$high,
+        bottom = dims$y$low,
+        top = dims$y$high
+      )
+      
+      list(crs = cube_crs, extent = cube_extent)
+      
+    }, error = function(e) {
+      message("Error accessing CRS or dimensions of the DataCube: ", e$message)
+      stop("Error accessing CRS or dimensions of the DataCube: ", e$message)
+    })
+    cube_crs <- cube_info$crs
+    cube_extent <- cube_info$extent
     
-    message(glue::glue(
-      "✅ Extracted cube extent via dimensions():\n",
-      "Left: {cube_extent$left}, Right: {cube_extent$right}, ",
-      "Bottom: {cube_extent$bottom}, Top: {cube_extent$top}"
-    ))
     
     
+
     cube_crs <- gdalcubes::srs(data)  
-    message(cube_crs)
-    # 2. Geometrien in dieses CRS reprojizieren
     geometries <- sf::st_transform(geometries, cube_crs)
     
     
@@ -341,17 +357,12 @@ aggregate_spatial <- Process$new(
     ), crs = sf::st_crs(geometries)) %>% 
       sf::st_as_sfc()
     
-    message(glue::glue("✅ Cube bbox geometry: {sf::st_as_text(cube_bbox)}"))
     within_idx <- lengths(
       sf::st_within(geometries, cube_bbox, sparse = FALSE)
     ) > 0
     
     geometries_in_bbox <- geometries[within_idx, ]
-    message(
-      "There remain ",
-      nrow(geometries_in_bbox),
-      " training features that are completely contained in the BBOX."
-    )
+
     
     if (nrow(geometries_in_bbox) == 0) {
       stop("No training geometries are completely in the data cube!")

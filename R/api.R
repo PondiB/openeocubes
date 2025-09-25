@@ -349,4 +349,7 @@ addEndpoint = function() {
   Session$assignProcess(mlm_class_xgboost)
   Session$assignProcess(mlm_regr_xgboost)
   Session$assignProcess(load_ml_model)
+  Session$assignProcess(mlm_class_mlp)
+  Session$assignProcess(mlm_class_lighttae)
+  Session$assignProcess(mlm_class_stgf)
 }
