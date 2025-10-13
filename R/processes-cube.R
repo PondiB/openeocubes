@@ -358,7 +358,6 @@ aggregate_spatial <- Process$new(
       list(filtered = kept, n_in = nrow(geoms), n_kept = nrow(kept))
     }
     
-    # ---- normalize geometries input ----
     message("Training data is loaded")
     if (is.character(geometries)) {
       tryCatch({
@@ -381,14 +380,11 @@ aggregate_spatial <- Process$new(
     message("empty: ", sum(sf::st_is_empty(geometries)),
             " | invalid: ", sum(!sf::st_is_valid(geometries)))
     
-    # --- STRIKTER GUARD: ohne Quell-CRS abbrechen
     geometries <- ensure_crs(geometries, "geometries (input)")
     
-    # Roh-Logs (vor jeglicher Transformation)
     log_crs("input", sf::st_crs(geometries))
     log_bbox("input", geometries)
     
-    # ---- reducer mapping (kein Default!) ----
     reducer_type <- if (!is.null(reducer)) {
       switch(
         reducer,
@@ -406,12 +402,10 @@ aggregate_spatial <- Process$new(
       NULL
     }
     
-    # ---- fid ----
     message("geomeotreies adding fid to it")
     geometries <- add_fid_if_missing(geometries)
     geometries$fid <- as.integer(geometries$fid)
     
-    # ---- cube info ----
     cube_crs <- gdalcubes::srs(data)
     dims <- gdalcubes::dimensions(data)
     cube_extent <- list(
@@ -420,7 +414,6 @@ aggregate_spatial <- Process$new(
     )
     log_crs("cube", sf::st_crs(cube_crs))
     
-    # ---- centroid-Log (nur wenn vorhanden)
     if (nrow(geometries) > 0 && !all(sf::st_is_empty(geometries))) {
       suppressWarnings({
         ct <- try(sf::st_transform(sf::st_centroid(sf::st_union(geometries)), 4326), silent = TRUE)
@@ -431,7 +424,6 @@ aggregate_spatial <- Process$new(
       })
     }
     
-    # ---- keep only geoms inside cube bbox ----
     keep <- filter_geoms_to_cube(
       geoms = geometries,
       cube_extent = cube_extent,
@@ -464,12 +456,11 @@ aggregate_spatial <- Process$new(
     
     message("Go to extraction now...")
     
-    # ---- extract ----
     vec_cube <- tryCatch({
       gdalcubes::extract_geom(
         cube        = data,
         sf          = geometries_in_bbox,
-        FUN         = reducer_type,   # bleibt ggf. NULL
+        FUN         = reducer_type,   
         reduce_time = FALSE,
         merge       = TRUE,
         drop_geom   = FALSE
