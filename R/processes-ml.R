@@ -120,7 +120,8 @@ ml_fit <- Process$new(
   operation = function(model, training_set, target, job) {
     
     ## ---------------- Helpers ----------------
-
+    
+    
     
     extract_time_series_features <- function(training_set, features_data, time_steps) {
       if (time_steps >= 1) {
@@ -172,7 +173,6 @@ ml_fit <- Process$new(
         dplyr::distinct(fid, .keep_all = TRUE)
       
       train_data_clean <- dplyr::left_join(train_data_clean, target_data, by = "fid")
-      message("Wide format done")
       train_data_clean
     }
     
@@ -181,7 +181,6 @@ ml_fit <- Process$new(
     ## ---------------- Start ----------------
     message("ml_fit is being prepared...")
     
-    # DL-Erkennung: wir gehen UNITED über create_model (wie TempCNN).
     is_dl <- !is.null(model$create_model) && is.function(model$create_model)
     
     if (is_dl) {
@@ -203,7 +202,7 @@ ml_fit <- Process$new(
       
       features_data <- grep("^B0?\\d{1,2}$", names(training_set), value = TRUE)
       if ("NDVI" %in% names(training_set)) features_data <- c(features_data, "NDVI")
-
+      
       training_data <- convert_to_wide_format(train_data = training_set, target = target)
       features <- extract_time_series_features(training_set = training_data,
                                                features_data = features_data,
@@ -231,17 +230,16 @@ ml_fit <- Process$new(
         message("torch_tensor(labels) failed: ", e$message); stop(e)
       })
       
-
-      class_count <- length(unique(labels))
-      message("Class number: ", class_count)
       
+      class_count <- length(unique(labels))
+
       # Modell durch Factory bauen (wie TempCNN)
       dl_model <- model$create_model(
         input_data_columns = features_data,
         time_steps = time_steps,
         class_count = class_count
       )
-
+      
       # Sanity Forward (callable Wrapper via ())
       try({
         dl_model$eval()
@@ -359,14 +357,33 @@ ml_fit <- Process$new(
     
     tryCatch({
       if (model$method == "rf") {
-        if (is.null(model$tuneGrid) || is.na(model$tuneGrid$mtry)) {
-          max_variables <- max(1, floor(sqrt(ncol(x))))
-          model$tuneGrid <- expand.grid(mtry = max_variables)
-          message("tuneGrid was automatically set to mtry = ", max_variables)
-        } else if (model$tuneGrid$mtry < 1 || model$tuneGrid$mtry > ncol(x)) {
-          warning("Invalid `mtry` value in tuneGrid. Set `mtry` to 1.")
-          model$tuneGrid <- expand.grid(mtry = 1)
+        if (!is.null(model$seed)) set.seed(as.integer(model$seed))
+        p <- ncol(x)
+        mm <- model$mtry_mode
+        mtry <- NULL
+        
+        if (!is.null(mm)) {
+          if (is.character(mm)) {
+            mtry <- switch(tolower(mm),
+                           "sqrt"     = max(1L, floor(sqrt(p))),
+                           "log2"     = max(1L, floor(log2(p))),
+                           "onethird" = max(1L, floor(p/3)),
+                           "all"      = p,
+                           suppressWarnings(as.integer(mm))
+            )
+          } else if (is.numeric(mm)) {
+            mtry <- as.integer(mm)
+          }
         }
+        if (is.null(mtry) || is.na(mtry) || mtry < 1L || mtry > p) {
+          mtry <- max(1L, floor(sqrt(p)))  # robuster Default
+        }
+        
+        model$tuneGrid <- expand.grid(mtry = mtry)
+        if (is.null(model$trControl)) {
+          model$trControl <- caret::trainControl(method = "cv", number = 5, sampling = "up")
+        }
+        message("Random Forest mtry = ", mtry, " (p = ", p, ")")
       } else if (model$method %in% c("svmRadial","svmLinear","svmPoly")) {
         if (is.null(model$tuneGrid)) stop("SVM models require a defined tuneGrid")
         model$preProcess <- c("center","scale")
@@ -406,7 +423,6 @@ ml_fit <- Process$new(
     return(model)
   }
 )
-
 
 
 
@@ -453,6 +469,21 @@ ml_predict <- Process$new(
         (!is.null(model$conv_layers) && !is.null(model$dense))
     }
     
+
+    sanitize_band_names <- function(nms) {
+      nms <- as.character(nms)
+      if (length(nms) == 1L) {
+        s <- gsub("X[0-9]+[\\._]", "", nms, perl = TRUE)
+        parts <- unlist(regmatches(s, gregexpr("[A-Za-z][A-Za-z0-9_]+", s, perl = TRUE)))
+        parts <- parts[nzchar(parts)]
+        return(parts)
+      } else {
+        out <- gsub("^X[0-9]+[\\._]", "", nms, perl = TRUE)
+        out <- sub("^[\\._]+", "", out, perl = TRUE)
+        return(out)
+      }
+    }
+    
     mlm_single <- function(data_cube, model) {
       message("Preparing prediction with apply_pixel using temporary directory...")
       tmp <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
@@ -472,7 +503,10 @@ ml_predict <- Process$new(
       }
       Sys.setenv(MODEL_FILE = model_file)
       
-      cube_band_names <- gdalcubes::bands(data_cube)$name
+      raw_band_names  <- gdalcubes::bands(data_cube)$name
+      cube_band_names <- sanitize_band_names(raw_band_names)
+      message("Bands: ", paste(cube_band_names, collapse = ", "))
+      
       band_names_file <- file.path(tmp, "band_names.rds")
       tryCatch({
         saveRDS(cube_band_names, band_names_file)
@@ -486,7 +520,6 @@ ml_predict <- Process$new(
       Sys.setenv(TMPDIRPATH = tmp)
       Sys.setenv(NSTEPS = nsteps)
       
-      
       predict_pixel_fun <- function(x) {
         local_tmp <- Sys.getenv("TMPDIRPATH")
         nsteps <- as.numeric(Sys.getenv("NSTEPS"))
@@ -498,14 +531,10 @@ ml_predict <- Process$new(
             (!is.null(model$conv_layers) && !is.null(model$dense))
         }
         
-        if (!is.matrix(x)) {
-          x <- matrix(x, nrow = 1)
-        }
+        if (!is.matrix(x)) x <- matrix(x, nrow = 1)
         
         local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
-        if (is.null(colnames(x))) {
-          colnames(x) <- local_bands
-        }
+        if (is.null(colnames(x))) colnames(x) <- local_bands
         
         pixel_df <- as.data.frame(x)
         
@@ -520,13 +549,10 @@ ml_predict <- Process$new(
           message("Deep Learning model detected in predict_pixel_fun")
           pixel_matrix <- as.matrix(pixel_df)
           n_channels <- length(local_bands)
-          pixel_tensor <- torch::torch_tensor(pixel_matrix, dtype = torch_float())
-          pixel_tensor <- pixel_tensor$view(c(1, n_channels, 1))
+          pixel_tensor <- torch::torch_tensor(pixel_matrix, dtype = torch_float())$view(c(1, n_channels, 1))
           message("Shape of pixel_tensor: ", paste(dim(pixel_tensor), collapse = " x "))
           local_model$eval()
-          with_no_grad({
-            preds <- local_model(pixel_tensor)
-          })
+          with_no_grad({ preds <- local_model(pixel_tensor) })
           pred_class_tensor <- torch::torch_argmax(preds, dim = 2)
           pred_class <- as.numeric(torch::as_array(pred_class_tensor))
           return(pred_class)
@@ -552,8 +578,6 @@ ml_predict <- Process$new(
       return(prediction_cube)
     }
     
-    
-    
     mlm_multi <- function(data_cube, model) {
       message("Preparing prediction with apply_time using temporary directory...")
       tmp <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
@@ -573,9 +597,11 @@ ml_predict <- Process$new(
       
       Sys.setenv(MODEL_FILE = model_file)
       
-      cube_band_names <- gdalcubes::bands(data_cube)$name
+      raw_band_names  <- gdalcubes::bands(data_cube)$name
+      cube_band_names <- sanitize_band_names(raw_band_names)
+      message("Bands santalize: ", paste(cube_band_names, collapse = ", "))
+      
       band_names_file <- file.path(tmp, "band_names.rds")
-      message(cube_band_names)
       tryCatch({
         saveRDS(cube_band_names, band_names_file)
       }, error = function(e) {
@@ -588,7 +614,6 @@ ml_predict <- Process$new(
       Sys.setenv(NSTEPS = nsteps)
       message("Number of time steps: ", nsteps)
       
-      
       predict_time_fun <- function(x) {
         local_tmp <- Sys.getenv("TMPDIRPATH")
         local_nsteps <- as.numeric(Sys.getenv("NSTEPS"))
@@ -598,7 +623,6 @@ ml_predict <- Process$new(
             "nn_module" %in% class(model) ||
             (!is.null(model$conv_layers) && !is.null(model$dense))
         }
-        
         
         if (!is.matrix(x)) {
           x <- matrix(x, nrow = length(readRDS(file.path(local_tmp, "band_names.rds"))))
@@ -612,8 +636,6 @@ ml_predict <- Process$new(
                nrow(x), " x ", ncol(x))
         }
         
-        
-        
         if (endsWith(model_file, ".pt")) {
           library(torch)
           local_model <- torch::torch_load(model_file)
@@ -621,46 +643,31 @@ ml_predict <- Process$new(
           local_model <- readRDS(model_file)
         }
         
-        if(is_torch_model(local_model)){
+        if (is_torch_model(local_model)){
           message("Deep Learning model detected")
           library(torch)
-          pixel_tensor <- torch::torch_tensor(x, dtype = torch_float())
-          pixel_tensor <- pixel_tensor$view(c(1, n_bands, local_nsteps))
-          
+          pixel_tensor <- torch::torch_tensor(x, dtype = torch_float())$view(c(1, n_bands, local_nsteps))
           local_model$eval()
-          with_no_grad({
-            preds <- local_model(pixel_tensor)
-          })
+          with_no_grad({ preds <- local_model(pixel_tensor) })
           pred_class_tensor <- torch::torch_argmax(preds, dim = 2)
           pred_class <- as.numeric(torch::as_array(pred_class_tensor))
           return(matrix(rep(pred_class, local_nsteps), nrow = 1))
-        }else{
+        } else {
           message("Classic machine learning detected")
           wide_vec <- as.vector(x)
           wide_mat <- matrix(wide_vec, nrow = 1)
-          wide_names <- unlist(lapply(seq_len(local_nsteps), function(i) {
-            paste0(local_bands, "_T", i)
-          }))
+          wide_names <- unlist(lapply(seq_len(local_nsteps), function(i) paste0(local_bands, "_T", i)))
           message("Wide names: ", paste(wide_names, collapse = ", "))
-          
           if (length(wide_vec) != length(wide_names)) {
             stop("Mismatch: vector length is ", length(wide_vec), " but expected ", length(wide_names))
           }
-          
           colnames(wide_mat) <- wide_names
-          
           pixel_df <- as.data.frame(wide_mat)
-          
           pred <- predict(local_model, newdata = pixel_df)
-          
           pred_value <- as.numeric(pred)
           result_matrix <- matrix(rep(pred_value, local_nsteps), nrow = 1)
-          
-          
-          
           return(result_matrix)
         }
-        
       }
       
       prediction_cube <- tryCatch({
@@ -678,12 +685,10 @@ ml_predict <- Process$new(
       return(prediction_cube)
     }
     
-    
-    #######onnx prediction ################
+    ####### ONNX prediction ################
     
     detected_model_type <- function(model) {
       if (endsWith(model, ".onnx")) {
-        
         onnxruntime <- reticulate::import("onnxruntime")
         session <- onnxruntime$InferenceSession(model)
         input_details <- session$get_inputs()[[1]]
@@ -707,9 +712,7 @@ ml_predict <- Process$new(
       stop("The transferred model is not an ONNX model.")
     }
     
-    
     mlm_single_onnx <- function(data_cube, model) {
-      #ensure_python_env(required_modules = c("numpy", "onnxruntime", "torch"))
       message("Preparing ONNX prediction (single time step) using apply_pixel()...")
       tmp <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
       
@@ -721,7 +724,10 @@ ml_predict <- Process$new(
       }
       Sys.setenv(MODEL_FILE = model_file)
       
-      cube_band_names <- gdalcubes::bands(data_cube)$name
+      raw_band_names  <- gdalcubes::bands(data_cube)$name
+      cube_band_names <- sanitize_band_names(raw_band_names)
+      message("Bands: ", paste(cube_band_names, collapse = ", "))
+      
       band_names_file <- file.path(tmp, "band_names.rds")
       tryCatch({
         saveRDS(cube_band_names, band_names_file)
@@ -730,7 +736,6 @@ ml_predict <- Process$new(
       })
       Sys.setenv(TMPDIRPATH = tmp)
       
-      # Die Anzahl der Zeitschritte sollte 1 sein – überprüfen:
       time_steps <- gdalcubes::dimension_values(data_cube)$t
       nsteps <- length(time_steps)
       Sys.setenv(NSTEPS = nsteps)
@@ -744,14 +749,10 @@ ml_predict <- Process$new(
         nsteps <- as.numeric(Sys.getenv("NSTEPS"))
         model_file <- Sys.getenv("MODEL_FILE")
         
-        if (!is.matrix(x)) {
-          x <- matrix(x, nrow = 1)
-        }
+        if (!is.matrix(x)) x <- matrix(x, nrow = 1)
         
         local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
-        if (is.null(colnames(x))) {
-          colnames(x) <- local_bands
-        }
+        if (is.null(colnames(x))) colnames(x) <- local_bands
         
         onnx_dl_flag <- Sys.getenv("ONNX_DL_FLAG")
         if (onnx_dl_flag == "TRUE") {
@@ -813,8 +814,10 @@ ml_predict <- Process$new(
       }
       Sys.setenv(MODEL_FILE = model_file)
       
-      cube_band_names <- gdalcubes::bands(data_cube)$name
-      print(cube_band_names)
+      raw_band_names  <- gdalcubes::bands(data_cube)$name
+      cube_band_names <- sanitize_band_names(raw_band_names)
+      message("Bands: ", paste(cube_band_names, collapse = ", "))
+      
       band_names_file <- file.path(tmp, "band_names.rds")
       saveRDS(cube_band_names, band_names_file)
       if (!file.exists(band_names_file)) {
@@ -842,9 +845,7 @@ ml_predict <- Process$new(
         
         local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
         n_bands <- length(local_bands)
-        if (is.null(colnames(x))) {
-          colnames(x) <- local_bands
-        }
+        if (is.null(colnames(x))) colnames(x) <- local_bands
         
         onnx_dl_flag <- Sys.getenv("ONNX_DL_FLAG")
         if (onnx_dl_flag == "TRUE") {
@@ -852,9 +853,7 @@ ml_predict <- Process$new(
         } else {
           wide_vec <- as.vector(x)
           wide_mat <- matrix(wide_vec, nrow = 1, ncol = n_bands * nsteps_local)
-          wide_names <- unlist(lapply(seq_len(nsteps_local), function(i) {
-            paste0(local_bands, "_T", i)
-          }))
+          wide_names <- unlist(lapply(seq_len(nsteps_local), function(i) paste0(local_bands, "_T", i)))
           if (ncol(wide_mat) != length(wide_names)) {
             stop("Mismatch: number of columns is ", ncol(wide_mat), " but expected ", length(wide_names))
           }
@@ -862,12 +861,8 @@ ml_predict <- Process$new(
           x <- wide_mat
         }
         
-        if (!reticulate::py_module_available("numpy")) {
-          reticulate::py_install("numpy", pip = TRUE)
-        }
-        if (!reticulate::py_module_available("onnxruntime")) {
-          reticulate::py_install("onnxruntime", pip = TRUE)
-        }
+        if (!reticulate::py_module_available("numpy")) reticulate::py_install("numpy", pip = TRUE)
+        if (!reticulate::py_module_available("onnxruntime")) reticulate::py_install("onnxruntime", pip = TRUE)
         np <- reticulate::import("numpy")
         onnxruntime <- reticulate::import("onnxruntime")
         
@@ -882,12 +877,10 @@ ml_predict <- Process$new(
         if (onnx_dl_flag == "TRUE") {
           pred_class <- as.numeric(apply(pred, 1, which.max))
         } else {
-          #pred_class <- as.numeric(apply(pred, 1, which.max))
           pred_class <- as.numeric(pred)
         }
         result <- matrix(rep(pred_class, nsteps_local), nrow = 1)
-        message("Prediction: ", result)
-        
+        message("Prediction: ", paste(result, collapse = ", "))
         return(result)
       }
       
@@ -905,8 +898,6 @@ ml_predict <- Process$new(
       
       return(prediction_cube)
     }
-    
-    
     
     time_steps_query <- function(data){
       time_steps <- gdalcubes::dimension_values(data)
@@ -958,10 +949,7 @@ ml_predict <- Process$new(
       
       if (endsWith(model, ".pt")) {
         library(torch)
-        
-        if (!file.exists(model)) {
-          stop("Model file does not exist: ", model)
-        }
+        if (!file.exists(model)) stop("Model file does not exist: ", model)
         model <- torch::torch_load(model)
         message("Torch model successfully loaded.")
         
@@ -969,18 +957,17 @@ ml_predict <- Process$new(
         model_obj <- readRDS(model)
         message("RDS model loaded successfully.")
         
-        if(is.raw(model_obj)){
+        if (is.raw(model_obj)) {
           message("raw RDS detetcted")
           con_rds <- rawConnection(model_obj, "rb")
           model <- torch::torch_load(con_rds)
-        }
-        else if (inherits(model_obj, "train")) {
+        } else if (inherits(model_obj, "train")) {
           message("Caret model recognized")
           model <- model_obj
         } else {
           stop("Unknown model type in .rds - no nn_module, no caret model, no Torch state_dict")
         }
-      }else {
+      } else {
         stop("Unsupported model format")
       }
     }
@@ -996,6 +983,7 @@ ml_predict <- Process$new(
     }
   }
 )
+
 
 ########################################################
 ##### mlm_svm_process #####
@@ -2667,7 +2655,7 @@ save_ml_model <- Process$new(
       stop("No suitable Python interpreter found!")
     }
     
-  
+    
     
     
     ensure_extension <- function(filename, ext) {
@@ -2699,7 +2687,7 @@ save_ml_model <- Process$new(
       fm <- model$finalModel
       
       kcls_vec <- try(class(fm@kernelf), silent = TRUE)
-
+      
       if (inherits(fm, "ksvm")) {
         kern <- try(detect_svm_kernel(model), silent = TRUE)
         if (!inherits(kern, "try-error") && nzchar(kern)) {
@@ -2736,7 +2724,7 @@ save_ml_model <- Process$new(
     }
     
     
-   
+    
     
     unscale_vec <- function(x, mu, sig) mu + x * sig
     pred_from_dec <- function(dec_sub, classes, posneg_pairs, tie_rule = c(">0",">=0")) {
@@ -2769,10 +2757,10 @@ save_ml_model <- Process$new(
       pp      <- model_r$preProcess
       means   <- as.numeric(pp$mean[feat]); names(means) <- feat
       sds     <- as.numeric(pp$std[feat]);  names(sds)   <- feat
-     
-
       
-
+      
+      
+      
       Xscaled <- as.matrix(model_r$trainingData[, feat, drop = FALSE])
       storage.mode(Xscaled) <- "double"
       y_true <- as.character(model_r$trainingData$.outcome)
@@ -2790,15 +2778,15 @@ save_ml_model <- Process$new(
       
       
       dec <- get_decision_matrix(model, Xscaled)
-
-
+      
+      
       C2 <- ncol(dec)
       expected_C2 <- K * (K - 1) / 2
       if (is.null(C2) || C2 != expected_C2) {
         stop(sprintf("OvO columns mismatch: NCOL(dec)=%s, expected %s (K=%s).",
                      as.character(C2), expected_C2, K))
       }
-     
+      
       X_aug <- cbind(Xscaled, 1.0)
       storage.mode(X_aug) <- "double"
       n_feat <- ncol(Xscaled)
@@ -2846,7 +2834,7 @@ save_ml_model <- Process$new(
           sprintf("%.6f / %.6f / %.6f\n", min(cors), median(cors), max(cors)))
       stopifnot(all(cors > 0.999))
       
-    
+      
       pred_from_dec <- function(dec_rowmat, classes, posneg_pairs, rule = c("majority","margin","signedsum")) {
         rule <- match.arg(rule)
         K    <- length(classes); C2 <- length(posneg_pairs)
@@ -2890,7 +2878,7 @@ save_ml_model <- Process$new(
       # ONNX bauen
       onnx_path   <- paste0(out_base, "_svm_ovo_linear_", use_rule, ".onnx")
       labels_json <- sub("\\.onnx$", "_labels.json", onnx_path)
-
+      
       build_onnx_for_rule(
         use_rule        = use_rule,
         weights_aligned = weights_aligned,
@@ -2910,7 +2898,7 @@ save_ml_model <- Process$new(
     
     
     
-  
+    
     
     # --------- POLY ----------
     export_ksvm_poly_onnx <- function(train_obj, out_base,
@@ -2943,7 +2931,7 @@ save_ml_model <- Process$new(
       scaleK <- as.numeric(kp$scale)
       offK   <- as.numeric(kp$offset)
       
-  
+      
       message("decsion started...")
       library(kernlab)
       get_decision_matrix <- function(model, Xscaled) {
@@ -2954,13 +2942,13 @@ save_ml_model <- Process$new(
       dec_raw <- get_decision_matrix(model_ksvm, Xscaled)
       stopifnot(ncol(dec_raw) == C2)
       message("decssion done")
-     
+      
       pv <- try(predict(model_ksvm, Xscaled, type = "votes"), silent = TRUE)
       if (inherits(pv, "try-error")) stop("This ksvm does not provide any ‘votes’ – cancel.")
       rn <- rownames(pv); if (is.null(rn) || any(!nzchar(rn))) rn <- classes
       stopifnot(length(rn) == K)
       cat("C2 = ", C2, " | range(colSums(pv)) = ", paste(range(colSums(pv)), collapse=".."), "\n", sep="")
-
+      
       s_sign_strict <- function(z) ifelse(z > 0, 1L, -1L)
       all_pairs <- combn(rn, 2, simplify = FALSE)
       
@@ -2988,7 +2976,7 @@ save_ml_model <- Process$new(
         if (cr >= 0) { pos_class_k[k] <- a; neg_class_k[k] <- b } else { pos_class_k[k] <- b; neg_class_k[k] <- a }
       }
       
- 
+      
       votes_from_dec_rule_tie <- function(zrow, pair_id_for_k, pos_k, neg_k, cls, tie_rule = c(">0",">=0")){
         tie_rule <- match.arg(tie_rule)
         acc <- setNames(integer(length(cls)), cls)
@@ -3023,7 +3011,7 @@ save_ml_model <- Process$new(
       tie_rule <- if (l1_ge <= l1_gt) ">=0" else ">0"
       cat("→ Use tie role: ", tie_rule, "\n", sep="")
       
-    
+      
       l1_cur <- l1_state_tie(dec_raw, pair_id_for_k, pos_class_k, neg_class_k, rn, pv, tie_rule)
       cat(sprintf("Greedy-Init: L1=%.6f\n", l1_cur))
       
@@ -3084,14 +3072,14 @@ save_ml_model <- Process$new(
       }
       cat(sprintf("2-Swap ends: L1=%.12f (Iterationen=%d)\n", l1_cur, iter_sw))
       
-    
+      
       our_votes <- build_votes_from_state_tie(dec_raw, pair_id_for_k, pos_class_k, neg_class_k, rn, tie_rule)
       l1_final  <- mean(colSums(abs(our_votes - pv)))
       acc_final <- mean(rn[apply(our_votes, 2, which.max)] == rn[apply(pv, 2, which.max)])
       cat(sprintf("Votes-Check (Tie %s): L1=%.12f | Top1-Acc=%.3f\n", tie_rule, l1_final, acc_final))
       stopifnot(l1_final < 1e-12, acc_final >= 0.999)
-
-    
+      
+      
       ai_list <- kernlab::alphaindex(model_ksvm)     
       stopifnot(length(ai_list) == C2)
       
@@ -3180,7 +3168,7 @@ save_ml_model <- Process$new(
       cat(sprintf("LS corr(z_recon, dec_raw) pro k: min/median/max = %.6f / %.6f / %.6f\n",
                   min(corr_used), median(corr_used), max(corr_used)))
       
-     
+      
       z_from_models_scaled <- function(x_scaled_row, bm_list, kernelf) {
         vapply(bm_list, function(bm){
           ker <- kernlab::kernelMatrix(kernelf, matrix(x_scaled_row, nrow = 1L), bm$SV)
@@ -3214,7 +3202,7 @@ save_ml_model <- Process$new(
       l1_models_vs_pv <- l1_models_vs_pv / ncol(pv)
       cat(sprintf("Check (bin_models -> pv, tie %s): L1 = %.12e\n", tie_rule, l1_models_vs_pv))
       stopifnot(l1_models_vs_pv < 1e-9)
-
+      
       # Für ONNX-Export: Klassenreihenfolge exakt wie in pv
       out_classes <- rn
       
@@ -3272,7 +3260,7 @@ save_ml_model <- Process$new(
       kp    <- kernlab::kpar(model_ksvm@kernelf)
       sigma <- as.numeric(kp$sigma) 
       
-   
+      
       library(kernlab)
       get_decision_matrix <- function(model, Xscaled) {
         dec <- try(predict(model, Xscaled, type = "decision"), silent = TRUE)
@@ -3282,14 +3270,14 @@ save_ml_model <- Process$new(
       dec_raw <- get_decision_matrix(model_ksvm, Xscaled)
       stopifnot(ncol(dec_raw) == C2)
       
-     
+      
       pv <- try(predict(model_ksvm, Xscaled, type = "votes"), silent = TRUE)
       if (inherits(pv, "try-error")) stop("This ksvm does not provide any votes – cancel.")
       rn <- rownames(pv); if (is.null(rn) || any(!nzchar(rn))) rn <- classes
       stopifnot(length(rn) == K)
       cat("C2 = ", C2, " | range(colSums(pv)) = ", paste(range(colSums(pv)), collapse=".."), "\n", sep="")
       
-     
+      
       s_sign_strict <- function(z) ifelse(z > 0, 1L, -1L)
       all_pairs <- combn(rn, 2, simplify = FALSE)
       safe_cor <- function(x, y) { cr <- suppressWarnings(cor(x, y, use = "complete.obs")); if (!is.finite(cr)) 0 else cr }
@@ -3345,7 +3333,7 @@ save_ml_model <- Process$new(
       tie_rule <- if (l1_ge <= l1_gt) ">=0" else ">0"
       cat("→ Verwende Tie-Regel: ", tie_rule, "\n", sep="")
       
-     
+      
       l1_cur <- l1_state_tie(dec_raw, pair_id_for_k, pos_class_k, neg_class_k, rn, pv, tie_rule)
       cat(sprintf("Greedy-Init: L1=%.6f\n", l1_cur))
       max_iter <- 10 * C2; iter <- 0L
@@ -3409,8 +3397,8 @@ save_ml_model <- Process$new(
       acc_final <- mean(rn[apply(our_votes, 2, which.max)] == rn[apply(pv, 2, which.max)])
       cat(sprintf("Votes-Check (Tie %s): L1=%.12f | Top1-Acc=%.3f\n", tie_rule, l1_final, acc_final))
       stopifnot(l1_final < 1e-12, acc_final >= 0.999)
-
-     
+      
+      
       ai_list <- kernlab::alphaindex(model_ksvm)     
       stopifnot(length(ai_list) == C2)
       
@@ -3652,7 +3640,7 @@ save_ml_model <- Process$new(
           nodes_truenodeids  <- c(nodes_truenodeids,  left[br_idx]  - 1L)
           nodes_falsenodeids <- c(nodes_falsenodeids, right[br_idx] - 1L)
           nodes_modes <- c(nodes_modes, rep("BRANCH_LEQ", length(br_idx)))
-          nodes_missing_value_tracks_true <- c(nodes_missing_value_tracks_true, rep(0L, length(br_idx)))
+          nodes_missing_value_tracks_true <- c(nodes_missing_value_tracks_true, rep(1L, length(br_idx)))
         }
         
         lf_idx <- which(is_leaf)
@@ -3728,8 +3716,6 @@ save_ml_model <- Process$new(
     }
     
     ####
-    
-    
     export_rf_onnx <- function(
     train_obj, out_base,
     dtype = "float32",
@@ -3737,13 +3723,12 @@ save_ml_model <- Process$new(
     do_checks = TRUE,
     tie_eps = 1e-6
     ) {
-      
-      # --- Modell & Typen ---
       model_r <- train_obj
       rf_mod  <- if (inherits(model_r, "train")) model_r$finalModel else model_r
       if (!(inherits(rf_mod, "randomForest") || inherits(rf_mod, "ranger"))) {
         stop("Expect randomForest or ranger classification model (if applicable in caret::train).")
       }
+      
       out_classes <- if (!is.null(model_r$levels)) {
         as.character(model_r$levels)
       } else if (inherits(rf_mod, "randomForest") && !is.null(rf_mod$classes)) {
@@ -3762,6 +3747,7 @@ save_ml_model <- Process$new(
         feature_names <- rf_mod$forest$independent.variable.names
       }
       stopifnot(length(feature_names) >= 1)
+      
       pp <- model_r$preProcess
       means <- sds <- NULL
       if (!is.null(pp) && !is.null(pp$mean) && !is.null(pp$std)) {
@@ -3771,11 +3757,13 @@ save_ml_model <- Process$new(
           if (any(!is.finite(sds)) || any(sds == 0)) means <- sds <- NULL
         }
       }
+      
       train_X <- NULL; train_y <- NULL
       if (!is.null(model_r$trainingData)) {
         train_X <- as.data.frame(model_r$trainingData[, feature_names, drop = FALSE])
         train_y <- factor(model_r$trainingData$.outcome, levels = out_classes)
       }
+      
       arr <- extract_arrays_randomForest_TE(rf_mod, feature_names, out_classes, train_X, train_y)
       
       if (isTRUE(do_checks)) {
@@ -3786,7 +3774,7 @@ save_ml_model <- Process$new(
       }
       
       onnx_path <- paste0(out_base, "_rf_teclassifier.onnx")
-      
+      message("feature names", feature_names)
       build_rf_teclassifier_onnx(
         arr            = arr,
         feature_names  = feature_names,
@@ -3799,17 +3787,38 @@ save_ml_model <- Process$new(
         tie_eps        = tie_eps
       )
       
+      # Metadaten als einfache Strings (kein JSON):
+      meta_opts <- list(
+        feature_names = paste(feature_names, collapse = ", "),
+        class_labels  = paste(out_classes,  collapse = ", "),
+        zero_based    = "true"  # TreeEnsembleClassifier-Labels sind 0-basiert
+      )
+      add_metadata_to_onnx(onnx_path, meta_opts)
+
       if (isTRUE(do_checks) && !is.null(train_X)) {
+        # ---------- C) Batch-Check: richtiger np-dtype + Unscaling ----------
         ort <- reticulate::import("onnxruntime", convert = FALSE)
         np  <- reticulate::import("numpy", convert = FALSE)
         sess <- ort$InferenceSession(onnx_path)
         ins_r  <- reticulate::py_to_r(sess$get_inputs())
         input_name <- as.character(ins_r[[1]]$name)
         
+        # dtype passend zum Modell
+        is_f64   <- identical(dtype, "float64")
+        np_dtype <- if (is_f64) "float64" else "float32"
+        
+        # Falls trainingData durch caret::preProcess bereits skaliert ist,
+        # zurück auf Rohskala rechnen – genau diese Rohwerte gehen dann in beide Pfade.
+        X_ref <- train_X
+        if (!is.null(means) && !is.null(sds)) {
+          X_ref <- sweep(X_ref, 2, sds, "*")
+          X_ref <- sweep(X_ref, 2, means, "+")
+        }
+        
         onnx_predict_idx1_batch <- function(sess, input_name, X_raw) {
           X <- if (is.vector(X_raw)) matrix(X_raw, nrow=1L) else as.matrix(X_raw)
           colnames(X) <- colnames(X_raw)
-          xnp <- np$array(X, dtype="float32")
+          xnp <- np$array(X, dtype = np_dtype)
           res <- reticulate::py_to_r(sess$run(NULL, setNames(list(xnp), input_name)))
           as.integer(res[[1]])
         }
@@ -3822,9 +3831,9 @@ save_ml_model <- Process$new(
         }
         
         set.seed(1)
-        N <- min(100L, nrow(train_X))
-        rows <- sample(seq_len(nrow(train_X)), N)
-        X_raw_N <- train_X[rows, , drop=FALSE]; colnames(X_raw_N) <- feature_names
+        N <- min(100L, nrow(X_ref))
+        rows <- sample(seq_len(nrow(X_ref)), N)
+        X_raw_N <- X_ref[rows, , drop=FALSE]; colnames(X_raw_N) <- feature_names
         
         onnx_idx1  <- onnx_predict_idx1_batch(sess, input_name, X_raw_N)
         caret_idx1 <- rf_predict_idx1(model_r, X_raw_N, out_classes)
@@ -3833,11 +3842,12 @@ save_ml_model <- Process$new(
         cat("Mismatch-Rate:", mean(onnx_idx1 != caret_idx1), "\n")
         cat("ONNX class distribution:\n");  print(sort(table(onnx_idx1)))
         cat("Caret class distribution:\n"); print(sort(table(caret_idx1)))
+        # --------------------------------------------------------------------
       }
       
       invisible(list(
         onnx_path = onnx_path,
-        classes   = out_classes,      
+        classes   = out_classes,
         features  = feature_names
       ))
     }
@@ -3853,7 +3863,7 @@ save_ml_model <- Process$new(
       library(reticulate)
       py <- find_python_bin()
       
-  
+      
       
       onnx        <- reticulate::import("onnx",        convert = FALSE)
       helper      <- reticulate::import("onnx.helper", convert = FALSE)
@@ -4480,20 +4490,17 @@ save_ml_model <- Process$new(
           ", tie_rule=", tie_rule, ") gespeichert: ", out_path, "\n", sep = "")
     }
     
-    
-    
-    
-    
     build_rf_teclassifier_onnx <- function(
-    arr,                      
+    arr,
     feature_names, classes, out_path,
-    means = NULL, sds = NULL,           
+    means = NULL, sds = NULL,
     dtype = c("float32","float64"),
     primary_output = c("idx1","scores"),
     tie_eps = 1e-6
     ) {
       dtype <- match.arg(dtype)
       primary_output <- match.arg(primary_output)
+      
       onnx   <- reticulate::import("onnx",        convert = FALSE)
       helper <- reticulate::import("onnx.helper", convert = FALSE)
       np     <- reticulate::import("numpy",       convert = FALSE)
@@ -4503,12 +4510,16 @@ save_ml_model <- Process$new(
       is_f64 <- identical(dtype, "float64")
       TNUM   <- if (is_f64) TensorProto$DOUBLE else TensorProto$FLOAT
       as_fp_vec <- function(x) np$array(as.numeric(x), dtype = if (is_f64) "float64" else "float32")
-      as_fp_mat <- function(M){ if (is.vector(M)) M <- matrix(M, nrow=1L); np$array(as.numeric(M), dtype = if (is_f64) "float64" else "float32") }
+      as_fp_mat <- function(M){
+        if (is.vector(M)) M <- matrix(M, nrow=1L)
+        np$array(as.numeric(M), dtype = if (is_f64) "float64" else "float32")
+      }
       
       K      <- length(classes)
       n_feat <- length(feature_names)
-      
-      inp   <- helper$make_tensor_value_info("input_raw", TensorProto$FLOAT, list(-1L, as.integer(n_feat)))
+
+      # I/O
+      inp <- helper$make_tensor_value_info("input_raw", TNUM, list(-1L, as.integer(n_feat)))
       out_i <- helper$make_tensor_value_info("idx1",   TensorProto$INT64, list(-1L, 1L))
       out_s <- helper$make_tensor_value_info("scores", TNUM,              list(-1L, as.integer(K)))
       outs  <- list(out_i, out_s)
@@ -4519,14 +4530,17 @@ save_ml_model <- Process$new(
       }
       outs <- reorder_outs(outs, c("idx1","scores"), primary_output)
       
+      # Initializer
       initializers <- list(
-        onnx$numpy_helper$from_array(np$array(matrix(1L, nrow=1L, ncol=1L), dtype="int64"), "one_i"),
-        onnx$numpy_helper$from_array(as_fp_vec(tie_eps), "eps_f")
+        onnx$numpy_helper$from_array(np$array(1L, dtype="int64"),           "one_i"),   # Skalar
+        onnx$numpy_helper$from_array(as_fp_mat((K - seq_len(K)) * tie_eps), "tie_bias"),
+        onnx$numpy_helper$from_array(as_fp_vec(0.0),                        "zero_f")   # für Cleaning
       )
       
       nodes <- list()
       cur_in <- "input_raw"
       
+      # Optional: Standardisierung
       if (!is.null(means) && !is.null(sds)) {
         stopifnot(length(means) == n_feat, length(sds) == n_feat)
         initializers <- c(initializers,
@@ -4534,68 +4548,83 @@ save_ml_model <- Process$new(
                           onnx$numpy_helper$from_array(as_fp_mat(sds),   "std_vec")
         )
         nodes <- c(nodes,
-                   helper$make_node("Sub", list(cur_in, "mean_vec"), list("centered"), name="Center"),
-                   helper$make_node("Div", list("centered", "std_vec"), list("scaled"), name="Scale")
+                   helper$make_node("Sub", list(cur_in, "mean_vec"),    list("centered"), name="Center"),
+                   helper$make_node("Div", list("centered","std_vec"),  list("scaled"),   name="Scale")
         )
         cur_in <- "scaled"
       }
       
-      te_node <- helper$make_node(
-        "TreeEnsembleClassifier",
-        inputs  = list(cur_in),
-        outputs = list("Y_unused", "scores"),
-        domain  = "ai.onnx.ml",
-        nodes_treeids   = as.integer(arr$nodes_treeids),
-        nodes_nodeids   = as.integer(arr$nodes_nodeids),
-        nodes_featureids= as.integer(arr$nodes_featureids),
-        nodes_modes     = as.character(arr$nodes_modes),  
-        nodes_values    = as.numeric(arr$nodes_values),
-        nodes_truenodeids  = as.integer(arr$nodes_truenodeids),
-        nodes_falsenodeids = as.integer(arr$nodes_falsenodeids),
-        nodes_missing_value_tracks_true = as.integer(arr$nodes_missing_value_tracks_true),
-        class_treeids   = as.integer(arr$leaf_treeids),
-        class_nodeids   = as.integer(arr$leaf_nodeids),
-        class_ids       = as.integer(arr$leaf_targets),
-        class_weights   = as.numeric(arr$leaf_weights),
-        classlabels_int64s = as.integer(seq_len(K)),
-        post_transform  = "NONE"
-      )
-      nodes <- c(nodes, te_node)
       
-      ranks <- seq_len(K)
-      bias  <- (K - ranks) * tie_eps
-      initializers <- c(initializers,
-                        onnx$numpy_helper$from_array(as_fp_mat(bias), "tie_bias")
-      )
+      # --- NEW: Missing-Handling -> default TRUE (=links) ---
+      mvt <- tryCatch(as.integer(arr$nodes_missing_value_tracks_true),
+                      error = function(e) NULL)
+      if (is.null(mvt) || length(mvt) != length(arr$nodes_modes)) {
+        # Fallback: alles auf TRUE setzen (Leaves werden vom Operator ignoriert)
+        mvt <- rep(1L, length(arr$nodes_modes))
+      }
+      
+      # TreeEnsembleClassifier
       nodes <- c(nodes,
-                 helper$make_node("Add",    list("scores","tie_bias"), list("scores_biased"), name="AddTieBias"),
-                 helper$make_node("ArgMax", list("scores_biased"),     list("idx0"),
-                                  axis=1L, keepdims=1L, name="ArgMax"),
-                 helper$make_node("Cast",   list("idx0"),              list("idx0_i64"),
+                 helper$make_node(
+                   "TreeEnsembleClassifier",
+                   inputs  = list(cur_in),
+                   outputs = list("label_unused", "scores_raw"),
+                   domain  = "ai.onnx.ml",
+                   nodes_treeids    = as.integer(arr$nodes_treeids),
+                   nodes_nodeids    = as.integer(arr$nodes_nodeids),
+                   nodes_featureids = as.integer(arr$nodes_featureids),
+                   nodes_modes      = as.character(arr$nodes_modes),
+                   nodes_values     = as.numeric(arr$nodes_values),
+                   nodes_truenodeids   = as.integer(arr$nodes_truenodeids),
+                   nodes_falsenodeids  = as.integer(arr$nodes_falsenodeids),
+                   nodes_missing_value_tracks_true = as.integer(mvt),  # <- entscheidend
+                   class_treeids    = as.integer(arr$leaf_treeids),
+                   class_nodeids    = as.integer(arr$leaf_nodeids),
+                   class_ids        = as.integer(arr$leaf_targets),    # 0-basiert
+                   class_weights    = as.numeric(arr$leaf_weights),
+                   classlabels_int64s = as.integer(0:(K-1)),
+                   post_transform   = "NONE"
+                 )
+      )
+      
+      # Tie-Bias + offizielle "scores"
+      nodes <- c(nodes,
+                 helper$make_node("Add",      list("scores_raw","tie_bias"), list("scores_biased"), name="AddTieBias"),
+                 helper$make_node("Identity", list("scores_biased"),         list("scores"),        name="ScoresOut")
+      )
+      
+      # idx1 = argmax(scores_biased, axis=1) + 1  → Shape [N,1]
+      nodes <- c(nodes,
+                 helper$make_node("ArgMax", list("scores_biased"), list("idx0"),
+                                  axis = 1L, keepdims = 1L, name = "ArgMaxTop1"),
+                 helper$make_node("Cast",   list("idx0"),          list("idx0_i64"),
                                   to = TensorProto$INT64, name = "CastI64"),
-                 helper$make_node("Add",    list("idx0_i64","one_i"),  list("idx1"), name="Make1Idx")
+                 helper$make_node("Add",    list("idx0_i64","one_i"), list("idx1"), name="MakeIdx1")
       )
       
       graph <- helper$make_graph(
         nodes       = nodes,
-        name        = "rf_tree_ensemble_classifier_tiebias",
+        name        = "rf_tree_ensemble_classifier_idx1",
         inputs      = list(inp),
         outputs     = outs,
         initializer = initializers
       )
       model_onnx <- helper$make_model(
         graph,
-        producer_name = "rf_to_onnx_treeensemble_classifier_tiebias",
+        producer_name = "rf_to_onnx_treeensemble_classifier_idx1",
         opset_imports = list(
           helper$make_operatorsetid("",           13L),
           helper$make_operatorsetid("ai.onnx.ml", 3L)
         )
       )
-      onnx$save(model_onnx, out_path)
+      
+      onnx$save_model(model_onnx, out_path)
       cat("ONNX : ", out_path, "\n", sep = "")
     }
     
-   
+    
+    
+    
     
     save_torch_model <- function(model, filepath,
                                  input_channels = NULL,
@@ -4610,7 +4639,7 @@ save_ml_model <- Process$new(
         first_conv     <- model$conv_layers[[1]][[1]]
         input_channels <- as.integer(first_conv$in_channels)
         time_steps     <- as.integer(model$time_steps %||% stop("'time_steps' fehlt am TempCNN-Modell"))
-
+        
         B     <- 1L
         dummy <- torch::torch_randn(c(B, input_channels, time_steps))
         model$eval()
@@ -4627,14 +4656,14 @@ save_ml_model <- Process$new(
       ts_from_model <- tryCatch(model$time_steps,         error = function(e) NULL)
       il_from_model <- tryCatch(model$input_layout,       error = function(e) NULL)
       cols_from_mod <- tryCatch(model$input_data_columns, error = function(e) NULL)
-
+      
       
       input_channels <- input_channels %||% ic_from_model %||%
         (if (!is.null(cols_from_mod)) length(cols_from_mod) else NULL)
       time_steps   <- time_steps   %||% ts_from_model    %||% 1L
       
       input_layout <- if (!is.null(il_from_model)) il_from_model else "NCT"
-
+      
       if (is.null(input_channels) || input_channels < 1L)
         stop("Für Torch-Export fehlt 'input_channels'. Hänge es beim Training ans Modell oder übergib es als Argument.")
       if (is.null(time_steps) || time_steps < 1L)
@@ -4659,7 +4688,7 @@ save_ml_model <- Process$new(
       script_model <- torch::jit_trace(model, dummy)
       script_model$eval()
       torch::jit_save(script_model, filepath)
-
+      
       list(pt_path = filepath,
            input_chan = as.integer(input_channels),
            time_steps = as.integer(time_steps),
@@ -4697,28 +4726,40 @@ return(onnx_path)
     
     convert_model_to_pkl <- function(model, model_type, filepath) {
       library(reticulate)
-      joblib <- reticulate::import("joblib"); np <- reticulate::import("numpy")
-      sklearn <- reticulate::import("sklearn.ensemble"); sklearn_svm <- reticulate::import("sklearn.svm"); xgboost <- reticulate::import("xgboost")
+      joblib <- import("joblib")
+      np <- import("numpy")
       
-      if (!("train" %in% class(model))) stop("Please pass a caret train object")
-      if (!("trainingData" %in% names(model))) stop("The caret model does not contain any trainingData. Please save the model with trainingData")
+      xgboost <- import("xgboost")
       
+      if (!("train" %in% class(model))) {
+        stop("Please pass a caret train object")
+      }
+      
+      if (!("trainingData" %in% names(model))) {
+        stop("The caret model does not contain any trainingData. Please save the model with trainingData")
+      }
       train_data <- model$trainingData
-      if (!(".outcome" %in% colnames(train_data))) stop("The trainingData does not contain an '.outcome' column")
       
+      if (!(".outcome" %in% colnames(train_data))) {
+        stop("The trainingData does not contain an '.outcome' column")
+      }
       predictors <- setdiff(colnames(train_data), ".outcome")
       target_column <- ".outcome"
-      final <- model$finalModel
+      model <- model$finalModel
       train_data_clean <- train_data[, predictors, drop = FALSE]
       if (is.factor(train_data[[target_column]]) || is.character(train_data[[target_column]])) {
         train_data[[target_column]] <- as.integer(as.factor(train_data[[target_column]])) - 1
       }
-      x_train <- np$array(as.matrix(train_data_clean))
-      y_train <- np$array(as.numeric(train_data[[target_column]]))
       
+      tryCatch({
+        x_train <- np$array(as.matrix(train_data_clean))
+        y_train <- np$array(as.numeric(train_data[[target_column]]))
+      }, error = function(e) {
+        message("Error during numpy array conversion: ", e$message)
+        stop(e)
+      })
       if (model_type == "xgbTree") {
-        if (!inherits(final, "xgb.Booster")) stop("Error: The model is not an XGBoost model")
-        xgboost::xgb.save(final, paste0(filepath, ".bin"))
+        xgboost::xgb.save(model, paste0(filepath, ".bin"))
       } else {
         stop("Model type is not supported!")
       }
@@ -4737,18 +4778,24 @@ return(onnx_path)
       message("Metadata has been added to the ONNX model.")
     }
     
+    
+    
     save_ml_model_as_onnx <- function(model_type, filepath) {
       library(reticulate)
       tryCatch({
-        onnxmltools   <- reticulate::import("onnxmltools")
-        skl2onnx      <- reticulate::import("skl2onnx")
-        onnx          <- reticulate::import("onnx")
-        joblib        <- reticulate::import("joblib")
-        FloatTensorType <- reticulate::import("skl2onnx.common.data_types")$FloatTensorType
+        onnxmltools <- import("onnxmltools")
+        skl2onnx    <- import("skl2onnx")
+        onnx        <- import("onnx")
+        joblib      <- import("joblib")
+        
+        # WICHTIG: richtiger Datentyp-Import
+        oc_types <- import("onnxconverter_common.data_types")
+        FloatTensorType <- oc_types$FloatTensorType
         
         n_features <- NULL; model_py <- NULL
+        
         if (model_type == "xgbTree") {
-          xgb_mod <- reticulate::import("xgboost")
+          xgb_mod <- import("xgboost")
           booster_py <- xgb_mod$Booster()
           booster_py$load_model(paste0(filepath, ".bin"))
           model_py   <- booster_py
@@ -4765,8 +4812,11 @@ return(onnx_path)
         
         initial_type <- list(list("float_input", FloatTensorType(list(NULL, as.integer(n_features)))))
         
-        if (model_type == "xgbTree") onnx_model <- onnxmltools$convert_xgboost(model_py, initial_types = initial_type)
-        else onnx_model <- skl2onnx$convert_sklearn(model_py, initial_types = initial_type)
+        if (model_type == "xgbTree") {
+          onnx_model <- onnxmltools$convert_xgboost(model_py, initial_types = initial_type)
+        } else {
+          onnx_model <- skl2onnx$convert_sklearn(model_py, initial_types = initial_type)
+        }
         
         onnx_file <- ensure_extension(filepath, "onnx")
         onnx$save_model(onnx_model, onnx_file)
@@ -4776,6 +4826,7 @@ return(onnx_path)
         message("Error in save_ml_model_as_onnx:", e$message); stop(e)
       })
     }
+    
     
     save_model_as_mlm_stac_json <- function(model, filepath, tasks = list("classification"), options = list()) {
       mlm_stac_item <- list(
@@ -4887,8 +4938,8 @@ return(onnx_path)
         assets = list()
       )
       
-      message("Nun sind wir hier")
       model_info <- list()
+      message("model_info", model_info)
       
       is_tempcnn <- tryCatch(
         !is.null(model$conv_layers) && length(model$conv_layers) >= 1 &&
@@ -4896,29 +4947,46 @@ return(onnx_path)
           !is.null(model$conv_layers[[1]][[1]]$in_channels),
         error = function(e) FALSE
       )
-      
+
       if (is_tempcnn) {
-        model_info$"mlm:name" <- basename(sub("\\.json$", "", filepath))
-        model_info$"mlm:architecture" <- "TempCNN"
-        model_info$"mlm:tasks" <- tasks
-        model_info$"mlm:framework" <- "R (torch)"
-        model_info$"mlm:framework_version" <- paste0("R ", R.version$major, ".", R.version$minor)
+
+        # --- robuste Parameterezählung (Iterator!) ---
+        total_params <- tryCatch({
+          if (requireNamespace("coro", quietly = TRUE)) {
+            s <- 0L
+            coro::loop(for (p in model$parameters) {
+              s <- s + prod(as.integer(p$size()))
+            })
+            as.integer(s)
+          } else {
+            # Fallback, falls coro nicht installiert ist (kann bei Iteratoren fehlschlagen)
+            sum(unlist(lapply(model$parameters, function(p) prod(as.integer(p$size())))))
+          }
+        }, error = function(e) NA_integer_)
         
-        total_params <- tryCatch(sum(unlist(lapply(model$parameters, function(p) prod(dim(p))))), error = function(e) NA_integer_)
-        model_info$"mlm:total_parameters" <- if (is.finite(total_params)) as.integer(total_params) else NULL
-        model_info$"mlm:hyperparameters" <- list(conv_layers = length(model$conv_layers), dense_layers = length(model$dense))
-        model_info$"mlm:pretrained" <- FALSE
-        model_info$"mlm:pretrained_source" <- NULL
+        model_info$"mlm:name"                <- basename(sub("\\.json$", "", filepath))
+        model_info$"mlm:architecture"        <- "TempCNN"
+        model_info$"mlm:tasks"               <- tasks
+        model_info$"mlm:framework"           <- "R (torch)"
+        model_info$"mlm:framework_version"   <- paste0("R ", R.version$major, ".", R.version$minor)
+        model_info$"mlm:total_parameters"    <- if (isTRUE(is.finite(total_params))) as.integer(total_params) else NULL
+        model_info$"mlm:hyperparameters"     <- list(conv_layers = length(model$conv_layers), dense_layers = tryCatch(length(model$dense), error=function(e) 0L))
+        model_info$"mlm:pretrained"          <- FALSE
+        model_info$"mlm:pretrained_source"   <- NULL
         model_info$"mlm:batch_size_suggestion" <- 1
-        model_info$"mlm:accelerator" <- "gpu"
+        model_info$"mlm:accelerator"         <- "gpu"
         model_info$"mlm:accelerator_constrained" <- FALSE
-        model_info$"mlm:accelerator_count" <- 1
+        model_info$"mlm:accelerator_count"   <- 1
         
         input_channels <- model$conv_layers[[1]][[1]]$in_channels
-        time_steps     <- model$time_steps
-        bands          <- tryCatch(model$input_data_columns, error = function(e) NULL)
+
+        time_steps <- tryCatch(model$time_steps, error = function(e) NULL)
+
+        bands <- tryCatch(model$input_data_columns, error = function(e) NULL)
+        
         if (is.null(input_channels)) stop("Could not extract input_channels from conv_layers!")
         if (is.null(time_steps))     stop("time_steps is missing in the model!")
+        
         model_info$"mlm:input" <- list(
           list(
             name  = "Temporal CNN Input",
@@ -4933,20 +5001,56 @@ return(onnx_path)
           )
         )
         
+        # ---- Output-Size ohne Forward: NA-sichere Checks mit isTRUE(...) ----
         output_size <- tryCatch({
-          if (!is.null(model$dense) && length(model$dense) >= 1L) {
-            last_dense <- model$dense[[length(model$dense)]]
-            os <- tryCatch(as.integer(last_dense$out_features), error = function(e) NA_integer_)
-            if (is.finite(os) && os > 0) return(os)
-            if (!is.null(last_dense$weight)) {
-              sz <- tryCatch(as.integer(last_dense$weight$size()), error = function(e) integer())
-              if (length(sz) >= 1L && is.finite(sz[1]) && sz[1] > 0) return(sz[1])
+          # (0) Falls Klassenanzahl am Modell hinterlegt ist, nimm diese
+          cc <- tryCatch(as.integer(model$class_count), error = function(e) NA_integer_)
+          if (isTRUE(is.finite(cc) && cc > 0L)) return(cc)
+          
+          # (1) Explizite finale 'out'-Schicht (so ist dein TempCNN gebaut)
+          out_mod <- tryCatch(model$out, error = function(e) NULL)
+          if (!is.null(out_mod)) {
+            os <- tryCatch(as.integer(out_mod$out_features), error = function(e) NA_integer_)
+            if (isTRUE(is.finite(os) && os > 0L)) return(os)
+            
+            w <- tryCatch(out_mod$weight, error = function(e) NULL)
+            if (!is.null(w)) {
+              sz <- tryCatch(as.integer(w$size()), error = function(e) integer())
+              if (isTRUE(length(sz) >= 1L && is.finite(sz[1]) && sz[1] > 0L)) return(sz[1])
             }
           }
+          
+          # (2) Generischer Scan über den Modulbaum: letzte nn_linear finden
+          last_linear_out <- NA_integer_
+          if (requireNamespace("coro", quietly = TRUE)) {
+            coro::loop(for (m in model$modules()) {
+              if (isTRUE("nn_linear" %in% class(m))) {
+                os <- tryCatch(as.integer(m$out_features), error = function(e) NA_integer_)
+                if (isTRUE(is.finite(os) && os > 0L)) last_linear_out <- os
+              }
+            })
+          } else {
+            # Fallback ohne coro: versuche eine einfache Iteration
+            mods <- tryCatch(model$modules(), error = function(e) NULL)
+            if (!is.null(mods) && is.list(mods)) {
+              for (m in mods) {
+                if (isTRUE("nn_linear" %in% class(m))) {
+                  os <- tryCatch(as.integer(m$out_features), error = function(e) NA_integer_)
+                  if (isTRUE(is.finite(os) && os > 0L)) last_linear_out <- os
+                }
+              }
+            }
+          }
+          if (isTRUE(is.finite(last_linear_out) && last_linear_out > 0L)) return(last_linear_out)
+          
           NA_integer_
-        }, error = function(e) NA_integer_)
-        if (!is.finite(output_size) || is.na(output_size) || output_size < 1L)
-          stop("Could not extract output_size from dense layer")
+        }, error = function(e) {
+          message("output_size error: ", conditionMessage(e))
+          NA_integer_
+        })
+        
+        if (!isTRUE(is.finite(output_size) && output_size >= 1L))
+          stop("Could not extract output_size (TempCNN). Hinterlege model$class_count oder stelle sicher, dass model$out$out_features vorhanden ist.")
         
         model_info$"mlm:output" <- list(
           list(
@@ -4958,46 +5062,59 @@ return(onnx_path)
               data_type = "float32"
             ),
             description = "Output features from TempCNN",
-            "classification:classes" = if (tasks[[1]] == "classification") {
+            "classification:classes" = if (!is.null(tasks) && length(tasks) >= 1L && identical(tasks[[1]], "classification")) {
               lapply(0:(output_size - 1), function(i) list(value = i, name = paste("class", i), description = paste("Class", i)))
             } else NULL,
             post_processing_function = NULL
           )
         )
-        
+
       } else if ("nn_module" %in% class(model)) {
+        # ------- generischer Torch-Model-Zweig -------
         arch_name <- tryCatch({
           cls <- class(model)
           pick <- cls[!cls %in% c("nn_module", "R6", "R6Class")]
           if (length(pick) >= 1) pick[1] else "DLModel"
         }, error = function(e) "DLModel")
         
-        model_info$"mlm:name" <- basename(sub("\\.json$", "", filepath))
-        model_info$"mlm:architecture" <- arch_name
-        model_info$"mlm:tasks" <- tasks
-        model_info$"mlm:framework" <- "R (torch)"
-        model_info$"mlm:framework_version" <- paste0("R ", R.version$major, ".", R.version$minor)
+        # robuste Parameterezählung
+        total_params <- tryCatch({
+          if (requireNamespace("coro", quietly = TRUE)) {
+            s <- 0L
+            coro::loop(for (p in model$parameters) {
+              s <- s + prod(as.integer(p$size()))
+            })
+            as.integer(s)
+          } else {
+            sum(unlist(lapply(model$parameters, function(p) prod(as.integer(p$size())))))
+          }
+        }, error = function(e) NA_integer_)
         
-        total_params <- tryCatch(sum(unlist(lapply(model$parameters, function(p) prod(dim(p))))), error = function(e) NA_integer_)
-        model_info$"mlm:total_parameters" <- if (is.finite(total_params)) as.integer(total_params) else NULL
-        model_info$"mlm:pretrained" <- FALSE
-        model_info$"mlm:pretrained_source" <- NULL
+        model_info$"mlm:name"                 <- basename(sub("\\.json$", "", filepath))
+        model_info$"mlm:architecture"         <- arch_name
+        model_info$"mlm:tasks"                <- tasks
+        model_info$"mlm:framework"            <- "R (torch)"
+        model_info$"mlm:framework_version"    <- paste0("R ", R.version$major, ".", R.version$minor)
+        model_info$"mlm:total_parameters"     <- if (isTRUE(is.finite(total_params))) as.integer(total_params) else NULL
+        model_info$"mlm:pretrained"           <- FALSE
+        model_info$"mlm:pretrained_source"    <- NULL
         model_info$"mlm:batch_size_suggestion" <- 1
-        model_info$"mlm:accelerator" <- "gpu"
+        model_info$"mlm:accelerator"          <- "gpu"
         model_info$"mlm:accelerator_constrained" <- FALSE
-        model_info$"mlm:accelerator_count" <- 1
+        model_info$"mlm:accelerator_count"    <- 1
         
         input_channels <- tryCatch(model$input_channels, error = function(e) NULL)
         time_steps     <- tryCatch(model$time_steps,     error = function(e) NULL)
         bands          <- tryCatch(model$input_data_columns, error = function(e) NULL)
-        layout         <- toupper(tryCatch(model$input_layout, error = function(e) NULL) %||% "NCT")
+        layout         <- tryCatch(toupper(model$input_layout), error = function(e) "NCT")
+        if (is.null(layout) || is.na(layout)) layout <- "NCT"
         
         if (is.null(input_channels) && !is.null(bands)) input_channels <- length(bands)
         if (is.null(input_channels) || input_channels < 1L)
           stop("Could not infer input_channels for generic DL model.")
         if (is.null(time_steps) || time_steps < 1L) time_steps <- 1L  # MLP → 1
         
-        if (layout == "NC") {
+        if (identical(layout, "NC")) {
           shape <- list(1, as.integer(input_channels))
           dim_order <- list("batch", "channels")
           desc <- "Static (non-temporal) input"
@@ -5019,25 +5136,26 @@ return(onnx_path)
         
         output_size <- tryCatch({
           B <- 1L
-          dummy <- if (layout == "NC") {
-            torch::torch_zeros(c(B, as.integer(input_channels)), dtype = torch_float())
+          dummy <- if (identical(layout, "NC")) {
+            torch::torch_zeros(c(B, as.integer(input_channels)), dtype = torch::torch_float())
           } else {
-            torch::torch_zeros(c(B, as.integer(input_channels), as.integer(time_steps)), dtype = torch_float())
+            torch::torch_zeros(c(B, as.integer(input_channels), as.integer(time_steps)), dtype = torch::torch_float())
           }
           model$eval()
           out <- model(dummy)
+          if (is.list(out)) out <- out[[1]]
           sz  <- tryCatch(as.integer(out$size()), error = function(e) integer())
-          if (length(sz) >= 2L && is.finite(sz[2]) && sz[2] > 0) return(sz[2])
+          if (isTRUE(length(sz) >= 2L && is.finite(sz[2]) && sz[2] > 0L)) return(sz[2])
           
           cc <- tryCatch(as.integer(model$class_count), error = function(e) NA_integer_)
-          if (is.finite(cc) && cc > 0) return(cc)
+          if (isTRUE(is.finite(cc) && cc > 0L)) return(cc)
           cls <- tryCatch(length(model$classes), error = function(e) NA_integer_)
-          if (is.finite(cls) && cls > 0) return(as.integer(cls))
+          if (isTRUE(is.finite(cls) && cls > 0L)) return(as.integer(cls))
           
           NA_integer_
         }, error = function(e) NA_integer_)
         
-        if (!is.finite(output_size) || is.na(output_size) || output_size < 1L)
+        if (!isTRUE(is.finite(output_size) && output_size >= 1L))
           stop("Could not infer output_size for generic DL model.")
         
         model_info$"mlm:output" <- list(
@@ -5050,7 +5168,7 @@ return(onnx_path)
               data_type = "float32"
             ),
             description = paste("Output features from", arch_name),
-            "classification:classes" = if (tasks[[1]] == "classification") {
+            "classification:classes" = if (!is.null(tasks) && length(tasks) >= 1L && identical(tasks[[1]], "classification")) {
               lapply(0:(output_size - 1), function(i)
                 list(value = i, name = paste("class", i), description = paste("Class", i)))
             } else NULL,
@@ -5058,33 +5176,47 @@ return(onnx_path)
           )
         )
         
-        if (length(options) > 0) for (key in names(options)) if (grepl("^mlm:", key)) model_info[[key]] <- options[[key]]
+        if (length(options) > 0) {
+          for (key in names(options)) {
+            if (grepl("^mlm:", key)) model_info[[key]] <- options[[key]]
+          }
+        }
         
       } else {
         stop("Unknown model type: Please check the model!")
       }
       
+
+      # --- Properties zusammenführen ---
       mlm_stac_item$properties <- c(mlm_stac_item$properties, model_info)
       
+      # --- Modell als RDS-Bytevektor speichern ---
       rds_path <- ensure_extension(sub("\\.json$", "", filepath), "rds")
-      con <- rawConnection(raw(0), "wb"); torch::torch_save(model, con)
-      raw_model <- rawConnectionValue(con); close(con)
+      con <- rawConnection(raw(0), "wb"); on.exit(close(con), add = TRUE)
+      torch::torch_save(model, con)
+      raw_model <- rawConnectionValue(con)
       saveRDS(raw_model, file = rds_path)
       
+      # --- Asset-Eintrag ---
       mlm_stac_item$assets <- list(
         model = list(
-          href = rds_path, type = "application/octet-stream", title = paste0(model_info$`mlm:architecture`, " Model"),
-          "mlm:artifact_type" = "R (Raw RDS)", roles = list("mlm:model")
+          href = rds_path,
+          type = "application/octet-stream",
+          title = paste0(model_info$`mlm:architecture`, " Model"),
+          "mlm:artifact_type" = "R (Raw RDS)",
+          roles = list("mlm:model")
         )
       )
+      
       jsonlite::write_json(mlm_stac_item, path = filepath, auto_unbox = TRUE, pretty = TRUE)
       message("Model was saved as MLM-STAC-JSON under: ", filepath)
       return(filepath)
     }
     
     
+    
     # ================== OPERATION BODY ==================
-
+    
     if (missing(options) || is.null(options)) options <- list() else options <- as.list(options)
     if (!missing(tasks) && length(tasks) > 0) options[["mlm:tasks"]] <- as.list(tasks)
     
@@ -5099,7 +5231,7 @@ return(onnx_path)
       is_bad_dim <- function(x) { is.null(x) || length(x) != 1L || !is.finite(x) || x < 1 }
       
       model <- torch::torch_load(data)
-
+      
       # --- EARLY: TempCNN-Erkennung (bevor wir model$input_channels etc. anfassen) ---
       has_conv <- tryCatch(
         !is.null(model$conv_layers) && length(model$conv_layers) >= 1 &&
@@ -5114,7 +5246,7 @@ return(onnx_path)
         message(" → input_channels = ", input_channels,
                 ", time_steps = ", time_steps)
         
-       
+        
         pt_meta <- save_torch_model(
           model,
           file.path(shared_dir, paste0(base_name, ".pt")),
@@ -5135,7 +5267,7 @@ return(onnx_path)
         time_steps   = pt_meta$time_steps,
         base_name    = base_name,
         output_dir   = shared_dir
-        )
+      )
       
       json_file <- file.path(shared_dir, ensure_extension(base_name, "json"))
       save_model_as_mlm_stac_json_dl(model, json_file, tasks, options)
@@ -5146,6 +5278,7 @@ return(onnx_path)
     
     else if (inherits(data, "train")) {
       message("Machine model detected...")
+      
       if (inherits(data$finalModel, "ksvm")) {
         message("Detected SVM (kernlab::ksvm) → custom ONNX path.")
         res <- export_caret_ksvm_to_onnx(
@@ -5157,13 +5290,27 @@ return(onnx_path)
           do_checks      = TRUE
         )
         result$onnx <- res$onnx
-      } else  if(inherits(data$finalModel, "randomForest")){
-        message("Detected RF -> into custom Onnx")
-        res <- export_rf_onnx(data, out_base = file.path(tmp, base_name),
-                              dtype = "float32", primary_output = "idx1", do_checks = TRUE)
         
+      } else if (inherits(data$finalModel, "randomForest")) {
+        message("Detected RF...")
+        res <- export_rf_onnx(
+          data, out_base = file.path(tmp, base_name),
+          dtype = "float32", primary_output = "idx1", do_checks = TRUE
+        )
         result$onnx <- res$onnx_path
-      }else{
+        
+        # Metadaten zusätzlich zu deinen options mergen (ohne JSON – simple CSV-Strings)
+        extra_opts <- c(
+          options,
+          list(
+            feature_names = paste(res$features, collapse = ","),
+            class_labels  = paste(res$classes,  collapse = ","),
+            zero_based    = "true"
+          )
+        )
+        add_metadata_to_onnx(result$onnx, extra_opts)
+        
+      } else {
         model_type <- detect_model_type(data)
         message("Detected model type: ", model_type)
         convert_model_to_pkl(data, model_type, file.path(tmp, base_name))
@@ -5171,11 +5318,15 @@ return(onnx_path)
         onnx_path <- save_ml_model_as_onnx(model_type, file.path(tmp, base_name))
         result$onnx <- onnx_path
       }
+      
+      # JSON (MLM-STAC) immer für caret-Modelle schreiben
       json_file <- file.path(tmp, ensure_extension(base_name, "json"))
       save_model_as_mlm_stac_json(data, json_file, tasks, options)
       result$json <- json_file
-      
-    } else {
+    }
+    
+    
+    else {
       stop("Unknown model type: must be 'nn_module' (Torch) or 'train' (Caret).")
     }
     
