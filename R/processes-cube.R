@@ -221,11 +221,31 @@ aggregate_spatial <- Process$new(
   categories = as.array("aggregate", "cubes"),
   summary = "Temporal aggregations based on calendar hierarchies",
   parameters = list(
-    Parameter$new(name = "data", description = "The source data cube.", schema = list(type = "object", subtype = "datacube")),
-    Parameter$new(name = "geometries", description = "Geometries for which the aggregation will be computed. Feature properties are preserved for vector data cubes and all GeoJSON Features.", schema = list(type = "object", subtype = "datacube")),
-    Parameter$new(name = "reducer", description = "A reducer to be applied on all values of each geometry. A reducer is a single process such as mean or a set of processes, which computes a single value for a list of values, see the category 'reducer' for such processes.", schema = list(type = "any"), optional = FALSE),
-    Parameter$new(name = "target_dimension", description = "By default (which is null), the process only computes the results and doesn't add a new dimension.", schema = list(type = list("string", "null")), optional = TRUE),
-    Parameter$new(name = "context", description = "Additional data to be passed to the reducer", schema = list(type = "any"), optional = TRUE)
+    Parameter$new(
+      name = "data",
+      description = "The source data cube.", 
+      schema = list(type = "object", 
+      subtype = "datacube")),
+    Parameter$new(
+      name = "geometries", 
+      description = "Geometries for which the aggregation will be computed. Feature properties are preserved for vector data cubes and all GeoJSON Features.", 
+      schema = list(type = "object", 
+      subtype = "datacube")),
+    Parameter$new(
+      name = "reducer", 
+      description = "A reducer to be applied on all values of each geometry. A reducer is a single process such as mean or a set of processes, which computes a single value for a list of values, see the category 'reducer' for such processes.", 
+      schema = list(type = "any"), 
+      optional = FALSE),
+    Parameter$new(
+      name = "target_dimension", 
+      description = "By default (which is null), the process only computes the results and doesn't add a new dimension.", 
+      schema = list(type = list("string", "null")), 
+      optional = TRUE),
+    Parameter$new(
+      name = "context", 
+      description = "Additional data to be passed to the reducer", 
+      schema = list(type = "any"), 
+      optional = TRUE)
   ),
   returns = vec_datacube,
   operation = function(data, geometries, reducer = NULL, target_dimension = NULL, context = NULL, job) {
