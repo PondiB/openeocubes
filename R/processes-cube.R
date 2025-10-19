@@ -223,52 +223,142 @@ aggregate_spatial <- Process$new(
   parameters = list(
     Parameter$new(
       name = "data",
-      description = "The source data cube.",
-      schema = list(type = "object", subtype = "datacube")
-    ),
+      description = "The source data cube.", 
+      schema = list(type = "object", 
+      subtype = "datacube")),
     Parameter$new(
-      name = "geometries",
-      description = "Geometries for which the aggregation will be computed. Feature properties are preserved for vector data cubes and all GeoJSON Features.",
-      schema = list(type = "object", subtype = "datacube")
-    ),
+      name = "geometries", 
+      description = "Geometries for which the aggregation will be computed. Feature properties are preserved for vector data cubes and all GeoJSON Features.", 
+      schema = list(type = "object", 
+      subtype = "datacube")),
     Parameter$new(
-      name = "reducer",
-      description = "A reducer to be applied on all values of each geometry. A reducer is a single process such as mean or a set of processes, which computes a single value for a list of values, see the category 'reducer' for such processes.",
-      schema = list(type = "any"),
-      optional = FALSE
-    ),
+      name = "reducer", 
+      description = "A reducer to be applied on all values of each geometry. A reducer is a single process such as mean or a set of processes, which computes a single value for a list of values, see the category 'reducer' for such processes.", 
+      schema = list(type = "any"), 
+      optional = FALSE),
     Parameter$new(
-      name = "target_dimension",
-      description = "By default (which is null), the process only computes the results and doesn't add a new dimension.",
-      schema = list(type = list("string", "null")),
-      optional = TRUE
-    ),
+      name = "target_dimension", 
+      description = "By default (which is null), the process only computes the results and doesn't add a new dimension.", 
+      schema = list(type = list("string", "null")), 
+      optional = TRUE),
     Parameter$new(
-      name = "context",
-      description = "Additional data to be passed to the reducer",
-      schema = list(type = "any"),
-      optional = TRUE
-    )
+      name = "context", 
+      description = "Additional data to be passed to the reducer", 
+      schema = list(type = "any"), 
+      optional = TRUE)
   ),
   returns = vec_datacube,
-  operation = function(data,
-                       geometries,
-                       reducer = NULL,
-                       target_dimension = NULL,
-                       context = NULL,
-                       job) {
-
-    add_fid_if_missing <- function(sf_obj) {
-      if (! "fid" %in% names(sf_obj)) {
-        sf_obj$fid <- seq.int(nrow(sf_obj))
+  operation = function(data, geometries, reducer = NULL, target_dimension = NULL, context = NULL, job) {
+    
+    library(sf)
+    library(gdalcubes)
+    suppressPackageStartupMessages({
+      if (!"lwgeom" %in% .packages()) try(requireNamespace("lwgeom", quietly = TRUE))
+    })
+    
+    log_bbox <- function(tag, x) {
+      bb <- suppressWarnings(try(sf::st_bbox(x), silent = TRUE))
+      if (inherits(bb, "try-error") || any(is.na(bb))) {
+        message(tag, " bbox: NA")
+      } else {
+        message(tag, " bbox: xmin=", signif(bb["xmin"], 6),
+                " ymin=", signif(bb["ymin"], 6),
+                " xmax=", signif(bb["xmax"], 6),
+                " ymax=", signif(bb["ymax"], 6))
       }
-      message("fid set")
-      return(sf_obj)
+    }
+    log_crs <- function(tag, crs) {
+      if (inherits(crs, "crs")) {
+        val <- if (!is.null(crs$input) && nzchar(crs$input)) crs$input else crs$wkt
+        message(tag, " CRS: ", val)
+      } else {
+        message(tag, " CRS: ", crs)
+      }
+    }
+    
+    ensure_crs <- function(g, name="geometries") {
+      if (is.na(sf::st_crs(g))) {
+        bb <- suppressWarnings(sf::st_bbox(g))
+        stop(name, ": CRS is missing. BBox=", paste(bb, collapse=","),
+             ".  Please set the source CRS, e.g.: st_crs(obj) <- 2154")
+      }
+      g
+    }
+    
+    add_fid_if_missing <- function(sf_obj) {
+      if (!"fid" %in% names(sf_obj)) sf_obj$fid <- seq.int(nrow(sf_obj))
+      message("fid set"); sf_obj
+    }
+    
+    repair_geoms <- function(g) {
+      g <- sf::st_zm(g, drop = TRUE, what = "ZM")
+      if (requireNamespace("lwgeom", quietly = TRUE)) {
+        g <- lwgeom::st_make_valid(g)
+      } else {
+        g <- sf::st_make_valid(g)
+      }
+      g <- suppressWarnings(sf::st_collection_extract(g, "POLYGON", warn = FALSE))
+      if (any(sf::st_is_empty(g))) {
+        n_empty <- sum(sf::st_is_empty(g))
+        message("drop empty geometries after make_valid/extract: ", n_empty)
+        g <- g[!sf::st_is_empty(g), , drop = FALSE]
+      }
+      g <- sf::st_set_precision(g, 1e-2)
+      g
+    }
+    
+    filter_geoms_to_cube <- function(geoms, cube_extent, cube_crs,
+                                     mode = c("intersects","within"),
+                                     buffer = 0, trim = FALSE) {
+      mode <- match.arg(mode)
+      
+      bbox_sfc <- sf::st_as_sfc(sf::st_bbox(c(
+        xmin = cube_extent$left, ymin = cube_extent$bottom,
+        xmax = cube_extent$right, ymax = cube_extent$top
+      ), crs = sf::st_crs(cube_crs)))
+      
+      if (buffer != 0) bbox_sfc <- sf::st_buffer(bbox_sfc, buffer)
+      
+      # CRS angleichen (hier wird erst transformiert)
+      if (sf::st_crs(geoms) != sf::st_crs(cube_crs)) {
+        geoms <- sf::st_transform(geoms, sf::st_crs(cube_crs))
+      }
+      
+      geoms <- repair_geoms(geoms)
+      
+      log_crs("train", sf::st_crs(geoms))
+      log_crs("cube",  sf::st_crs(cube_crs))
+      log_bbox("train", geoms)
+      log_bbox("cube ", bbox_sfc)
+      
+      if (nrow(geoms) == 0) return(list(filtered = geoms, n_in = 0, n_kept = 0))
+      
+      sel <- switch(mode,
+                    "intersects" = sf::st_intersects(geoms, bbox_sfc, sparse = FALSE)[,1],
+                    "within"     = sf::st_within(geoms,    bbox_sfc, sparse = FALSE)[,1]
+      )
+      kept <- geoms[sel, , drop = FALSE]
+      
+      if (nrow(kept) == 0 && nrow(geoms) > 0) {
+        bbox_buf <- sf::st_buffer(bbox_sfc, 0.1)
+        sel2 <- sf::st_intersects(geoms, bbox_buf, sparse = FALSE)[,1]
+        kept2 <- geoms[sel2, , drop = FALSE]
+        if (nrow(kept2) > 0) {
+          message("Note: Intersection only found with small buffer (0.1 m): ", nrow(kept2))
+          kept <- kept2
+        }
+      }
+      
+      if (trim && nrow(kept) > 0) {
+        kept$..orig_row <- seq_len(nrow(kept))
+        kept <- suppressWarnings(sf::st_intersection(kept, bbox_sfc))
+        kept$..orig_row <- NULL
+      }
+      
+      list(filtered = kept, n_in = nrow(geoms), n_kept = nrow(kept))
     }
     
     message("Training data is loaded")
-
-    
     if (is.character(geometries)) {
       tryCatch({
         geometries <- geojsonsf::geojson_sf(geometries)
@@ -276,111 +366,129 @@ aggregate_spatial <- Process$new(
         tryCatch({
           geometries <- sf::read_sf(geometries)
         }, error = function(e2) {
-          stop(
-            "Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ",
-            e2$message
-          )
+          stop("Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ", e2$message)
         })
       })
     }
-    srs <- gdalcubes::srs(data)
     if (is.list(geometries) && !inherits(geometries, "sf")) {
-      # serialize list to JSON string, then parse with sf
       geometries <- jsonlite::toJSON(geometries, auto_unbox = TRUE)
       geometries <- geojsonsf::geojson_sf(geometries)
-
-      
     }
-  
+    if (!inherits(geometries, "sf")) stop("Geometries must be either a GeoJSON string or an sf object")
     
-    # Ensure geometries is an sf object
-    if (!inherits(geometries, "sf")) {
-      stop("Geometries must be either a GeoJSON string or an sf object")
-    }
-    # Get the reducer function if specified
+    message("n features: ", nrow(geometries))
+    message("empty: ", sum(sf::st_is_empty(geometries)),
+            " | invalid: ", sum(!sf::st_is_valid(geometries)))
+    
+    geometries <- ensure_crs(geometries, "geometries (input)")
+    
+    log_crs("input", sf::st_crs(geometries))
+    log_bbox("input", geometries)
+    
     reducer_type <- if (!is.null(reducer)) {
       switch(
         reducer,
-        "mean" = base::mean,
+        "mean"   = base::mean,
         "median" = stats::median,
-        "min" = base::min,
-        "max" = base::max,
-        "sum" = base::sum,
-        "count" = count,
-        "sd" = sd,
-        "var" = var,
+        "min"    = base::min,
+        "max"    = base::max,
+        "sum"    = base::sum,
+        "count"  = function(x) sum(!is.na(x)),
+        "sd"     = stats::sd,
+        "var"    = stats::var,
         stop("The specified reducer is not supported")
       )
     } else {
       NULL
     }
     
-    message('geomeotreies adding fid to it')
+    message("geomeotreies adding fid to it")
     geometries <- add_fid_if_missing(geometries)
     geometries$fid <- as.integer(geometries$fid)
-    library(gdalcubes)
-
     
-    cube_info <- tryCatch({
-      cube_crs <- gdalcubes::srs(data)
-
-      dims <- gdalcubes::dimensions(data)
-
-      cube_extent <- list(
-        left = dims$x$low,
-        right = dims$x$high,
-        bottom = dims$y$low,
-        top = dims$y$high
-      )
-      
-      list(crs = cube_crs, extent = cube_extent)
-      
-    }, error = function(e) {
-      message("Error accessing CRS or dimensions of the DataCube: ", e$message)
-      stop("Error accessing CRS or dimensions of the DataCube: ", e$message)
-    })
-    cube_crs <- cube_info$crs
-    cube_extent <- cube_info$extent
+    cube_crs <- gdalcubes::srs(data)
+    dims <- gdalcubes::dimensions(data)
+    cube_extent <- list(
+      left   = dims$x$low,  right = dims$x$high,
+      bottom = dims$y$low,  top   = dims$y$high
+    )
+    log_crs("cube", sf::st_crs(cube_crs))
     
+    if (nrow(geometries) > 0 && !all(sf::st_is_empty(geometries))) {
+      suppressWarnings({
+        ct <- try(sf::st_transform(sf::st_centroid(sf::st_union(geometries)), 4326), silent = TRUE)
+        if (!inherits(ct, "try-error")) {
+          cc <- sf::st_coordinates(ct)
+          message("train centroid (lon,lat): ", paste(round(cc, 6), collapse=", "))
+        }
+      })
+    }
     
-    
-
-    cube_crs <- gdalcubes::srs(data)  
-    geometries <- sf::st_transform(geometries, cube_crs)
-    
-    
-    cube_bbox <- sf::st_bbox(c(
-      xmin = cube_extent$left,
-      ymin = cube_extent$bottom,
-      xmax = cube_extent$right,
-      ymax = cube_extent$top
-    ), crs = sf::st_crs(geometries)) %>% 
-      sf::st_as_sfc()
-    
-    within_idx <- lengths(
-      sf::st_within(geometries, cube_bbox, sparse = FALSE)
-    ) > 0
-    
-    geometries_in_bbox <- geometries[within_idx, ]
-
-    
+    keep <- filter_geoms_to_cube(
+      geoms = geometries,
+      cube_extent = cube_extent,
+      cube_crs = cube_crs,
+      mode = "intersects",
+      buffer = 0,
+      trim = FALSE
+    )
+    geometries_in_bbox <- keep$filtered
+    message("n features in bbox: ", keep$n_kept, " (von ", keep$n_in, ")")
     if (nrow(geometries_in_bbox) == 0) {
-      stop("No training geometries are completely in the data cube!")
+      cube_bbox_sfc <- sf::st_as_sfc(sf::st_bbox(
+        c(xmin = cube_extent$left,
+          ymin = cube_extent$bottom,
+          xmax = cube_extent$right,
+          ymax = cube_extent$top),
+        crs = sf::st_crs(cube_crs)
+      ))
+      
+      overlap_area <- tryCatch(
+        {
+          iu <- sf::st_intersection(sf::st_union(geometries), cube_bbox_sfc)
+          as.numeric(sf::st_area(iu))
+        },
+        error = function(e) NA_real_
+      )
+      message("overlap_area (m^2): ", overlap_area)
+      stop("No training geometries intersect the data cube!")
     }
     
     message("Go to extraction now...")
-    vec_cube <- gdalcubes::extract_geom(
-      cube = data,
-      sf = geometries,
-      FUN = reducer_type,
-      reduce_time = FALSE,
-      merge = TRUE,
-      drop_geom = FALSE # Keep geometries in output
-    )
+    
+    vec_cube <- tryCatch({
+      gdalcubes::extract_geom(
+        cube        = data,
+        sf          = geometries_in_bbox,
+        FUN         = reducer_type,   
+        reduce_time = FALSE,
+        merge       = TRUE,
+        drop_geom   = FALSE
+      )
+    }, error = function(e) {
+      diag <- list(
+        error_message            = conditionMessage(e),
+        cube_srs                 = tryCatch(gdalcubes::srs(data), error = function(.) NA),
+        cube_extent              = cube_extent,
+        n_geoms_input            = nrow(geometries),
+        n_geoms_in_bbox          = nrow(geometries_in_bbox),
+        geoms_crs                = tryCatch(sf::st_crs(geometries)$input, error = function(.) NA),
+        geoms_bbox_is_na         = tryCatch(any(is.na(sf::st_bbox(geometries))), error = function(.) NA),
+        geoms_in_bbox_crs        = tryCatch(sf::st_crs(geometries_in_bbox)$input, error = function(.) NA),
+        geoms_in_bbox_bbox_is_na = tryCatch(any(is.na(sf::st_bbox(geometries_in_bbox))), error = function(.) NA),
+        reducer_is_func          = is.function(reducer_type)
+      )
+      message("extract_geom() FAILED. Diagnostics:\n", paste(utils::capture.output(str(diag)), collapse = "\n"))
+      stop("extract_geom() failed: ", conditionMessage(e))
+    })
+    
+    message("extract_geom() OK. Result-type: ", paste(class(vec_cube), collapse = ", "))
     return(vec_cube)
-
   }
 )
+
+
+      
 
 #' aggregate temporal period
 aggregate_temporal_period <- Process$new(
@@ -960,7 +1068,7 @@ merge_cubes <- Process$new(
   operation = function(data1, data2, context, job) {
     if ("cube" %in% class(data1) && "cube" %in% class(data2)) {
       compare <- compare.list(dimensions(data1), dimensions(data2))
-
+      
       if (FALSE %in% compare) {
         stop("Dimensions of datacubes are not equal")
       } else {
@@ -972,6 +1080,7 @@ merge_cubes <- Process$new(
     }
   }
 )
+
 
 #' array element
 array_element <- Process$new(
