@@ -214,6 +214,15 @@ load_collection <- Process$new(
   }
 )
 
+
+
+
+
+
+
+
+
+
 #' aggregate temporal period
 aggregate_spatial <- Process$new(
   id = "aggregate_spatial",
@@ -225,12 +234,12 @@ aggregate_spatial <- Process$new(
       name = "data",
       description = "The source data cube.", 
       schema = list(type = "object", 
-      subtype = "datacube")),
+                    subtype = "datacube")),
     Parameter$new(
       name = "geometries", 
       description = "Geometries for which the aggregation will be computed. Feature properties are preserved for vector data cubes and all GeoJSON Features.", 
       schema = list(type = "object", 
-      subtype = "datacube")),
+                    subtype = "datacube")),
     Parameter$new(
       name = "reducer", 
       description = "A reducer to be applied on all values of each geometry. A reducer is a single process such as mean or a set of processes, which computes a single value for a list of values, see the category 'reducer' for such processes.", 
@@ -252,9 +261,7 @@ aggregate_spatial <- Process$new(
     
     library(sf)
     library(gdalcubes)
-    suppressPackageStartupMessages({
-      if (!"lwgeom" %in% .packages()) try(requireNamespace("lwgeom", quietly = TRUE))
-    })
+   
     
     log_bbox <- function(tag, x) {
       bb <- suppressWarnings(try(sf::st_bbox(x), silent = TRUE))
@@ -292,20 +299,36 @@ aggregate_spatial <- Process$new(
     
     repair_geoms <- function(g) {
       g <- sf::st_zm(g, drop = TRUE, what = "ZM")
+      
       if (requireNamespace("lwgeom", quietly = TRUE)) {
         g <- lwgeom::st_make_valid(g)
       } else {
         g <- sf::st_make_valid(g)
       }
-      g <- suppressWarnings(sf::st_collection_extract(g, "POLYGON", warn = FALSE))
-      if (any(sf::st_is_empty(g))) {
-        n_empty <- sum(sf::st_is_empty(g))
-        message("drop empty geometries after make_valid/extract: ", n_empty)
-        g <- g[!sf::st_is_empty(g), , drop = FALSE]
+      
+      gt <- sf::st_geometry_type(g)
+      
+      if (all(gt %in% c("POINT", "MULTIPOINT"))) {
+        g <- suppressWarnings(sf::st_collection_extract(g, "POINT", warn = FALSE))
+        if (any(sf::st_is_empty(g))) {
+          n_empty <- sum(sf::st_is_empty(g))
+          message("drop empty point geometries after make_valid/extract: ", n_empty)
+          g <- g[!sf::st_is_empty(g), , drop = FALSE]
+        }
+        
+      } else {
+        g <- suppressWarnings(sf::st_collection_extract(g, "POLYGON", warn = FALSE))
+        if (any(sf::st_is_empty(g))) {
+          n_empty <- sum(sf::st_is_empty(g))
+          message("drop empty polygon geometries after make_valid/extract: ", n_empty)
+          g <- g[!sf::st_is_empty(g), , drop = FALSE]
+        }
       }
+      
       g <- sf::st_set_precision(g, 1e-2)
       g
     }
+    
     
     filter_geoms_to_cube <- function(geoms, cube_extent, cube_crs,
                                      mode = c("intersects","within"),
@@ -319,7 +342,6 @@ aggregate_spatial <- Process$new(
       
       if (buffer != 0) bbox_sfc <- sf::st_buffer(bbox_sfc, buffer)
       
-      # CRS angleichen (hier wird erst transformiert)
       if (sf::st_crs(geoms) != sf::st_crs(cube_crs)) {
         geoms <- sf::st_transform(geoms, sf::st_crs(cube_crs))
       }
@@ -357,6 +379,7 @@ aggregate_spatial <- Process$new(
       
       list(filtered = kept, n_in = nrow(geoms), n_kept = nrow(kept))
     }
+    
     
     message("Training data is loaded")
     if (is.character(geometries)) {
@@ -428,7 +451,7 @@ aggregate_spatial <- Process$new(
       geoms = geometries,
       cube_extent = cube_extent,
       cube_crs = cube_crs,
-      mode = "intersects",
+      mode = "within",
       buffer = 0,
       trim = FALSE
     )
@@ -487,8 +510,6 @@ aggregate_spatial <- Process$new(
   }
 )
 
-
-      
 
 #' aggregate temporal period
 aggregate_temporal_period <- Process$new(
@@ -1447,7 +1468,7 @@ array_interpolate_linear <- Process$new(
     tryCatch({
       message("\nFill NA values...")
 
-      gdalcubes::fill_time(data, method)
+      cube <- gdalcubes::fill_time(data, method)
 
       message("NA values filled!")
     }, error = function(err) {
@@ -1456,7 +1477,7 @@ array_interpolate_linear <- Process$new(
       stop(toString(err$message))
     })
 
-    return(data)
+    return(cube)
   }
 )
 
