@@ -1,6 +1,7 @@
 #load required librarys
 library(openeo) 
 library(terra)
+
 # Connect to the openEO backend (in this case, a local backend)
 con <- connect("http://localhost:8000")
 # Retrieve available processes from the backend (e.g., for ML, preprocessing)
@@ -10,7 +11,7 @@ login(user = "user", password = "password")
 # Get a list of supported file formats (for input/output)
 formats <- list_file_formats()
 # Path to the GeoJSON training data (containing points and labels)
-training_data <-(".../path_to_the_trainings_data")
+training_data <-("../train_data/land_train_data.geojson")
 
 # Load a Sentinel-2 data cube covering the training area
 datacube_crop <- p$load_collection(
@@ -22,9 +23,10 @@ datacube_crop <- p$load_collection(
     north = 5720076,
     crs = 25832
   ),
-  temporal_extent = c("2021-06-01", "2021-07-30"),
+  temporal_extent = c("2021-06-01", "2021-08-30"),
   bands = c("B02", "B03", "B04", "B08")
 )
+datacube_crop <- p$array_interpolate_linear(datacube_crop)
 # Load a Sentinel-2 data cube covering the area of interest (AOI) for prediction
 datacube_aoi <- p$load_collection(
   id = "sentinel-s2-l2a-cogs",
@@ -35,10 +37,10 @@ datacube_aoi <- p$load_collection(
     north = 5759460.3,
     crs = 25832
   ),
-  temporal_extent = c("2021-06-01", "2021-07-30"),
+  temporal_extent = c("2021-06-01", "2021-08-30"),
   bands = c("B02", "B03", "B04", "B08")
 )
-
+datacube_aoi <- p$array_interpolate_linear(datacube_aoi)
 
 # model shell for the tempcnn
 tempcnn <- p$mlm_class_tempcnn(
@@ -83,13 +85,13 @@ result_predict <- p$save_result(
 )
 # Execute the full process chain and measure the execution time
 start.time <- Sys.time()
-svm <- compute_result(result_predict)
+pre <- compute_result(result_predict)
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
 # Visualize the prediction result as a raster
-plot(rast(svm))
-r <- rast(svm)
+plot(rast(pre))
+r <- rast(pre)
 table(values(r))
 
 

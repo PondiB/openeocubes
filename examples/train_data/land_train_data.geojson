@@ -1,0 +1,548 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {
+          "fid": 1,
+          "Label": "Wald",
+          "ClassID": 1
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4530336, 51.5693962],
+              [7.4520832, 51.5625256],
+              [7.4611466, 51.5589562],
+              [7.4601393, 51.5680142],
+              [7.4601393, 51.5680142],
+              [7.4530336, 51.5693962]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 2, "Label": "Wald", "ClassID": 1 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4679837, 51.5681169],
+              [7.4695571, 51.5604323],
+              [7.4726976, 51.5674407],
+              [7.4679837, 51.5681169]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 3, "Label": "Wasser", "ClassID": 2 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4017649, 51.5172864],
+              [7.398151, 51.5160622],
+              [7.4004202, 51.5150412],
+              [7.4004202, 51.5150412],
+              [7.4017649, 51.5172864]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 4, "Label": "Wasser", "ClassID": 2 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4053792, 51.5159967],
+              [7.4037997, 51.5148277],
+              [7.4063285, 51.5145205],
+              [7.4053792, 51.5159967]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 5, "Label": "Wasser", "ClassID": 2 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.5132972, 51.4907468],
+              [7.5100753, 51.4908972],
+              [7.5125273, 51.4895211],
+              [7.5132972, 51.4907468]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 6, "Label": "Wasser", "ClassID": 2 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4374581, 51.5466891],
+              [7.4359762, 51.5470929],
+              [7.4359097, 51.5464772],
+              [7.4374581, 51.5466891]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 7, "Label": "Acker_unbepflanzt", "ClassID": 3 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4354302, 51.5713077],
+              [7.4344649, 51.5700516],
+              [7.4367654, 51.5688118],
+              [7.4390753, 51.5704956],
+              [7.4354302, 51.5713077]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 8, "Label": "Acker_unbepflanzt", "ClassID": 3 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.432693, 51.5763123],
+              [7.4330359, 51.5739944],
+              [7.434945, 51.5752221],
+              [7.432693, 51.5763123]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 9, "Label": "Acker_unbepflanzt", "ClassID": 3 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4927671, 51.5863071],
+              [7.4891893, 51.585742],
+              [7.4900111, 51.584769],
+              [7.4927671, 51.5863071]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 10, "Label": "Acker_unbepflanzt", "ClassID": 3 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4994103, 51.5830316],
+              [7.4972712, 51.582731],
+              [7.4978828, 51.5801431],
+              [7.4994103, 51.5830316]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 11, "Label": "Acker_unbepflanzt", "ClassID": 3 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4678282, 51.5962098],
+              [7.4655024, 51.5955784],
+              [7.4658367, 51.5941209],
+              [7.4678282, 51.5962098]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 12, "Label": "Acker_unbepflanzt", "ClassID": 3 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.5218285, 51.5990267],
+              [7.5175716, 51.5977162],
+              [7.522586, 51.5973149],
+              [7.5218285, 51.5990267]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 13, "Label": "Acker_bepflanzt", "ClassID": 4 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.5026221, 51.590723],
+              [7.5001694, 51.5906097],
+              [7.5025768, 51.5880994],
+              [7.5026221, 51.590723]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 14, "Label": "Acker_bepflanzt", "ClassID": 4 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4963715, 51.59537],
+              [7.4939669, 51.5951205],
+              [7.4937775, 51.5942165],
+              [7.4962349, 51.5941933],
+              [7.4963715, 51.59537]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 15, "Label": "Acker_bepflanzt", "ClassID": 4 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.500507, 51.595013],
+              [7.4989247, 51.5951021],
+              [7.5006844, 51.5936218],
+              [7.500507, 51.595013]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 16, "Label": "Acker_bepflanzt", "ClassID": 4 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4886654, 51.5618754],
+              [7.4870339, 51.5618339],
+              [7.4875108, 51.560672],
+              [7.4890008, 51.5606843],
+              [7.4886654, 51.5618754]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 17, "Label": "Acker_bepflanzt", "ClassID": 4 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.3977967, 51.6031643],
+              [7.3947658, 51.6032595],
+              [7.3951069, 51.6010509],
+              [7.3985349, 51.6021361],
+              [7.3977967, 51.6031643]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 18, "Label": "Wald", "ClassID": 1 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4320495, 51.5806754],
+              [7.4325856, 51.577841],
+              [7.4368883, 51.5802481],
+              [7.4320495, 51.5806754]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 19, "Label": "Wald", "ClassID": 1 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.4740649, 51.6015576],
+              [7.4741803, 51.5981164],
+              [7.4776246, 51.5974507],
+              [7.4789019, 51.6012379],
+              [7.4740649, 51.6015576]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 20, "Label": "Wald", "ClassID": 1 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.5070392, 51.5928012],
+              [7.5058455, 51.5904089],
+              [7.5101971, 51.5914752],
+              [7.5070392, 51.5928012]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 21, "Label": "Industrie", "ClassID": 5 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.5030709, 51.5333503],
+              [7.4986384, 51.5322554],
+              [7.5037182, 51.5296426],
+              [7.5095895, 51.5322857],
+              [7.5030709, 51.5333503]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 22, "Label": "Industrie", "ClassID": 5 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.490506, 51.5443508],
+              [7.4908871, 51.5434267],
+              [7.4966871, 51.5456051],
+              [7.490506, 51.5443508]
+            ]
+          ]
+        }
+      },
+      {
+        "type": "Feature",
+        "properties": { "fid": 23, "Label": "Industrie", "ClassID": 5 },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [7.5031099, 51.5428456],
+              [7.5003095, 51.541389],
+              [7.5038645, 51.5405464],
+              [7.5031099, 51.5428456]
+            ]
+          ]
+        }
+      },
+  {
+    "type": "Feature",
+    "properties": { "fid": 24, "Label": "Industrie", "ClassID": 5 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.4195672, 51.5669283],
+          [7.4197256, 51.5636243],
+          [7.4214393, 51.5635108],
+          [7.4212138, 51.5668548],
+          [7.4195672, 51.5669283]
+        ]
+      ]
+    }
+  },
+  {
+    "type": "Feature",
+    "properties": { "fid": 25, "Label": "Industrie", "ClassID": 5 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.4232029, 51.5651192],
+          [7.4230758, 51.563724],
+          [7.4270871, 51.5637232],
+          [7.4272634, 51.5649688],
+          [7.4232029, 51.5651192]
+        ]
+      ]
+    }
+  },
+  {
+    "type": "Feature",
+    "properties": { "fid": 26, "Label": "Industrie", "ClassID": 5 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.4202743, 51.5617054],
+          [7.4203841, 51.5604364],
+          [7.4302136, 51.5607732],
+          [7.4300608, 51.562028],
+          [7.4202743, 51.5617054]
+        ]
+      ]
+    }
+  },
+  {
+    "type": "Feature",
+    "properties": { "fid": 27, "Label": "Industrie", "ClassID": 5 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.4210687, 51.5596532],
+          [7.423738, 51.5578858],
+          [7.431667, 51.5573909],
+          [7.43099, 51.5598683],
+          [7.4210687, 51.5596532]
+        ]
+      ]
+    }
+  },
+  {
+    "type": "Feature",
+    "properties": { "fid": 28, "Label": "Stadt", "ClassID": 6 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.4659959, 51.51742],
+          [7.4587163, 51.5151114],
+          [7.4684726, 51.5127801],
+          [7.4726333, 51.5166869],
+          [7.4659959, 51.51742]
+        ]
+      ]
+    }
+  },
+  {
+    "type": "Feature",
+    "properties": { "fid": 29, "Label": "Stadt", "ClassID": 6 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.4514753, 51.5258907],
+          [7.4513032, 51.5219265],
+          [7.4570234, 51.5250348],
+          [7.4514753, 51.5258907]
+        ]
+      ]
+    }
+  },
+  {
+    "type": "Feature",
+    "properties": { "fid": 30, "Label": "Stadt", "ClassID": 6 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.4552937, 51.5049567],
+          [7.4577325, 51.5027482],
+          [7.4641284, 51.5052366],
+          [7.4552937, 51.5049567]
+        ]
+      ]
+    }
+  },
+  {
+    "type": "Feature",
+    "properties": { "fid": 31, "Label": "Stadt", "ClassID": 6 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.41105, 51.5031087],
+          [7.4127888, 51.5009463],
+          [7.41547, 51.5044254],
+          [7.41105, 51.5031087]
+        ]
+      ]
+    }
+  },
+  {
+    "type": "Feature",
+    "properties": { "fid": 32, "Label": "Stadt", "ClassID": 6 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.4532486, 51.5459421],
+          [7.4474693, 51.5432154],
+          [7.4620725, 51.5415771],
+          [7.4532486, 51.5459421]
+        ]
+      ]
+    }
+  },
+  {
+    "type": "Feature",
+    "properties": { "fid": 33, "Label": "Stadt", "ClassID": 6 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.4124832, 51.5387033],
+          [7.4085513, 51.535863],
+          [7.4114663, 51.5339352],
+          [7.4124832, 51.5387033]
+        ]
+      ]
+    }
+  },
+  {
+    "type": "Feature",
+    "properties": { "fid": 34, "Label": "Stadt", "ClassID": 6 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.4855333, 51.4439552],
+          [7.4843231, 51.4435297],
+          [7.48504, 51.4430061],
+          [7.4855333, 51.4439552]
+        ]
+      ]
+    }
+  },
+  {
+    "type": "Feature",
+    "properties": { "fid": 35, "Label": "Stadt", "ClassID": 6 },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [7.5323599, 51.4330954],
+          [7.5317611, 51.4323434],
+          [7.5335823, 51.4321203],
+          [7.5323599, 51.4330954]
+            ]
+          ]
+        }
+      }
+    ]
+  }
