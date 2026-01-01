@@ -2,18 +2,13 @@
 % Please edit documentation in R/processes-ml.R
 \name{ml_model_schema}
 \alias{ml_model_schema}
-\title{Get ML Model Schema}
+\title{ml_model_schema}
 \usage{
 ml_model_schema()
 }
 \value{
-A list containing:
-\itemize{
-\item{description}{A character string describing the ML model}
-\item{schema}{A list defining the type and subtype of the ML model}
-}
+model list
 }
 \description{
-Returns a list containing the description and schema for a machine learning model object.
-This schema is used to define the structure of ML models in the system.
+Return a list with datacube description and schema
 }

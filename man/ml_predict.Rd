@@ -3,7 +3,7 @@
 \docType{data}
 \name{ml_predict}
 \alias{ml_predict}
-\title{Machine Learning Prediction Process}
+\title{Apply a trained ML/DL model to a data cube and return predictions}
 \format{
 An object of class \code{Process} (inherits from \code{R6}) of length 12.
 }
@@ -11,17 +11,15 @@ An object of class \code{Process} (inherits from \code{R6}) of length 12.
 ml_predict
 }
 \arguments{
-\item{data}{A data cube containing input features for prediction}
+\item{cube}{Object of subtype "raster-cube". The area-of-interest data cube on which predictions will be made.}
 
-\item{model}{A trained machine learning model to use for prediction}
-
-\item{dimension}{Optional dimensions to reduce by the model}
+\item{model}{Object of subtype "mlm-model" or a file path (ONNX, .rds, or .pt). The trained model to use for prediction.}
 }
 \value{
-A data cube containing the predicted values
+A raster-cube object containing the predicted values in a new "prediction" band.
 }
 \description{
-Applies a trained machine learning model to a data cube of input features and returns predictions.
-This process handles the prediction workflow and error handling for ML model applications.
+Applies a machine learning or deep learning model to every pixel (and/or time step)
+of the input raster-cube and returns a new data cube with the predicted values.
 }
 \keyword{datasets}
