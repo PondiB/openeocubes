@@ -5,10 +5,16 @@
 \title{datacube_schema}
 \usage{
 datacube_schema()
+
+datacube_schema()
 }
 \value{
 datacube list
+
+datacube list
 }
 \description{
+Return a list with datacube description and schema
+
 Return a list with datacube description and schema
 }

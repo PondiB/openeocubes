@@ -3,7 +3,7 @@
 \docType{data}
 \name{save_ml_model}
 \alias{save_ml_model}
-\title{Save Machine Learning Model}
+\title{Save trained ML model as ONNX, JSON (MLM-STAC), and RDS}
 \format{
 An object of class \code{Process} (inherits from \code{R6}) of length 12.
 }
@@ -11,19 +11,26 @@ An object of class \code{Process} (inherits from \code{R6}) of length 12.
 save_ml_model
 }
 \arguments{
-\item{data}{A trained machine learning model object}
+\item{data}{Object of subtype "mlm-model". A trained ML model: a caret \code{train} object or a torch \code{nn_module}.}
 
-\item{name}{A unique identifier for the model}
+\item{name}{Character. Unique identifier for the model; used as base filename for saved artifacts.}
 
-\item{task}{The use case(s) for which the model was trained}
+\item{tasks}{List. The use case(s) of the model (e.g., \code{list("classification")} or \code{list("regression")}).}
 
-\item{options}{Additional options for saving the model (optional)}
+\item{options}{List, optional. Additional key-value options for metadata (e.g., \code{list("mlm:pretrained" = TRUE)}).}
 }
 \value{
-The saved ML model object
+A named list with file paths to the exported artifacts:
+\describe{
+\item{onnx}{Path to the saved ONNX model file}
+\item{rds}{Path to the saved RDS (or raw RDS) file}
+\item{json}{Path to the saved MLM-STAC JSON metadata file}
+}
 }
 \description{
-Saves a trained machine learning model in ONNX format with associated metadata.
-This process handles model serialization and metadata management.
+Saves a trained machine learning model in ONNX, JSON (MLM-STAC) and RDS formats.
+For Torch (nn_module) models, also produces a TorchScript (.pt) version.
+Handles caret \code{train} objects and torch \code{nn_module}s, enriches ONNX with metadata,
+and returns download links for all artifacts.
 }
 \keyword{datasets}

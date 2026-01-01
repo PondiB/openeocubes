@@ -2,18 +2,13 @@
 % Please edit documentation in R/processes-ml.R
 \name{ml_datacube_schema}
 \alias{ml_datacube_schema}
-\title{Get Data Cube Schema}
+\title{ml_datacube_schema}
 \usage{
 ml_datacube_schema()
 }
 \value{
-A list containing:
-\itemize{
-\item{description}{A character string describing the data cube}
-\item{schema}{A list defining the type and subtype of the data cube}
-}
+datacube list
 }
 \description{
-Returns a list containing the description and schema for a data cube object.
-This schema is used to define the structure of data cubes in machine learning processes.
+Return a list with datacube description and schema
 }

@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsodium-dev libudunits2-dev \
     zlib1g-dev libunwind-dev libssl-dev libxml2-dev \
     doxygen graphviz \
+    python3 python3-pip python3-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch 20230802.1 https://github.com/abseil/abseil-cpp.git /tmp/abseil && \
@@ -36,6 +37,10 @@ RUN R -e "install.packages(c('remotes'), repos='https://cloud.r-project.org')"
 RUN R -e "install.packages(c('devtools'), repos='https://cloud.r-project.org')"
 
 RUN R -e "install.packages(c('gdalcubes','plumber','useful','ids','R6','s2','sf','rstac','bfast','geojsonsf'), repos='https://cloud.r-project.org')"
+
+# Install missing required packages explicitly
+# Note: stats and tools are base R packages, no need to install
+RUN R -e "install.packages(c('kernlab','readr','reticulate','xgboost','randomForest','terra','abind','tidyr','httr','caret','torch','dplyr','base64enc','jsonlite','tibble','rlang'), repos='https://cloud.r-project.org')"
 
 RUN mkdir -p /opt/dockerfiles/ /var/openeo/workspace/ /var/openeo/workspace/data/
 
