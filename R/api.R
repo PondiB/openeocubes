@@ -9,32 +9,45 @@
 #' @include api_process_graphs.R
 NULL
 
-# Capabilities handler
-.capabilities = function() {
+
+
+
+.capabilities = function(req, res) {
   
-  config = Session$getConfig()
+  res$setHeader("Content-Type", "application/json; charset=utf-8")
+  
+  config    = Session$getConfig()
   endpoints = Session$getEndpoints()
   
-  endpoints = endpoints %>% group_by(path) %>% summarise(
-    paths=list(tibble(path,method) %>% (function(x,...){
-      return(list(path=unique(x$path),methods=as.list(x$method)))
-    })))
+  endpoints = endpoints %>% 
+    group_by(path) %>% 
+    summarise(
+      paths = list(
+        tibble(path, method) %>% (function(x, ...) {
+          list(
+            path    = unique(x$path),
+            methods = as.list(x$method)
+          )
+        })
+      )
+    )
   
-  list = list()
-  list$api_version = config$api_version
-  list$backend_version = config$backend_version
-  list$stac_version = config$stac_version
-  list$id = config$id
-  list$title = config$title
-  list$description = config$description
-  list$endpoints = endpoints$paths
-  list$links = list(list(
-    rel = "self",
-    href = paste(config$base_url, "", sep = "/")))
+  out = list()
+  out$api_version    = config$api_version
+  out$backend_version = config$backend_version
+  out$stac_version   = config$stac_version
+  out$id             = config$id
+  out$title          = config$title
+  out$description    = config$description
+  out$endpoints      = endpoints$paths
+  out$links          = list(list(
+    rel  = "self",
+    href = paste(config$base_url, "", sep = "/")
+  ))
   
-  return(list)
-  
+  return(out)
 }
+
 
 .well_known = function() {
   
@@ -201,15 +214,30 @@ NULL
 
 .cors_filter = function(req,res) {
   res$setHeader("Access-Control-Allow-Origin", req$HTTP_ORIGIN)
-  res$setHeader("Access-Control-Expose-Headers", "Location, OpenEO-Identifier, OpenEO-Costs")
+  res$setHeader("Access-Control-Expose-Headers", "Link, Location, OpenEO-Costs, OpenEO-Identifier")
   forward()
 }
 
-.cors_option = function(req,res, ...) {
-  res$setHeader("Access-Control-Allow-Headers", "Content-Type")
-  res$setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS,PATCH")
-  res$status = 204
+.cors_option = function(req, res, ...) {
+  res$setHeader("Access-Control-Allow-Origin", "*")
+  res$setHeader(
+    "Access-Control-Expose-Headers",
+    "Link, Location, OpenEO-Costs, OpenEO-Identifier"
+  )
+  
+  res$setHeader(
+    "Access-Control-Allow-Headers",
+    "Authorization, Content-Type"
+  )
+  
+  res$setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+  )
+  
+  res$status <- 204
 }
+
 
 #' dedicate the handler functions to the corresponding paths
 addEndpoint = function() {
@@ -233,6 +261,12 @@ addEndpoint = function() {
   Session$createEndpoint(path = "/collections",
                          method = "GET",
                          handler = .collections)
+  
+  Session$createEndpoint(path = "/collections",
+                         method = "OPTIONS",
+                         handler = .cors_option,
+                         filter = FALSE)
+  
   
   Session$createEndpoint(path = "/collections/{collection_id}",
                          method = "GET",
@@ -352,4 +386,5 @@ addEndpoint = function() {
   Session$assignProcess(mlm_class_mlp)
   Session$assignProcess(mlm_class_lighttae)
   Session$assignProcess(mlm_class_stgf)
+  Session$assignProcess(load_stac_ml)
 }

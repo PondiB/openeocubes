@@ -384,6 +384,7 @@ aggregate_spatial <- Process$new(
     message("Training data is loaded")
     if (is.character(geometries)) {
       tryCatch({
+        message("load")
         geometries <- geojsonsf::geojson_sf(geometries)
       }, error = function(e) {
         tryCatch({
@@ -393,6 +394,7 @@ aggregate_spatial <- Process$new(
         })
       })
     }
+    
     if (is.list(geometries) && !inherits(geometries, "sf")) {
       geometries <- jsonlite::toJSON(geometries, auto_unbox = TRUE)
       geometries <- geojsonsf::geojson_sf(geometries)
