@@ -403,22 +403,19 @@ aggregate_spatial <- Process$new(
 
     message("Training data is loaded")
     if (is.character(geometries)) {
-      tryCatch(
-        {
-          geometries <- geojsonsf::geojson_sf(geometries)
-        },
-        error = function(e) {
-          tryCatch(
-            {
-              geometries <- sf::read_sf(geometries)
-            },
-            error = function(e2) {
-              stop("Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ", e2$message)
-            }
-          )
-        }
-      )
+      tryCatch({
+        message("load")
+        geometries <- geojsonsf::geojson_sf(geometries)
+      }, error = function(e) {
+        tryCatch({
+          geometries <- sf::read_sf(geometries)
+        }, error = function(e2) {
+          stop("Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ", e2$message)
+        })
+      })
+
     }
+    
     if (is.list(geometries) && !inherits(geometries, "sf")) {
       geometries <- jsonlite::toJSON(geometries, auto_unbox = TRUE)
       geometries <- geojsonsf::geojson_sf(geometries)
