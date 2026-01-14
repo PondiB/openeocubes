@@ -47,18 +47,6 @@ eo_datacube <- datacube_schema()
 
 
 
-#' Vector datacube_schema
-#' @description Return a list with datacube description and schema
-#'
-#' @return datacube list
-datacube_schema <- function() {
-  info <- list(description = "A vector data cube with the computed results.",
-               schema = list(type = "object", subtype = "datacube"))
-  return(info)
-}
-
-#' return object for the processes
-vec_datacube <- datacube_schema()
 
 
 
@@ -256,12 +244,11 @@ aggregate_spatial <- Process$new(
       schema = list(type = "any"), 
       optional = TRUE)
   ),
-  returns = vec_datacube,
+  returns = eo_datacube,
   operation = function(data, geometries, reducer = NULL, target_dimension = NULL, context = NULL, job) {
     
     library(sf)
     library(gdalcubes)
-   
     
     log_bbox <- function(tag, x) {
       bb <- suppressWarnings(try(sf::st_bbox(x), silent = TRUE))
@@ -330,9 +317,7 @@ aggregate_spatial <- Process$new(
     }
     
     
-    filter_geoms_to_cube <- function(geoms, cube_extent, cube_crs,
-                                     mode = c("intersects","within"),
-                                     buffer = 0, trim = FALSE) {
+    filter_geoms_to_cube <- function(geoms, cube_extent, cube_crs, mode = c("intersects","within"), buffer = 0, trim = FALSE) {
       mode <- match.arg(mode)
       
       bbox_sfc <- sf::st_as_sfc(sf::st_bbox(c(
@@ -455,6 +440,7 @@ aggregate_spatial <- Process$new(
       buffer = 0,
       trim = FALSE
     )
+
     geometries_in_bbox <- keep$filtered
     message("n features in bbox: ", keep$n_kept, " (von ", keep$n_in, ")")
     if (nrow(geometries_in_bbox) == 0) {
@@ -501,11 +487,11 @@ aggregate_spatial <- Process$new(
         geoms_in_bbox_bbox_is_na = tryCatch(any(is.na(sf::st_bbox(geometries_in_bbox))), error = function(.) NA),
         reducer_is_func          = is.function(reducer_type)
       )
-      message("extract_geom() FAILED. Diagnostics:\n", paste(utils::capture.output(str(diag)), collapse = "\n"))
+      message("extract_geom() failed Diagnostics:\n", paste(utils::capture.output(str(diag)), collapse = "\n"))
       stop("extract_geom() failed: ", conditionMessage(e))
     })
     
-    message("extract_geom() OK. Result-type: ", paste(class(vec_cube), collapse = ", "))
+    message("extract_geom()worked. Result-type: ", paste(class(vec_cube), collapse = ", "))
     return(vec_cube)
   }
 )
@@ -555,6 +541,7 @@ aggregate_temporal_period <- Process$new(
                        dimension = NULL,
                        context = NULL,
                        job) {
+
     dt_period <- switch(
       period,
       week = "P7D",
@@ -640,6 +627,7 @@ filter_bbox <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, extent, job) {
+
     crs <- gdalcubes::srs(data)
     nw <- c(extent$west, extent$north)
     sw <- c(extent$west, extent$south)
@@ -676,11 +664,9 @@ filter_spatial <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, geometries, job) {
-    # read geojson url and convert to geometry
     geo_data <- sf::read_sf(geometries)
     geo_data <- geo_data$geometry
     geo_data <- sf::st_transform(geo_data, 3857)
-    # filter using geom
     cube <- gdalcubes::filter_geom(data, geo_data)
     return(cube)
   }

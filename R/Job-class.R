@@ -148,7 +148,8 @@ Job <- R6Class(
   #' @field output.folder Set a new output folder
   active = list(
     output.folder = function() {
-      return(paste(Session$config$workspace.path, "jobs", self$id,sep="/"))
+      return(file.path("jobs", self$id))
+      #return(paste(Session$config$workspace.path, "jobs", self$id,sep="/"))
     }
   )
 )

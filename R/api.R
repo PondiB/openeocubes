@@ -10,8 +10,9 @@
 NULL
 
 # Capabilities handler
-.capabilities = function() {
-  
+
+.capabilities = function(req, res) {
+  res$setHeader("Content-Type", "application/json; charset=utf-8")
   config = Session$getConfig()
   endpoints = Session$getEndpoints()
   
@@ -46,7 +47,6 @@ NULL
   version$versions = obj
   
   return(version)
-  
   
 }
 
@@ -201,15 +201,31 @@ NULL
 
 .cors_filter = function(req,res) {
   res$setHeader("Access-Control-Allow-Origin", req$HTTP_ORIGIN)
-  res$setHeader("Access-Control-Expose-Headers", "Location, OpenEO-Identifier, OpenEO-Costs")
+  res$setHeader("Access-Control-Expose-Headers", "Link, Location, OpenEO-Costs, OpenEO-Identifier")
   forward()
 }
 
-.cors_option = function(req,res, ...) {
-  res$setHeader("Access-Control-Allow-Headers", "Content-Type")
-  res$setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS,PATCH")
-  res$status = 204
+.cors_option = function(req, res, ...) {
+  res$setHeader("Access-Control-Allow-Origin", "*")
+  res$setHeader(
+    "Access-Control-Expose-Headers",
+    "Link, Location, OpenEO-Costs, OpenEO-Identifier"
+  )
+  
+  res$setHeader(
+    "Access-Control-Allow-Headers",
+    "Authorization, Content-Type"
+  )
+  
+  res$setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+  )
+  
+  res$status <- 204
 }
+
+
 
 #' dedicate the handler functions to the corresponding paths
 addEndpoint = function() {
@@ -233,6 +249,11 @@ addEndpoint = function() {
   Session$createEndpoint(path = "/collections",
                          method = "GET",
                          handler = .collections)
+
+  Session$createEndpoint(path = "/collections",
+                         method = "OPTIONS",
+                         handler = .cors_option,
+                         filter = FALSE)
   
   Session$createEndpoint(path = "/collections/{collection_id}",
                          method = "GET",
@@ -352,4 +373,5 @@ addEndpoint = function() {
   Session$assignProcess(mlm_class_mlp)
   Session$assignProcess(mlm_class_lighttae)
   Session$assignProcess(mlm_class_stgf)
+  Session$assignProcess(load_stac_ml)
 }
