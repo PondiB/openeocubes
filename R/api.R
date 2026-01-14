@@ -157,26 +157,34 @@ NULL
   )
 }
 
-.authorized <- function(req, res) {
-  tryCatch(
-    {
-      auth <- req$HTTP_AUTHORIZATION
-      sub <- substr(auth, 15, nchar(auth))
-      token <- Session$getToken()
+.authorized = function(req, res) {
+  tryCatch({
+    path   <- if (!is.null(req$PATH_INFO)) req$PATH_INFO else "/"
+    method <- if (!is.null(req$REQUEST_METHOD)) req$REQUEST_METHOD else "GET"
 
-      if (is.null(auth)) {
-        throwError("AuthenticationRequired")
-      } else if (sub != token) {
-        res$status <- 403
-        list(error = "AuthenticationFailed")
-      } else {
-        forward()
-      }
-    },
-    error = handleError
-  )
+    is_jobs_root <- identical(path, "/jobs") && method %in% c("GET", "POST")
+    is_jobs_id <- grepl("^/jobs/[^/]+$", path) && identical(method, "GET")
+
+    if (!(is_jobs_root || is_jobs_id)) {
+      return(forward())
+    }
+
+    auth <- req$HTTP_AUTHORIZATION
+    if (is.null(auth) || !nzchar(auth)) {
+      throwError("AuthenticationRequired")
+    }
+
+    sub <- substr(auth, 15, nchar(auth))
+    token <- Session$getToken()
+
+    if (sub != token) {
+      res$status <- 403
+      return(list(error = "AuthenticationFailed"))
+    }
+
+    forward()
+  }, error = handleError)
 }
-
 
 .executeSynchronous <- function(req, res) {
   tryCatch(
