@@ -10,6 +10,7 @@
 #' @importFrom tibble add_row
 #' @import plumber
 #' @import gdalcubes
+#' @import callr
 #' @export
 SessionInstance <- R6Class(
   "SessionInstance",
@@ -19,6 +20,7 @@ SessionInstance <- R6Class(
     processes = NULL,
     data = NULL,
     jobs =NULL,
+    job_executor = NULL,
 
     #' @description Create a new session
     #' @param configuration Session configuration
@@ -72,7 +74,8 @@ SessionInstance <- R6Class(
       host = private$config$host
 
       private$initRouter()
-      self$initDirectory()
+      self$initDirectory(cleanup = TRUE)
+      
 
       addEndpoint()
 
@@ -94,7 +97,7 @@ SessionInstance <- R6Class(
     },
 
     #' @description initializes workspace and data paths
-    #'
+  
     initDirectory = function(cleanup = TRUE) {
       
       shared_dir <- Sys.getenv("SHARED_TEMP_DIR", unset = "")
@@ -109,9 +112,12 @@ SessionInstance <- R6Class(
         Sys.setenv(SHARED_TEMP_DIR = shared_dir)
       }
       
+      # Verzeichnis sicher anlegen
       dir.create(shared_dir, recursive = TRUE, showWarnings = FALSE)
       
+      # >>> Cleanup wirklich ausführen <<<
       if (isTRUE(cleanup) && dir.exists(shared_dir)) {
+        # löscht nur Inhalt, nicht den Ordner selbst
         old <- list.files(shared_dir, full.names = TRUE, all.files = TRUE, no.. = TRUE)
         if (length(old) > 0) unlink(old, recursive = TRUE, force = TRUE)
         message("Shared directory cleaned: ", normalizePath(shared_dir))
@@ -119,6 +125,10 @@ SessionInstance <- R6Class(
       
       message("Using internal shared dir: ", normalizePath(shared_dir))
     },
+    
+    
+    
+    
 
     #' @description build a df to add the endpoints later on
     #'
@@ -209,8 +219,7 @@ SessionInstance <- R6Class(
       names(newJob) = job$id
       self$jobs = append(self$jobs, newJob)
     },
-
-
+    
     #' @description Enqueue a job for asynchronous execution
     enqueueJob = function(job) {
       shared_dir <- Sys.getenv("SHARED_TEMP_DIR", unset = "")
@@ -228,13 +237,16 @@ SessionInstance <- R6Class(
         stderr = ""
       )
     },
+    
+    
 
-    #' @description Execute the job
+    #' @description Execute the job (asynchronous path)
     #'
     #' @param job Job to be executed
     #'
-runJob = function(job) {
+    runJob = function(job) {
       tryCatch({
+        # Job-spezifisches Ausgabe-Verzeichnis unterhalb des workspace
         dir <- file.path(Session$getConfig()$workspace.path, job$output.folder)
         if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)
         
@@ -247,12 +259,14 @@ runJob = function(job) {
         out_files <- character(0)
         
         if (class(format) == "list") {
+          message("Here in the session list")
           if (format$title == "Network Common Data Form") {
             out_files <- gdalcubes::write_ncdf(
               job$results,
               file.path(dir, basename(tempfile(fileext = ".nc")))
             )
           } else if (format$title == "GeoTiff") {
+            message("Geotiff run ")
             out_files <- gdalcubes::write_tif(job$results, dir = dir)
           } else {
             throwError("FormatUnsupported")
@@ -264,12 +278,13 @@ runJob = function(job) {
               file.path(dir, basename(tempfile(fileext = ".nc")))
             )
           } else if (format == "GTiff") {
+            message("GeoTiff_output erkannt in der session ")
             out_files <- gdalcubes::write_tif(job$results, dir = dir)
           } else {
             throwError("FormatUnsupported")
           }
         }
-        message("finished writing output files")
+        message("finished eingeleitet")
        
         shared_dir <- Sys.getenv("SHARED_TEMP_DIR", unset = NA)
         
@@ -304,20 +319,21 @@ runJob = function(job) {
     config = NULL,
     token = NULL,
     base_url = NULL,
-
+    
     initRouter = function() {
       private$router = Router$new()
-      private$router$registerHook("postroute",.cors_filter)
+      private$router$registerHook("postroute", .cors_filter)
       private$router$filter("authorization", .authorized, serializer = serializer_unboxed_json())
       
+  
       private$router$handle(
-        path = "/<path:.*>",
+        path   = "/<path:.*>",
         method = "GET",
         handler = function(req, res, path) {
           res$status <- 404
           res$setHeader("Content-Type", "application/json; charset=utf-8")
           list(
-            code = "NotFound",
+            code    = "NotFound",
             message = paste0("The requested resource '", req$PATH_INFO, "' does not exist.")
           )
         },
@@ -325,6 +341,8 @@ runJob = function(job) {
       )
     }
   )
+  
+  
 )
 
 
@@ -336,3 +354,5 @@ createSessionInstance = function(configuration = NULL) {
   assign("Session", SessionInstance$new(configuration),envir=.GlobalEnv)
   invisible(Session)
 }
+
+

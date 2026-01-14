@@ -282,8 +282,8 @@ ml_fit <- Process$new(
       )
       message("Confusion Matrix:"); print(confusion_matrix)
       
-      dl_model$time_steps <- as.integer(time_steps)
-      dl_model$input_channels <- as.integer(length(features_data))
+      dl_model$time_steps         <- as.integer(time_steps)
+      dl_model$input_channels     <- as.integer(length(features_data))
       dl_model$input_data_columns <- features_data
       dl_model$input_layout <- "NCT"
       
@@ -453,6 +453,7 @@ ml_predict <- Process$new(
   returns = eo_datacube,
   operation = function(data, model, job) {
     
+    # ---------- Helpers ----------
     is_torch_model <- function(model) {
       inherits(model, "nn_module") ||
         "nn_module" %in% class(model) ||
@@ -478,6 +479,7 @@ ml_predict <- Process$new(
 
     
     
+    # ---------- Classic ----------
     mlm_single <- function(data_cube, model) {
       message("Preparing prediction with apply_pixel using temporary directory...")
       tmp <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
@@ -687,14 +689,17 @@ ml_predict <- Process$new(
       stopifnot(file.exists(model_path))
       
       onnxruntime <- reticulate::import("onnxruntime", delay_load = TRUE)
+      
       session <- tryCatch(
         onnxruntime$InferenceSession(model_path),
         error = function(e) stop("ONNXRuntime InferenceSession failed: ", conditionMessage(e))
       )
+      
       inputs <- session$get_inputs()
       if (is.null(inputs) || length(inputs) < 1) {
         stop("ONNX session has no inputs (get_inputs() empty). Model likely invalid or not loaded correctly.")
       }
+      
       input_details <- inputs[[1]]
       shp <- input_details$shape
       
@@ -911,52 +916,55 @@ ml_predict <- Process$new(
       return(prediction_cube)
     }
     
+    # ---------- TerraTorch (pred_class only) ----------
     mlm_single_terratorch <- function(data_cube, desc) {
       message("TerraTorch single-timestep via apply_pixel() [pred_class only]")
       
       tmp <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
       Sys.setenv(TMPDIRPATH = tmp)
-      Sys.setenv(WANDB_DISABLED = "true")  
+      Sys.setenv(WANDB_DISABLED = "true")  # vermeidet Protobuf/W&B-Import
       
-      raw_band_names <- gdalcubes::bands(data_cube)$name
+      raw_band_names  <- gdalcubes::bands(data_cube)$name
       cube_band_names <- sanitize_band_names(raw_band_names)
       saveRDS(cube_band_names, file.path(tmp, "band_names.rds"))
       
+      # Descriptor aus YAML + Defaults
       tt_desc <- list(
-        expected_bands = if (!is.null(desc$bands)) desc$bands else c("B02","B03","B04","B8A","B11","B12"),
-        num_frames = if (!is.null(desc$num_frames)) as.integer(desc$num_frames) else 3L,
-        backbone = if (!is.null(desc$backbone)) desc$backbone else "terratorch_prithvi_eo_v2_100_tl",
-        ckpt = if (!is.null(desc$ckpt)) desc$ckpt else NULL,
-        backbone_pt = if (!is.null(desc$backbone_pt)) desc$backbone_pt else NULL,
-        num_classes = if (!is.null(desc$num_classes)) as.integer(desc$num_classes) else 13L,
-        backbone_bands = if (!is.null(desc$backbone_bands)) as.character(desc$backbone_bands) else
+        expected_bands   = if (!is.null(desc$bands)) desc$bands else c("B02","B03","B04","B8A","B11","B12"),
+        num_frames       = if (!is.null(desc$num_frames)) as.integer(desc$num_frames) else 3L,
+        backbone         = if (!is.null(desc$backbone)) desc$backbone else "terratorch_prithvi_eo_v2_100_tl",
+        ckpt             = if (!is.null(desc$ckpt)) desc$ckpt else NULL,
+        backbone_pt      = if (!is.null(desc$backbone_pt)) desc$backbone_pt else NULL,
+        num_classes      = if (!is.null(desc$num_classes)) as.integer(desc$num_classes) else 13L,
+        backbone_bands   = if (!is.null(desc$backbone_bands)) as.character(desc$backbone_bands) else
           c("BLUE","GREEN","RED","NIR_NARROW","SWIR_1","SWIR_2"),
-        neck_indices = if (!is.null(desc$neck_indices)) as.integer(desc$neck_indices) else c(2L,5L,8L,11L),
-        decoder_name = if (!is.null(desc$decoder)) desc$decoder else "UNetDecoder",
+        neck_indices     = if (!is.null(desc$neck_indices)) as.integer(desc$neck_indices) else c(2L,5L,8L,11L),
+        decoder_name     = if (!is.null(desc$decoder)) desc$decoder else "UNetDecoder",
         decoder_channels = if (!is.null(desc$decoder_channels)) as.integer(desc$decoder_channels) else c(512L,256L,128L,64L),
-        head_dropout = if (!is.null(desc$head_dropout)) as.numeric(desc$head_dropout) else 0.1,
-        model_factory = if (!is.null(desc$factory)) desc$factory else "EncoderDecoderFactory",
-        loss_name = if (!is.null(desc$loss)) desc$loss else "ce",
-        optimizer_name = if (!is.null(desc$optimizer)) desc$optimizer else "AdamW",
-        freeze_backbone = if (!is.null(desc$freeze_backbone)) isTRUE(desc$freeze_backbone) else TRUE,
-        freeze_decoder = if (!is.null(desc$freeze_decoder)) isTRUE(desc$freeze_decoder) else FALSE
+        head_dropout     = if (!is.null(desc$head_dropout)) as.numeric(desc$head_dropout) else 0.1,
+        model_factory    = if (!is.null(desc$factory)) desc$factory else "EncoderDecoderFactory",
+        loss_name        = if (!is.null(desc$loss)) desc$loss else "ce",
+        optimizer_name   = if (!is.null(desc$optimizer)) desc$optimizer else "AdamW",
+        freeze_backbone  = if (!is.null(desc$freeze_backbone)) isTRUE(desc$freeze_backbone) else TRUE,
+        freeze_decoder   = if (!is.null(desc$freeze_decoder)) isTRUE(desc$freeze_decoder) else FALSE
       )
       desc_file <- file.path(tmp, "terratorch_desc.rds")
       saveRDS(tt_desc, desc_file)
       Sys.setenv(TT_DESC_FILE = desc_file)
       
       predict_pixel_fun <- function(x) {
-        local_tmp <- Sys.getenv("TMPDIRPATH")
-        desc_file <- Sys.getenv("TT_DESC_FILE")
+        local_tmp   <- Sys.getenv("TMPDIRPATH")
+        desc_file   <- Sys.getenv("TT_DESC_FILE")
         local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
-        tt <- readRDS(desc_file)
+        tt          <- readRDS(desc_file)
         
         if (!is.matrix(x)) x <- matrix(x, nrow = length(local_bands))
         
         resolve_tt_band_indices <- function(expected_bands, cube_bands) {
           expected_bands <- as.character(expected_bands)
-          cube_bands <- as.character(cube_bands)
+          cube_bands     <- as.character(cube_bands)
           
+          # Vollständige Mapping-Tabellen S2 B01–B12 ↔ „sprechende“ Namen
           s2_to_hls_all <- c(
             B01 = "COASTAL",
             B02 = "BLUE",
@@ -975,21 +983,25 @@ ml_predict <- Process$new(
           hls_to_s2_all <- setNames(names(s2_to_hls_all), s2_to_hls_all)
           
           known_hls <- names(hls_to_s2_all)
-          known_s2 <- names(s2_to_hls_all)
+          known_s2  <- names(s2_to_hls_all)
           
+          # 0) Einfachster Fall: expected_bands stehen schon 1:1 im Cube
           if (all(expected_bands %in% cube_bands)) {
             idx <- match(expected_bands, cube_bands)
             return(list(idx = idx, effective_expected = expected_bands))
           }
           
+          # 1) expected = HLS (BLUE, RED, NIR, ...) -> map nach S2 (B02, B04, B08, ...)
           if (any(expected_bands %in% known_hls)) {
             mapped_s2 <- unname(hls_to_s2_all[expected_bands])
+            # nur die, die wirklich gemappt werden konnten
             if (!all(is.na(mapped_s2)) && all(mapped_s2 %in% cube_bands)) {
               idx <- match(mapped_s2, cube_bands)
               return(list(idx = idx, effective_expected = mapped_s2))
             }
           }
           
+          # 2) expected = S2 (B02, B03, ...) -> map nach HLS (BLUE, GREEN, ...) -> Cube
           if (any(expected_bands %in% known_s2)) {
             mapped_hls <- unname(s2_to_hls_all[expected_bands])
             if (!all(is.na(mapped_hls)) && all(mapped_hls %in% cube_bands)) {
@@ -998,6 +1010,7 @@ ml_predict <- Process$new(
             }
           }
           
+          # 3) Debug-Infos: was wäre S2->HLS und HLS->S2 für die expected_bands?
           mapped_from_s2 <- ifelse(expected_bands %in% known_s2,
                                    unname(s2_to_hls_all[expected_bands]),
                                    NA_character_)
@@ -1011,25 +1024,29 @@ ml_predict <- Process$new(
           )
           
           stop(
-            "Bands mismatch: erwartet (Deskriptor/YAML) ", paste(expected_bands, collapse = ", "),
+            "Bands mismatch: expected (descriptor/YAML) ", paste(expected_bands, collapse = ", "),
             " vs cube bands ", paste(cube_bands, collapse = ", "),
-            ". Could not find consistent mapping. Details: ", msg_extra
+            ". Konnte kein konsistentes Mapping finden. Details: ", msg_extra
           )
         }
         
+        
+        # Bands aus Cube auf erwartete Reihenfolge mappen
         band_res <- resolve_tt_band_indices(tt$expected_bands, local_bands)
         idx <- band_res$idx
-        x <- x[idx, , drop = FALSE]
+        x   <- x[idx, , drop = FALSE]
         
-        K <- tt$num_frames
+        # Zeitdimension an Backbone-FRAMES anpassen
+        K    <- tt$num_frames
         Tnow <- ncol(x)
         if (Tnow < K) {
           pad <- matrix(x[, Tnow, drop = FALSE], nrow = nrow(x), ncol = K - Tnow)
-          x <- cbind(x, pad)
+          x   <- cbind(x, pad)
         } else if (Tnow > K) {
           x <- x[, (Tnow - K + 1):Tnow, drop = FALSE]
         }
         
+        # Per-worker Cache für Python-Objekte
         if (!requireNamespace("reticulate", quietly = TRUE)) stop("reticulate required")
         cache_name <- "..mlp_tt_cache"
         if (!exists(cache_name, envir = .GlobalEnv, inherits = FALSE)) {
@@ -1042,8 +1059,10 @@ ml_predict <- Process$new(
           if (!is.null(cfg)) message("[worker] reticulate python: ", cfg$python)
           ok <- TRUE
           tryCatch(reticulate::import("terratorch"), error = function(e) { ok <<- FALSE })
-          if (!ok) stop("TerraTorch Python package not found in worker interpreter: ", if (!is.null(cfg)) cfg$python else "(unknown)")
+          if (!ok) stop("TerraTorch Python package not found in worker interpreter: ",
+                        if (!is.null(cfg)) cfg$python else "(unknown)")
           
+          # --- Python-Helfer in diesem Worker definieren ---
           reticulate::py_run_string("
 import torch
 import torch.nn.functional as F
@@ -1113,6 +1132,7 @@ def run_forward(backbone_name,
                 freeze_decoder=False):
     from terratorch.tasks import SemanticSegmentationTask
 
+    # NumPy-Arrays oder andere Sequenzen -> Python-Listen
     if neck_indices is None:
         neck_indices = [2, 5, 8, 11]
     else:
@@ -1225,7 +1245,7 @@ def infer_pixel(model, x_np, min_multiple=32):
           stop(e)
         })
         
-        cls1 <- as.numeric(cls0) + 1  
+        cls1 <- as.numeric(cls0) + 1  # 1-based
         return(cls1)
       }
       
@@ -1244,28 +1264,28 @@ def infer_pixel(model, x_np, min_multiple=32):
       Sys.setenv(TMPDIRPATH = tmp)
       Sys.setenv(WANDB_DISABLED = "true")
       
-      raw_band_names <- gdalcubes::bands(data_cube)$name
+      raw_band_names  <- gdalcubes::bands(data_cube)$name
       cube_band_names <- sanitize_band_names(raw_band_names)
       saveRDS(cube_band_names, file.path(tmp, "band_names.rds"))
       
       tt_desc <- list(
-        expected_bands = if (!is.null(desc$bands)) desc$bands else c("B02","B03","B04","B8A","B11","B12"),
-        num_frames = if (!is.null(desc$num_frames)) as.integer(desc$num_frames) else 3L,
-        backbone = if (!is.null(desc$backbone)) desc$backbone else "terratorch_prithvi_eo_v2_100_tl",
-        ckpt = if (!is.null(desc$ckpt)) desc$ckpt else NULL,
-        backbone_pt = if (!is.null(desc$backbone_pt)) desc$backbone_pt else NULL,
-        num_classes = if (!is.null(desc$num_classes)) as.integer(desc$num_classes) else 13L,
-        backbone_bands = if (!is.null(desc$backbone_bands)) as.character(desc$backbone_bands) else
+        expected_bands   = if (!is.null(desc$bands)) desc$bands else c("B02","B03","B04","B8A","B11","B12"),
+        num_frames       = if (!is.null(desc$num_frames)) as.integer(desc$num_frames) else 3L,
+        backbone         = if (!is.null(desc$backbone)) desc$backbone else "terratorch_prithvi_eo_v2_100_tl",
+        ckpt             = if (!is.null(desc$ckpt)) desc$ckpt else NULL,
+        backbone_pt      = if (!is.null(desc$backbone_pt)) desc$backbone_pt else NULL,
+        num_classes      = if (!is.null(desc$num_classes)) as.integer(desc$num_classes) else 13L,
+        backbone_bands   = if (!is.null(desc$backbone_bands)) as.character(desc$backbone_bands) else
           c("BLUE","GREEN","RED","NIR_NARROW","SWIR_1","SWIR_2"),
-        neck_indices = if (!is.null(desc$neck_indices)) as.integer(desc$neck_indices) else c(2L,5L,8L,11L),
-        decoder_name = if (!is.null(desc$decoder)) desc$decoder else "UNetDecoder",
+        neck_indices     = if (!is.null(desc$neck_indices)) as.integer(desc$neck_indices) else c(2L,5L,8L,11L),
+        decoder_name     = if (!is.null(desc$decoder)) desc$decoder else "UNetDecoder",
         decoder_channels = if (!is.null(desc$decoder_channels)) as.integer(desc$decoder_channels) else c(512L,256L,128L,64L),
-        head_dropout = if (!is.null(desc$head_dropout)) as.numeric(desc$head_dropout) else 0.1,
-        model_factory = if (!is.null(desc$factory)) desc$factory else "EncoderDecoderFactory",
-        loss_name = if (!is.null(desc$loss)) desc$loss else "ce",
-        optimizer_name = if (!is.null(desc$optimizer)) desc$optimizer else "AdamW",
-        freeze_backbone = if (!is.null(desc$freeze_backbone)) isTRUE(desc$freeze_backbone) else TRUE,
-        freeze_decoder = if (!is.null(desc$freeze_decoder)) isTRUE(desc$freeze_decoder) else FALSE
+        head_dropout     = if (!is.null(desc$head_dropout)) as.numeric(desc$head_dropout) else 0.1,
+        model_factory    = if (!is.null(desc$factory)) desc$factory else "EncoderDecoderFactory",
+        loss_name        = if (!is.null(desc$loss)) desc$loss else "ce",
+        optimizer_name   = if (!is.null(desc$optimizer)) desc$optimizer else "AdamW",
+        freeze_backbone  = if (!is.null(desc$freeze_backbone)) isTRUE(desc$freeze_backbone) else TRUE,
+        freeze_decoder   = if (!is.null(desc$freeze_decoder)) isTRUE(desc$freeze_decoder) else FALSE
       )
       desc_file <- file.path(tmp, "terratorch_desc.rds")
       saveRDS(tt_desc, desc_file)
@@ -1275,18 +1295,19 @@ def infer_pixel(model, x_np, min_multiple=32):
       Sys.setenv(NSTEPS = nsteps)
       
       predict_time_fun <- function(x) {
-        local_tmp <- Sys.getenv("TMPDIRPATH")
-        desc_file <- Sys.getenv("TT_DESC_FILE")
-        nsteps_loc <- as.numeric(Sys.getenv("NSTEPS"))
+        local_tmp   <- Sys.getenv("TMPDIRPATH")
+        desc_file   <- Sys.getenv("TT_DESC_FILE")
+        nsteps_loc  <- as.numeric(Sys.getenv("NSTEPS"))
         local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
-        tt <- readRDS(desc_file)
+        tt          <- readRDS(desc_file)
         
         if (!is.matrix(x)) x <- matrix(x, nrow = length(local_bands))
         
         resolve_tt_band_indices <- function(expected_bands, cube_bands) {
           expected_bands <- as.character(expected_bands)
-          cube_bands <- as.character(cube_bands)
+          cube_bands     <- as.character(cube_bands)
           
+          # Vollständige Mapping-Tabellen S2 B01–B12 ↔ „sprechende“ Namen
           s2_to_hls_all <- c(
             B01 = "COASTAL",
             B02 = "BLUE",
@@ -1305,7 +1326,7 @@ def infer_pixel(model, x_np, min_multiple=32):
           hls_to_s2_all <- setNames(names(s2_to_hls_all), s2_to_hls_all)
           
           known_hls <- names(hls_to_s2_all)
-          known_s2 <- names(s2_to_hls_all)
+          known_s2  <- names(s2_to_hls_all)
           
           if (all(expected_bands %in% cube_bands)) {
             idx <- match(expected_bands, cube_bands)
@@ -1314,6 +1335,7 @@ def infer_pixel(model, x_np, min_multiple=32):
           
           if (any(expected_bands %in% known_hls)) {
             mapped_s2 <- unname(hls_to_s2_all[expected_bands])
+            # nur die, die wirklich gemappt werden konnten
             if (!all(is.na(mapped_s2)) && all(mapped_s2 %in% cube_bands)) {
               idx <- match(mapped_s2, cube_bands)
               return(list(idx = idx, effective_expected = mapped_s2))
@@ -1343,19 +1365,23 @@ def infer_pixel(model, x_np, min_multiple=32):
           stop(
             "Bands mismatch: expected (descriptor/YAML) ", paste(expected_bands, collapse = ", "),
             " vs cube bands ", paste(cube_bands, collapse = ", "),
-            ". Could not find a consistent mapping. Details: ", msg_extra
+            ". Konnte kein konsistentes Mapping finden. Details: ", msg_extra
           )
         }
         
+        # Bands mappen
         band_res <- resolve_tt_band_indices(tt$expected_bands, local_bands)
         idx <- band_res$idx
-        x <- x[idx, , drop = FALSE]
-
-        K <- tt$num_frames
+        x   <- x[idx, , drop = FALSE]
+        
+        
+        
+        # Zeitdimension normalisieren
+        K    <- tt$num_frames
         Tnow <- ncol(x)
         if (Tnow < K) {
           pad <- matrix(x[, Tnow, drop = FALSE], nrow = nrow(x), ncol = K - Tnow)
-          x <- cbind(x, pad)
+          x   <- cbind(x, pad)
         } else if (Tnow > K) {
           x <- x[, (Tnow - K + 1):Tnow, drop = FALSE]
         }
@@ -1571,19 +1597,23 @@ def infer_pixel(model, x_np, min_multiple=32):
     }
     
     
+    # ---------- Dispatch ----------
     time_count <- gdalcubes::dimensions(data)$t$count
     multi_timesteps <- time_count > 1
     
+    # RAW bytes -> ONNX path
     if (is.raw(model)) {
       tmp_file <- tempfile(fileext = ".onnx"); writeBin(model, tmp_file)
       message("RAW model treated as ONNX at: ", tmp_file)
       model <- tmp_file
     }
+    # list -> onnx path
     if (is.list(model) && !is.null(model$onnx) && endsWith(tolower(model$onnx), ".onnx")) {
       message("Model provided as list – using ONNX: ", model$onnx)
       model <- model$onnx
     }
     
+    # TerraTorch?
     if (is_terratorch_desc(model)) {
       
       if (multi_timesteps) {
@@ -1598,6 +1628,7 @@ def infer_pixel(model, x_np, min_multiple=32):
       
     }
     
+    # ONNX?
     if (is.character(model) && endsWith(tolower(model), ".onnx")) {
       if (multi_timesteps) {
         prediction <- mlm_multi_onnx(data, model)
@@ -1609,6 +1640,7 @@ def infer_pixel(model, x_np, min_multiple=32):
       
     }
     
+    # extern .pt/.rds laden
     if (is.character(model)) {
       message("Loading external model...")
       if (endsWith(tolower(model), ".pt")) {
@@ -2918,7 +2950,7 @@ mlm_class_stgf <- Process$new(
             self$v <- nn_linear(d_model, d_model)
             self$attn_drop <- nn_dropout(p=pdrop)
           } else {
-            self$ln1 <- nn_layer_norm(d_model)
+            self$ln1    <- nn_layer_norm(d_model)
             self$gate_u <- nn_linear(d_model, d_model)
             self$gate_f <- nn_linear(d_model, d_model)
             self$cand <- nn_linear(d_model, d_model)
@@ -2983,8 +3015,8 @@ mlm_class_stgf <- Process$new(
             h1 <- self$ln1(h_t + ctx)
           }
           
-          h2 <- self$ff(h1)
-          h2 <- self$ln2(h1 + h2)                              
+          h2  <- self$ff(h1)
+          h2  <- self$ln2(h1 + h2)                              
           log_shape("post-ffn", h2)
           
           z <- torch_mean(h2, dim=2)                         
@@ -3276,6 +3308,7 @@ load_stac_ml <- Process$new(
     
     
     
+    message("start")
     item <- read_stac_item(uri)
     properties <- item$properties
     message("link")
@@ -3286,6 +3319,7 @@ load_stac_ml <- Process$new(
     
     if (is.null(properties$`mlm:input`) || is.null(properties$`mlm:output`)) { stop("STAC Item missing 'mlm:input' or 'mlm:output' (MLM extension not present?).") }
     
+    message("here")
     
     if(!is.null(model_asset)){
       sel <- pick_mlm_model_asset(item, model_asset)
@@ -3293,12 +3327,13 @@ load_stac_ml <- Process$new(
       sel <- pick_mlm_model_asset(item)
     }
     
+    message("nun hier")
     asset_name <- sel$name
     message(asset_name)
     asset <- sel$asset
     if (is.null(asset$href)) stop(sprintf("Asset '%s' has no href.", asset_name))
     message("model wird geladen")
-    model_id <- if (!is.null(properties$id) && nzchar(properties$id)) item$id else "stac_model"
+    model_id  <- if (!is.null(properties$id) && nzchar(properties$id)) item$id else "stac_model"
     model_dir <- file.path(shared_dir, "ml_models", model_id)
     
     filename <- "model.bin"
@@ -3314,7 +3349,7 @@ load_stac_ml <- Process$new(
       if (i < 1L || i > length(x)) stop(sprintf("'%s' index %d out of range.", what, idx))
       x[[i]]
     }
-    input_spec <- get_indexed(properties$`mlm:input`,  input_index,  "mlm:input")
+    input_spec  <- get_indexed(properties$`mlm:input`,  input_index,  "mlm:input")
     output_spec <- get_indexed(properties$`mlm:output`, output_index, "mlm:output")
     
     message("input_spec: ", jsonlite::toJSON(input_spec, auto_unbox = TRUE))
@@ -3390,16 +3425,22 @@ load_ml_model <- Process$new(
       ),
       schema = list(type = "string")
     )
+    
+    
   ),
   
-  returns = ml_model,
+  returns = list(
+    description = "A machine learning model to be used with machine learning processes such as ``ml_predict()``.", 
+    schema = list(type = "object", subtype = "ml-model")
+  ),
   
   operation = function(url, job) {
     library(tools)
     library(httr2)
     library(yaml)
-    library(jsonlite)  
+    library(jsonlite)  # neu für STAC-MLM
     
+    # ---- Helpers ----
     `%||%` <- function(a, b) if (!is.null(a)) a else b
     
     norm   <- function(x) trimws(as.character(x))
@@ -3465,7 +3506,7 @@ load_ml_model <- Process$new(
       }
       
       hdr <- resp_headers(resp)
-      cd <- hdr[["content-disposition"]]
+      cd  <- hdr[["content-disposition"]]
       
       file_name <- basename(u2)
       if (!is.null(cd)) {
@@ -3486,7 +3527,7 @@ load_ml_model <- Process$new(
       if (looks_like_path(u) && file.exists(u)) {
         p <- normalizePath(u)
         if (!endsWith(tolower(p), ".ckpt"))
-          stop("paths.ckpt_path must end with .ckpt: ", p)
+          stop("paths.ckpt_pfad muss auf .ckpt enden: ", p)
         return(p)
       }
       
@@ -3494,7 +3535,7 @@ load_ml_model <- Process$new(
         p <- sub("^file://", "", u)
         if (!file.exists(p)) stop("file:// path not found: ", p)
         if (!endsWith(tolower(p), ".ckpt"))
-          stop("file:// .ckpt Path invalid: ", p)
+          stop("file:// .ckpt Pfad ungültig: ", p)
         return(normalizePath(p))
       }
       
@@ -3502,30 +3543,33 @@ load_ml_model <- Process$new(
       if (!is.null(p_int)) {
         p_int <- normalizePath(p_int)
         if (!endsWith(tolower(p_int), ".ckpt"))
-          stop("Internal CKPT path does not end with .ckpt")
+          stop("Interner CKPT-Pfad endet nicht auf .ckpt")
         return(p_int)
       }
       
       if (!is_http(u)) {
-        stop("paths.ckpt_path must be a local path, file://, or HTTP/HTTPS: ", u)
+        stop("paths.ckpt_pfad muss lokaler Pfad, file:// oder HTTP/HTTPS sein: ", u)
       }
       
+      # Google Drive
       u2 <- normalize_gdrive(u)
       
+      # Dropbox
       if (grepl("dropbox.com", u2, ignore.case = TRUE)) {
         url_parts <- url_parse(u2)
         url_parts$query$dl <- "1"
         u2 <- url_build(url_parts)
-        message("[download_ckpt] Dropbox CKPT URL normalized: ", u2)
+        message("[download_ckpt] Dropbox-CKPT-URL normalisiert: ", u2)
       }
       
+      # ---- httr2 Request ----
       resp <- request(u2) |> req_perform()
       
       if (resp_status(resp) != 200)
-        stop("HTTP error during CKPT download: ", resp_status(resp))
+        stop("HTTP error beim CKPT-Download: ", resp_status(resp))
       
       hdr <- resp_headers(resp)
-      cd <- hdr[["content-disposition"]]
+      cd  <- hdr[["content-disposition"]]
       
       file_name <- NULL
       if (!is.null(cd)) {
@@ -3548,6 +3592,8 @@ load_ml_model <- Process$new(
       normalizePath(out)
     }
     
+    
+    
     detect_type_from_ext <- function(ext) {
       ext <- tolower(ext)
       if (ext %in% "rds")  return("rds")
@@ -3558,11 +3604,13 @@ load_ml_model <- Process$new(
       "unknown"
     }
     
+    # YAML-Erkennung: Datei .yaml oder Text, der parsebar ist
     is_yaml_text <- function(x) {
       if (!is.character(x) || length(x) != 1L) return(FALSE)
       if (is_http(x) || is_file_url(x)) return(FALSE)
       if (file.exists(x)) return(FALSE)
       if (!grepl(":", x)) return(FALSE)
+      # schneller sanity check (experiment_name / dataset / model / paths etc.)
       if (!grepl("experiment_name\\s*:", x) && !grepl("paths\\s*:", x)) return(FALSE)
       out <- tryCatch(yaml::yaml.load(x), error = function(e) NULL)
       is.list(out) && !is.null(out)
@@ -3584,44 +3632,47 @@ load_ml_model <- Process$new(
       `%||%` <- function(x, y) if (is.null(x)) y else x
       
       dcfg <- cfg$dataset %||% list()
-      mcfg <- cfg$model %||% list()
+      mcfg <- cfg$model   %||% list()
       
+      # Bänder MÜSSEN in der Konfiguration gesetzt sein
       bands_yaml <- dcfg$bands
       if (is.null(bands_yaml) || length(bands_yaml) == 0L) {
-        stop("dataset$bands must be set in the configuration (e.g., [BLUE, GREEN, RED, ...] or [B02, B03, ...]).")
+        stop("dataset$bands muss in der Konfiguration gesetzt sein (z.B. [BLUE, GREEN, RED, ...] oder [B02, B03, ...]).")
       }
       
+      # Genau so übernehmen, wie in der Konfiguration angegeben
       expected_bands <- as.character(bands_yaml)
       backbone_bands <- expected_bands
       
       structure(list(
-        type = "terratorch-ckpt",
-        backbone = mcfg$backbone %||% "terratorch_prithvi_eo_v2_100_tl",
-        num_frames = as.integer(dcfg$num_frames %||% 1L),
-        bands = expected_bands,
+        type            = "terratorch-ckpt",
+        backbone        = mcfg$backbone        %||% "terratorch_prithvi_eo_v2_100_tl",
+        num_frames      = as.integer(dcfg$num_frames %||% 1L),
+        bands           = expected_bands,
         backbone_bands  = backbone_bands,
-        num_classes = as.integer(mcfg$num_classes %||% 13L),
-        ckpt = ckpt_local,
-        backbone_pt = NULL,
-        factory = mcfg$factory %||% "EncoderDecoderFactory",
-        decoder = mcfg$decoder %||% "UNetDecoder",
-        neck_indices = mcfg$neck_indices %||% c(2L, 5L, 8L, 11L),
+        num_classes     = as.integer(mcfg$num_classes %||% 13L),
+        ckpt            = ckpt_local,
+        backbone_pt     = NULL,
+        factory         = mcfg$factory        %||% "EncoderDecoderFactory",
+        decoder         = mcfg$decoder        %||% "UNetDecoder",
+        neck_indices    = mcfg$neck_indices   %||% c(2L, 5L, 8L, 11L),
         decoder_channels= mcfg$decoder_channels %||% c(512L, 256L, 128L, 64L),
-        head_dropout = mcfg$head_dropout %||% 0.1,
-        loss = mcfg$loss %||% "ce",
-        optimizer = mcfg$optimizer %||% "AdamW",
+        head_dropout    = mcfg$head_dropout   %||% 0.1,
+        loss            = mcfg$loss           %||% "ce",
+        optimizer       = mcfg$optimizer      %||% "AdamW",
         freeze_backbone = mcfg$freeze_backbone %||% TRUE,
-        freeze_decoder = mcfg$freeze_decoder %||% FALSE,
-        config = cfg,
-        config_path = cfg_path
+        freeze_decoder  = mcfg$freeze_decoder  %||% FALSE,
+        config          = cfg,
+        config_path     = cfg_path
       ), class = "mlm-model")
     }
     
+    # ---------- STAC-MLM-Helper ----------
     
     is_stac_mlm_file <- function(path) {
       if (!file.exists(path)) return(FALSE)
       if (!grepl("\\.geo?json$", path, ignore.case = TRUE) &&
-          !grepl("\\.json$", path, ignore.case = TRUE)) {
+          !grepl("\\.json$",    path, ignore.case = TRUE)) {
         return(FALSE)
       }
       x <- tryCatch(jsonlite::read_json(path, simplifyVector = TRUE),
@@ -3631,22 +3682,24 @@ load_ml_model <- Process$new(
       any(startsWith(names(props), "mlm:"))
     }
     
+    # übersetzt STAC-MLM (wie das Beispiel-Item) in die gleiche cfg-Struktur wie YAML
     stac_mlm_to_cfg <- function(path) {
       x <- jsonlite::read_json(path, simplifyVector = TRUE)
       props <- x$properties %||% list()
       
       cfg <- list(
         experiment_name = props[["mlm:experiment_name"]] %||% x$id %||% "stac_mlm_experiment",
-        paths = props[["mlm:paths"]] %||% list(),
-        dataset = props[["mlm:dataset"]] %||% list(),
-        model = props[["mlm:model"]] %||% list(),
-        train = props[["mlm:train"]] %||% list(),
-        inference = props[["mlm:inference"]] %||% list()
+        paths     = props[["mlm:paths"]]      %||% list(),
+        dataset   = props[["mlm:dataset"]]    %||% list(),
+        model     = props[["mlm:model"]]      %||% list(),
+        train     = props[["mlm:train"]]      %||% list(),
+        inference = props[["mlm:inference"]]  %||% list()
       )
       
       cfg
     }
     
+    # ----------------- Einstieg -----------------
     url <- norm(url)
     if (is.na(url) || url == "") {
       stop("Parameter 'url' darf nicht leer sein.")
@@ -3654,11 +3707,13 @@ load_ml_model <- Process$new(
     
     message("load_ml_model: url = ", substr(url, 1, 80), if (nchar(url) > 80) "…" else "")
     
+    # ---- FALL 1: Konfiguration (YAML ODER STAC-MLM) ----
     use_yaml <- FALSE
     use_stac <- FALSE
     cfg <- NULL
     cfg_path <- NA_character_
     
+    # 1a) STAC-MLM lokal?
     if (file.exists(url) && is_stac_mlm_file(url)) {
       use_stac <- TRUE
       cfg <- stac_mlm_to_cfg(url)
@@ -3666,6 +3721,7 @@ load_ml_model <- Process$new(
       message("Detected STAC-MLM configuration (lokale Datei) – TerraTorch-Pipeline.")
     }
     
+    # 1b) STAC-MLM per HTTP/HTTPS?
     if (!use_stac && (is_http(url) || is_file_url(url))) {
       tmp <- tryCatch(download_to_shared(url), error = function(e) NULL)
       if (!is.null(tmp) && is_stac_mlm_file(tmp)) {
@@ -3676,12 +3732,15 @@ load_ml_model <- Process$new(
       }
     }
     
+    # 1c) YAML (nur wenn keine STAC-MLM-Konfiguration erkannt wurde)
     if (!use_stac) {
       if (file.exists(url) && grepl("\\.ya?ml$", url, ignore.case = TRUE)) {
         use_yaml <- TRUE
       } else if (is_yaml_text(url)) {
         use_yaml <- TRUE
       }
+      
+      destfile
     }
     
     if (use_yaml) {
@@ -3691,70 +3750,79 @@ load_ml_model <- Process$new(
       cfg_path <- y$cfg_path
     }
     
+    # Gemeinsamer Pfad für YAML + STAC-MLM
     if (use_yaml || use_stac) {
       exp_name <- cfg$experiment_name %||% "experiment"
       paths_cfg <- cfg$paths %||% list()
       icfg <- cfg$inference %||% list()
       
+      # Basis-Workdir im SHARED_TEMP_DIR
       terra_base <- file.path(shared_dir, "terra_work")
       if (!dir.exists(terra_base)) {
         dir.create(terra_base, recursive = TRUE, showWarnings = FALSE)
       }
-      work_root <- file.path(terra_base, exp_name)
-      ckpt_dir <- file.path(work_root, "output", "checkpoints")
+      work_root  <- file.path(terra_base, exp_name)
+      ckpt_dir   <- file.path(work_root, "output", "checkpoints")
       if (!dir.exists(ckpt_dir)) {
         dir.create(ckpt_dir, recursive = TRUE, showWarnings = FALSE)
       }
       
       ckpt_pfad  <- paths_cfg$ckpt_pfad %||% NULL
       
+      # --- A) Externes CKPT (kein Training nötig) ---
       if (!is.null(ckpt_pfad)) {
         msg_prefix <- if (use_yaml) "[YAML]" else "[STAC-MLM]"
-        message(msg_prefix, " paths.ckpt_path specified:", ckpt_pfad)
+        message(msg_prefix, " paths.ckpt_pfad angegeben: ", ckpt_pfad)
         ckpt_local <- download_ckpt(ckpt_pfad)
         if (!endsWith(tolower(ckpt_local), ".ckpt")) {
-          stop("paths.ckpt_pfad must end with .ckpt: ", ckpt_local)
+          stop("paths.ckpt_pfad muss auf .ckpt enden: ", ckpt_local)
         }
         desc <- make_terratorch_descriptor(cfg, cfg_path, ckpt_local)
-        message(msg_prefix, "Use external CKPT: ", ckpt_local)
+        message(msg_prefix, " Verwende externes CKPT: ", ckpt_local)
         return(desc)
       }
       
+      # --- B) Kein CKPT -> Training via generic_terra.py ---
       data_pfad <- paths_cfg$data_pfad %||% NULL
       if (is.null(data_pfad)) {
         stop(if (use_yaml) {
-          "YAML does not contain paths.ckpt_path or paths.data_path – at least data_path is required for training."
+          "YAML enthält kein paths.ckpt_pfad und kein paths.data_pfad – für Training ist mindestens data_pfad nötig."
         } else {
-          "STAC-MLM does not contain paths.ckpt_path or paths.data_path – at least data_path is required for training."
+          "STAC-MLM enthält kein paths.ckpt_pfad und kein paths.data_pfad – für Training ist mindestens data_pfad nötig."
         })
       }
       
+      # Welches Script?
       terra_script <- Sys.getenv(
         "TERRATORCH_SCRIPT",
         file.path("Python", "terra_for_R.py")
       )
+      
+      # Welches Python-Binary?
       terra_python <- Sys.getenv("TERRATORCH_PYTHON", "python")
-
-      message("[TerraTorch] Using Python binary: ", terra_python)
-      message("[TerraTorch] Using TerraTorch script: ", normalizePath(terra_script))
-
+      
+      message("[TerraTorch] Verwende Python-Binary: ", terra_python)
+      message("[TerraTorch] Verwende TerraTorch-Skript: ", normalizePath(terra_script))
+      
+      # Zusätzliche Info: welcher Pfad steckt wirklich hinter 'python'?
       py_which <- Sys.which(terra_python)
-      message("[TerraTorch] Sys.which('", terra_python, "') = ", ifelse(py_which == "", "<not found>", py_which))
-
+      message("[TerraTorch] Sys.which('", terra_python, "') = ", ifelse(py_which == "", "<nicht gefunden>", py_which))
+      
+      # Optional: sehr simpler Versions-Check
       py_info <- tryCatch(
         system2(terra_python, args = "--version", stdout = TRUE, stderr = TRUE),
-        error = function(e) paste("Error when querying Python --version: ", e$message)
+        error = function(e) paste("Fehler beim Abfragen von Python --version: ", e$message)
       )
       
       message("[TerraTorch] Python --version:\n", paste(py_info, collapse = "\n"))
       
       if (!file.exists(terra_script)) {
-        stop("generic_terra.py not found. Please set ENV TERRATORCH_SCRIPT or adjust the path in the code: ",
+        stop("generic_terra.py nicht gefunden. Bitte ENV TERRATORCH_SCRIPT setzen oder Pfad im Code anpassen: ",
              terra_script)
       }
       
       msg_prefix <- if (use_yaml) "[YAML]" else "[STAC-MLM]"
-      message(msg_prefix, " No CKPT specified – start Python training with generic_terra.py...")
+      message(msg_prefix, " Kein CKPT angegeben – starte Python-Training mit generic_terra.py …")
       cmd_args <- c(
         shQuote(terra_script),
         "--config", shQuote(cfg_path),
@@ -3762,25 +3830,28 @@ load_ml_model <- Process$new(
       )
       status <- system2("python", args = cmd_args, stdout = "", stderr = "")
       if (!identical(status, 0L)) {
-        stop("generic_terra.py returned with status “, status, ”.")
+        stop("generic_terra.py ist mit Status ", status, " zurückgekehrt.")
       }
       
-      ckpt_name <- icfg$ckpt_filename %||% "best.ckpt"
+      ckpt_name  <- icfg$ckpt_filename %||% "best.ckpt"
       ckpt_local <- file.path(ckpt_dir, ckpt_name)
       if (!file.exists(ckpt_local)) {
+        # Fallback: neueste .ckpt im ckpt_dir
         candidates <- list.files(ckpt_dir, pattern = "\\.ckpt$", full.names = TRUE)
         if (!length(candidates)) {
-          stop("No CKPT found in ", ckpt_dir, " after training.")
+          stop("Nach Training wurde kein CKPT in ", ckpt_dir, " gefunden.")
         }
         ckpt_local <- candidates[which.max(file.info(candidates)$mtime)]
       }
-      message(msg_prefix, " Training complete, CKPT: ", ckpt_local)
+      message(msg_prefix, " Training fertig, CKPT: ", ckpt_local)
       
       desc <- make_terratorch_descriptor(cfg, cfg_path, ckpt_local)
       return(desc)
     }
     
- 
+    # ---- FALL 2: Normale Datei (kein YAML/STAC-MLM) ----
+    #   -> .rds / .onnx / .pt (KEIN .ckpt!)
+    
     local_file <- NULL
     if (looks_like_path(url) && file.exists(url)) {
       local_file <- normalizePath(url)
@@ -3796,8 +3867,8 @@ load_ml_model <- Process$new(
     message("Detected file: ", local_file, " (type=", mtype, ")")
     
     if (identical(mtype, "ckpt")) {
-      stop("Direct .ckpt files are not allowed. Please use a YAML or STAC-MLM configuration.",
-           " with paths.ckpt_path or paths.data_path.")
+      stop("Direkte .ckpt-Dateien sind nicht erlaubt. Bitte eine YAML- oder STAC-MLM-Konfiguration ",
+           "mit paths.ckpt_pfad oder paths.data_pfad verwenden.")
     }
     
     if (identical(mtype, "rds")) {
@@ -3818,7 +3889,7 @@ load_ml_model <- Process$new(
     }
     
     stop("Unknown or unsupported file type: ", ext, " (", local_file, "). ",
-         ".rds, .onnx, .pt, YAML (path/text), or STAC-MLM-GeoJSON are permitted.")
+         "Erlaubt sind .rds, .onnx, .pt, YAML (Pfad/Text) oder STAC-MLM-GeoJSON.")
   }
 )
 
@@ -5025,16 +5096,22 @@ save_ml_model <- Process$new(
       )
       
       add_metadata_to_onnx(onnx_path, meta_opts)
+      message("wir sind hier...")
       
       if (isTRUE(do_checks) && !is.null(train_X)) {
+        message("onnxruntime laden")
         ort <- reticulate::import("onnxruntime", delay_load = TRUE)
-        np <- reticulate::import("numpy", convert = FALSE)
+        np  <- reticulate::import("numpy", convert = FALSE)
+        message("geladen")
         sess <- ort$InferenceSession(onnx_path)
-        ins_r <- reticulate::py_to_r(sess$get_inputs())
+        message("hier")
+        ins_r  <- reticulate::py_to_r(sess$get_inputs())
         input_name <- as.character(ins_r[[1]]$name)
-        is_f64 <- identical(dtype, "float64")
+        message("nun")
+        is_f64  <- identical(dtype, "float64")
         np_dtype <- if (is_f64) "float64" else "float32"
         
+        message("sind")
         X_ref <- train_X
         if (!is.null(means) && !is.null(sds)) {
           X_ref <- sweep(X_ref, 2, sds, "*")
@@ -5102,7 +5179,7 @@ save_ml_model <- Process$new(
       
       n_feat <- length(feature_names); K <- length(classes); C2 <- length(weights_aligned)
       inp <- helper$make_tensor_value_info("input_raw", TensorProto$FLOAT, list(1L, n_feat))
-      out_idx <- helper$make_tensor_value_info("idx1", TensorProto$INT64, list(1L, 1L))
+      out_idx   <- helper$make_tensor_value_info("idx1", TensorProto$INT64, list(1L, 1L))
       out_score <- helper$make_tensor_value_info(
         if (use_rule=="margin") "scores_vector" else "votes_vector",
         TensorProto$FLOAT, list(1L, K)
@@ -5209,14 +5286,14 @@ save_ml_model <- Process$new(
     
     
     build_onnx_poly_ovo <- function(
-      use_rule = c("majority","margin"),
-      bin_models, feature_names, classes, means, sds, kpar, out_path,
-      dtype = c("float64","float32"),
-      reorder_idx  = NULL,            
-      clip_base = NA_real_,       
-      add_debug = TRUE,
-      primary_output= c("idx1","votes_vector","scores_vector"),
-      tie_rule = c(">0",">=0")
+    use_rule = c("majority","margin"),
+    bin_models, feature_names, classes, means, sds, kpar, out_path,
+    dtype = c("float64","float32"),
+    reorder_idx  = NULL,            
+    clip_base = NA_real_,       
+    add_debug = TRUE,
+    primary_output= c("idx1","votes_vector","scores_vector"),
+    tie_rule = c(">0",">=0")
     ){
       
       
@@ -5332,11 +5409,11 @@ save_ml_model <- Process$new(
         bm <- bin_models[[j]]
         SVT <- t(bm$SV)                             
         coef<- matrix(bm$coef, nrow=length(bm$coef), ncol=1L)  
-        b <- matrix(bm$b, nrow=1L, ncol=1L)
+        b <- matrix(bm$b,    nrow=1L, ncol=1L)
         
         SVt_name  <- paste0("SVt_", j)
         coef_name <- paste0("coef_", j)
-        b_name <- paste0("b_", j)
+        b_name    <- paste0("b_", j)
         
         init_common <- c(init_common,
                          onnx$numpy_helper$from_array(as_fp_mat(SVT), SVt_name),
@@ -5464,13 +5541,13 @@ save_ml_model <- Process$new(
     
     
     build_onnx_rbf_ovo <- function(
-      use_rule = c("majority","margin"),
-      bin_models, feature_names, classes, means, sds, sigma, out_path,
-      dtype = c("float64","float32"),
-      reorder_idx = NULL,
-      add_debug  = TRUE,
-      primary_output= c("idx1","votes_vector","scores_vector"),
-      tie_rule = c(">0",">=0")
+    use_rule = c("majority","margin"),
+    bin_models, feature_names, classes, means, sds, sigma, out_path,
+    dtype = c("float64","float32"),
+    reorder_idx = NULL,
+    add_debug  = TRUE,
+    primary_output= c("idx1","votes_vector","scores_vector"),
+    tie_rule = c(">0",">=0")
     ){
       
       
@@ -5497,7 +5574,7 @@ save_ml_model <- Process$new(
       inp <- helper$make_tensor_value_info("input_raw", TensorProto$FLOAT, list(1L, n_feat))
       out_i <- helper$make_tensor_value_info("idx1", TensorProto$INT64, list(1L,1L))
       out_vv <- helper$make_tensor_value_info("votes_vector", TNUM, list(1L,K))
-      outs <- list(out_i, out_vv)
+      outs  <- list(out_i, out_vv)
       if (use_rule == "margin") {
         out_sv <- helper$make_tensor_value_info("scores_vector", TNUM, list(1L,K))
         outs <- c(outs, list(out_sv))
@@ -5559,7 +5636,7 @@ save_ml_model <- Process$new(
                  helper$make_node("Div", list("centered","std_safe"), list("scaled_raw"), name="ScaleSafe"),
                  helper$make_node("IsNaN", list("scaled_raw"), list("isnan_scaled"), name="IsNaN_scaled"),
                  helper$make_node("IsInf", list("scaled_raw"), list("isinf_scaled"), name="IsInf_scaled"),
-                 helper$make_node("Or", list("isnan_scaled","isinf_scaled"), list("bad_scaled"), name="Bad_scaled"),
+                 helper$make_node("Or",  list("isnan_scaled","isinf_scaled"), list("bad_scaled"), name="Bad_scaled"),
                  helper$make_node("Where", list("bad_scaled","zero_f","scaled_raw"),   list("scaled"), name="Scaled_Clean"))
       
       if (isTRUE(add_debug)) {
@@ -6203,6 +6280,10 @@ return(onnx_path)
         params <- model$parameters
         input_channels <- params[[1]]$size()[2]
         
+        #input_channels <- model$conv_layers[[1]][[1]]$in_channels
+        params <- model$parameters
+        input_channels <- params[[1]]$size()[2]
+        
         time_steps <- tryCatch(model$time_steps, error = function(e) NULL)
         
         bands <- tryCatch(model$input_data_columns, error = function(e) NULL)
@@ -6227,19 +6308,25 @@ return(onnx_path)
         
         
         output_size <- tryCatch({
+          message("Hier", input_channels)
           B <- 1L
           library(torch)
+          message("dummy start")
           dummy <- torch::torch_zeros(
             c(B, input_channels, time_steps),
             dtype = torch::torch_float()
           )
+          message("dummy done")
           
           model$eval()
+          message("eval")
           out <- torch::with_no_grad({
             model(dummy)
           })
+          message("extraction")
           out <- out$size()[2]
           
+          message("Nun hier", out)
           
           out
         }, error = function (e){
@@ -6338,19 +6425,25 @@ return(onnx_path)
         
         output_size <- tryCatch({
           
+          message("Hier", input_channels)
           B <- 1L
           library(torch)
+          message("dummy start")
           dummy <- torch::torch_zeros(
             c(B, input_channels, time_steps),
             dtype = torch::torch_float()
           )
+          message("dummy done")
           
           model$eval()
+          message("eval")
           out <- torch::with_no_grad({
             model(dummy)
           })
+          message("extraction")
           out <- out$size()[2]
           
+          message("Nun hier", out)
           
           out
         }, error = function (e){
@@ -6392,6 +6485,7 @@ return(onnx_path)
       } else {
         stop("Unknown model type: Please check the model!")
       }
+      message("Here")
       
       mlm_stac_item$properties <- c(mlm_stac_item$properties, model_info)
       

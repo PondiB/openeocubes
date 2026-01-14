@@ -1,13 +1,15 @@
 
 refreshJobFromFile <- function(job) {
   tryCatch({
-    info_dir <- file.path(Session$getConfig()$workspace.path, job$output.folder)
+    # job$output.folder ist z.B. "jobs/<job_id>"
+    info_dir  <- file.path(Session$getConfig()$workspace.path, job$output.folder)
     info_file <- file.path(info_dir, "jobInfo.txt")
     
     if (!file.exists(info_file)) {
       return(job)
     }
     
+    # Zeilen wie "Job_Status: finished" einlesen
     lines <- readLines(info_file, warn = FALSE)
     if (length(lines) == 0) {
       return(job)
@@ -15,9 +17,11 @@ refreshJobFromFile <- function(job) {
     
     kv <- strsplit(lines, ": ", fixed = TRUE)
     
+    # Namen und Werte extrahieren
     keys <- vapply(kv, function(p) if (length(p) >= 1) p[1] else NA_character_, character(1))
     vals <- vapply(kv, function(p) {
       if (length(p) >= 2) {
+        # Falls der Wert selbst ":" enthält, wieder zusammenfügen
         paste(p[-1], collapse = ": ")
       } else {
         NA_character_
@@ -31,25 +35,25 @@ refreshJobFromFile <- function(job) {
       if (!is.null(meta[[name]]) && !is.na(meta[[name]])) meta[[name]] else NULL
     }
     
-    id <- get_field("Job_ID")
-    title <- get_field("Job_Title")
+    id          <- get_field("Job_ID")
+    title       <- get_field("Job_Title")
     description <- get_field("Job_Description")
-    status <- get_field("Job_Status")
-    created <- get_field("Job_Created")
+    status      <- get_field("Job_Status")
+    created     <- get_field("Job_Created")
     
-    if (!is.null(id)) job$id <- id
-    if (!is.null(title)) job$title <- title
+    if (!is.null(id))          job$id          <- id
+    if (!is.null(title))       job$title       <- title
     if (!is.null(description)) job$description <- description
-    if (!is.null(status)) job$status <- status
-    if (!is.null(created)) job$created <- created
+    if (!is.null(status))      job$status      <- status
+    if (!is.null(created))     job$created     <- created
     
     return(job)
   }, error = function(e) {
+    # Falls irgendwas beim Lesen/Parsen schiefgeht, NICHT crashen, nur loggen:
     message("refreshJobFromFile failed: ", conditionMessage(e))
     return(job)
   })
 }
-
 
 .listAllJobs = function() {
   tryCatch({
@@ -101,25 +105,25 @@ refreshJobFromFile <- function(job) {
     process_graph = sent_job$process
     
     job = Job$new(process = process_graph)
-    job$status = "created"
+    job$status  = "created"
     job$created = as.character(Sys.time())
     
-    if (!is.null(sent_job$title)) job$title = sent_job$title
+    if (!is.null(sent_job$title))       job$title       = sent_job$title
     if (!is.null(sent_job$description)) job$description = sent_job$description
     
     writeJobInfo(job)
     Session$assignJob(job)
     
     res$setHeader(
-      name = "Location",
+      name  = "Location",
       value = paste(Session$getConfig()$base_url, "jobs", job$id, sep = "/")
     )
     res$setHeader(name = "OpenEO-Identifier", value = job$id)
     res$status <- 201
     
     out <- list(
-      id = job$id,
-      status = job$status,
+      id      = job$id,
+      status  = job$status,
       created = job$created
     )
     return(out)
@@ -143,8 +147,8 @@ refreshJobFromFile <- function(job) {
     res$status <- 202
     
     out <- list(
-      id = job_id,
-      status = job$status,
+      id      = job_id,
+      status  = job$status,
       message = "Job accepted for processing"
     )
     return(out)
@@ -183,9 +187,9 @@ refreshJobFromFile <- function(job) {
       }
       
       return(list(
-        title = job$title,
+        title       = job$title,
         description = job$description,
-        assets = assets
+        assets      = assets
       ))
     }
   }, error = handleError)
@@ -196,11 +200,11 @@ refreshJobFromFile <- function(job) {
     message("getJobFiles called with job_id = ", job_id, ", file = ", file)
     
     resultFile <- file.path(Session$getConfig()$workspace.path, "jobs", job_id, file)
-    message(" resultFile path = ", resultFile)
+    message("  resultFile path = ", resultFile)
     
     # 1) Existiert die Datei überhaupt?
     exists <- file.exists(resultFile)
-    message("file.exists = ", exists)
+    message("  file.exists = ", exists)
     if (!exists) {
       throwError("JobFailed", message = paste("Result file not found:", resultFile))
     }
@@ -208,7 +212,7 @@ refreshJobFromFile <- function(job) {
     # 2) Größe prüfen
     info <- file.info(resultFile)
     size <- info$size
-    message("file size = ", size)
+    message("  file size = ", size)
     if (is.na(size) || size <= 0) {
       throwError("JobFailed", message = paste("Result file is empty or invalid:", resultFile))
     }
@@ -217,20 +221,20 @@ refreshJobFromFile <- function(job) {
     ext <- tolower(tools::file_ext(resultFile))
     content_type <- switch(
       ext,
-      "tif" = "image/tiff",
+      "tif"  = "image/tiff",
       "tiff" = "image/tiff",
-      "nc" = "application/x-netcdf",
-      "txt" = "text/plain; charset=UTF-8",
+      "nc"   = "application/x-netcdf",
+      "txt"  = "text/plain; charset=UTF-8",
       "json" = "application/json; charset=UTF-8",
       "application/octet-stream"
     )
-    message("content_type = ", content_type)
+    message("  content_type = ", content_type)
     
     # 4) Datei lesen
     res$body <- readBin(resultFile, "raw", n = size)
     res$setHeader("Content-Type", content_type)
     
-    message("getJobFiles finished OK")
+    message("  getJobFiles finished OK")
     return(res)
   }, error = handleError)
 }
