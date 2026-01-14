@@ -123,16 +123,13 @@ ml_fit <- Process$new(
   
   operation = function(model, training_set, target, job) {
     
-    ## ---------------- Helpers ----------------
-    
-    
     
     extract_time_series_features <- function(training_set, features_data, time_steps) {
       if (time_steps >= 1) {
         message("multi time steps")
         features <- array(
           data = as.matrix(training_set[, grep("_T\\d+$", colnames(training_set))]),
-          dim  = c(nrow(training_set), length(features_data), time_steps)
+          dim = c(nrow(training_set), length(features_data), time_steps)
         )
       } 
       features
@@ -150,8 +147,8 @@ ml_fit <- Process$new(
     
     convert_to_wide_format <- function(train_data, target) {
       library(tidyr); library(dplyr); library(sf)
-      band_names   <- grep("^B0?\\d{1,2}$", names(train_data), value = TRUE)
-      has_ndvi     <- "NDVI" %in% colnames(train_data)
+      band_names <- grep("^B0?\\d{1,2}$", names(train_data), value = TRUE)
+      has_ndvi <- "NDVI" %in% colnames(train_data)
       bands_to_use <- c(band_names, if (has_ndvi) "NDVI")
       message("Found bands: ", paste(bands_to_use, collapse = ", "))
       
@@ -165,7 +162,7 @@ ml_fit <- Process$new(
           names_glue  = "{.value}_T{match(time, sort(unique(time)))}"
         )
       
-      time_order  <- sort(unique(train_data$time))
+      time_order <- sort(unique(train_data$time))
       cols_sorted <- unlist(lapply(seq_along(time_order), function(i) paste0(bands_to_use, "_T", i)))
       cols_sorted <- c("fid", cols_sorted)
       train_data_wide <- train_data_wide[, cols_sorted]
@@ -182,7 +179,6 @@ ml_fit <- Process$new(
     
     `%||%` <- function(a, b) if (!is.null(a)) a else b
     
-    ## ---------------- Start ----------------
     message("ml_fit is being prepared...")
     
     is_dl <- !is.null(model$create_model) && is.function(model$create_model)
@@ -245,9 +241,9 @@ ml_fit <- Process$new(
       try({
         dl_model$eval()
         take <- as.integer(min(4, x_train$size(1)))
-        xin  <- x_train$narrow(1, 1, take)$contiguous()
-        out  <- dl_model(xin)
-        arr  <- torch::as_array(out)
+        xin <- x_train$narrow(1, 1, take)$contiguous()
+        out <- dl_model(xin)
+        arr <- torch::as_array(out)
       }, silent = FALSE)
       
       opt_name <- tolower(model$parameters$optimizer %||% "adam")
@@ -282,14 +278,14 @@ ml_fit <- Process$new(
       
       confusion_matrix <- table(
         Predicted = as.integer(torch::as_array(predicted_classes)),
-        Actual    = as.integer(torch::as_array(y_train))
+        Actual = as.integer(torch::as_array(y_train))
       )
       message("Confusion Matrix:"); print(confusion_matrix)
       
       dl_model$time_steps         <- as.integer(time_steps)
       dl_model$input_channels     <- as.integer(length(features_data))
       dl_model$input_data_columns <- features_data
-      dl_model$input_layout       <- "NCT"
+      dl_model$input_layout <- "NCT"
       
       
       model_file <- tempfile(fileext = ".pt")
@@ -299,7 +295,6 @@ ml_fit <- Process$new(
       return(model_file)
     }
     
-    ## ---------------- Klassisches ML (Caret) ----------------
     message("Machine learning model recognized. Start ML calculation...")
     
     if (any(grepl("^X\\d+\\.", names(training_set)))) {
@@ -504,7 +499,7 @@ ml_predict <- Process$new(
       }
       Sys.setenv(MODEL_FILE = model_file)
       
-      raw_band_names  <- gdalcubes::bands(data_cube)$name
+      raw_band_names <- gdalcubes::bands(data_cube)$name
       cube_band_names <- sanitize_band_names(raw_band_names)
       message("Bands: ", paste(cube_band_names, collapse = ", "))
       
@@ -598,7 +593,7 @@ ml_predict <- Process$new(
       
       Sys.setenv(MODEL_FILE = model_file)
       
-      raw_band_names  <- gdalcubes::bands(data_cube)$name
+      raw_band_names <- gdalcubes::bands(data_cube)$name
       cube_band_names <- sanitize_band_names(raw_band_names)
       message("Bands santalize: ", paste(cube_band_names, collapse = ", "))
       
@@ -689,7 +684,6 @@ ml_predict <- Process$new(
       return(prediction_cube)
     }
     
-    ####### ONNX prediction ################
     
     detected_model_type <- function(model_path) {
       stopifnot(file.exists(model_path))
@@ -745,7 +739,7 @@ ml_predict <- Process$new(
       }
       Sys.setenv(MODEL_FILE = model_file)
       
-      raw_band_names  <- gdalcubes::bands(data_cube)$name
+      raw_band_names <- gdalcubes::bands(data_cube)$name
       cube_band_names <- sanitize_band_names(raw_band_names)
       message("Bands: ", paste(cube_band_names, collapse = ", "))
       
@@ -835,7 +829,7 @@ ml_predict <- Process$new(
       }
       Sys.setenv(MODEL_FILE = model_file)
       
-      raw_band_names  <- gdalcubes::bands(data_cube)$name
+      raw_band_names <- gdalcubes::bands(data_cube)$name
       cube_band_names <- sanitize_band_names(raw_band_names)
       message("Bands: ", paste(cube_band_names, collapse = ", "))
       
@@ -1953,12 +1947,11 @@ mlm_random_forest_envelope <- function(max_variables,
                                        seed = NULL,
                                        classification) {
   
-  # Bestimme den mtry-Wert, wie caret ihn erwartet
   mtry_grid <- if (is.character(max_variables)) {
     if (max_variables %in% c("sqrt", "log2", "onethird")) {
-      data.frame(mtry = NA)  # caret interpretiert das intern
+      data.frame(mtry = NA)  
     } else if (max_variables == "all") {
-      data.frame(mtry = NA)  # alle Features → caret entscheidet
+      data.frame(mtry = NA)  
     } else {
       stop("Invalid string value for max_variables")
     }
@@ -2126,7 +2119,6 @@ mlm_regr_random_forest <- Process$new(
 #' )
 
 
-### help function ###
 mlm_xgboost_envelope <- function(learning_rate = 0.15,
                                  max_depth = 5,
                                  min_child_weight = 1,
@@ -2151,7 +2143,6 @@ mlm_xgboost_envelope <- function(learning_rate = 0.15,
   )
 }
 
-#### Process
 
 mlm_class_xgboost <- Process$new(
   id = "mlm_class_xgboost",
@@ -2424,10 +2415,10 @@ mlm_class_tempcnn <- Process$new(
             
             reduced_time_steps <- time_steps
             for (i in seq_along(settings$cnn_layers)) {
-              in_ch  <- if (i == 1) length(self$input_data_columns) else settings$cnn_layers[[i - 1]]
+              in_ch <- if (i == 1) length(self$input_data_columns) else settings$cnn_layers[[i - 1]]
               out_ch <- settings$cnn_layers[[i]]
-              k      <- settings$cnn_kernels[[i]]
-              drop   <- settings$cnn_dropout_rates[[i]]
+              k <- settings$cnn_kernels[[i]]
+              drop <- settings$cnn_dropout_rates[[i]]
               
               self$conv_layers$append(
                 nn_sequential(
@@ -2441,29 +2432,23 @@ mlm_class_tempcnn <- Process$new(
                   nn_dropout(p = drop)
                 )
               )
-              # mit padding=k//2 bleibt T effektiv ~gleich; die folgende Zeile
-              # ist nicht nötig für die finale T-Länge – wir berechnen Flatten
-              # einfach dynamisch
+              
             }
             
             self$flatten <- nn_flatten()
-            # Dense-Head: In-Features = out_ch * T  (werden im forward dynamisch ermittelt)
-            self$dense1 <- nn_linear(in_features = 1L, out_features = settings$dense_layer_nodes) # placeholder, richtige Größe im forward gesetzt
-            self$act1   <- nn_relu()
-            self$drop1  <- nn_dropout(p = settings$dense_layer_dropout_rate)
-            self$out    <- nn_linear(in_features = settings$dense_layer_nodes, out_features = class_count)
+            self$dense1 <- nn_linear(in_features = 1L, out_features = settings$dense_layer_nodes) 
+            self$act1 <- nn_relu()
+            self$drop1 <- nn_dropout(p = settings$dense_layer_dropout_rate)
+            self$out <- nn_linear(in_features = settings$dense_layer_nodes, out_features = class_count)
           },
           forward = function(x) {
-            # x erwartet: (N, C, T)
             for (i in seq_along(self$conv_layers)) {
-              x <- self$conv_layers[[i]](x)  # callable wrapper
+              x <- self$conv_layers[[i]](x)  
             }
-            # dynamisch die Flatten-Länge bestimmen
             n <- x$size(1)
-            feat_dim <- x$size(2) * x$size(3)  # (Channels_out * T)
+            feat_dim <- x$size(2) * x$size(3) 
             x <- x$view(c(n, feat_dim))
             
-            # lineare Head-Layer ggf. beim ersten Forward richtig „anschließen“
             if (self$dense1$in_features != feat_dim) {
               self$dense1 <- nn_linear(in_features = feat_dim,
                                        out_features = self$dense1$out_features)$to(device = x$device)
@@ -2589,7 +2574,6 @@ mlm_class_mlp <- Process$new(
       seed = seed
     )
     
-    # Factory wie beim TempCNN: gibt ein nn_module-Objekt zurück
     create_model <- function(input_data_columns, time_steps, class_count) {
       library(torch)
       
@@ -2606,7 +2590,7 @@ mlm_class_mlp <- Process$new(
           
           input_dim <- length(input_cols) * time_steps
           hls <- as.integer(unlist(settings$hidden_layer_sizes))
-          dr  <- as.numeric(unlist(settings$dropout_rates))
+          dr <- as.numeric(unlist(settings$dropout_rates))
           if (length(dr) < length(hls)) dr <- c(dr, rep(tail(dr,1), length(hls)-length(dr)))
           
           layers <- list()
@@ -2626,11 +2610,11 @@ mlm_class_mlp <- Process$new(
           self$mlp <- do.call(nn_sequential, layers)
         },
         forward = function(x) {
-          x <- self$flatten(x)   # (N,C,T) -> (N, C*T)
-          self$mlp(x)            # callable wrapper
+          x <- self$flatten(x)  
+          self$mlp(x)            
         }
       )(
-        settings   = params,
+        settings = params,
         input_cols = input_data_columns,
         time_steps = time_steps,
         class_count = class_count
@@ -2748,7 +2732,6 @@ mlm_class_lighttae <- Process$new(
       seed = seed
     )
     
-    # Factory: baut ein nn_module mit Temporal Self-Attention
     create_model <- function(input_data_columns, time_steps, class_count) {
       library(torch)
       
@@ -2758,19 +2741,17 @@ mlm_class_lighttae <- Process$new(
           self$C <- length(input_cols)
           self$T <- time_steps
           
-          # Heuristik für Einbettungsdimension (leicht & stabil)
           d_model <- max(64L, as.integer(8L * ceiling(self$C / 2)))
           d_model <- min(d_model, 256L)
           self$d_model <- d_model
           
-          self$proj_in <- nn_linear(self$C, d_model)     # pro Zeitstempel C -> d_model
-          self$q_proj  <- nn_linear(d_model, d_model)
-          self$k_proj  <- nn_linear(d_model, d_model)
-          self$v_proj  <- nn_linear(d_model, d_model)
+          self$proj_in <- nn_linear(self$C, d_model)     
+          self$q_proj <- nn_linear(d_model, d_model)
+          self$k_proj <- nn_linear(d_model, d_model)
+          self$v_proj <- nn_linear(d_model, d_model)
           
           self$attn_drop <- nn_dropout(p = 0.1)
           
-          # Feed-Forward mit Residual (Post-Attention)
           self$ffn <- nn_sequential(
             nn_linear(d_model, 2L * d_model),
             nn_relu(),
@@ -2788,53 +2769,43 @@ mlm_class_lighttae <- Process$new(
         },
         
         forward = function(x) {
-          # x: (N, C, T) -> (N, T, C)
           x <- x$permute(c(1, 3, 2))
-          # Einbettung pro Zeitstempel: (N, T, C) -> (N, T, d_model)
           h <- self$proj_in(x)
           
-          # Q,K,V: (N, T, d_model)
           q <- self$q_proj(h)
           k <- self$k_proj(h)
           v <- self$v_proj(h)
           
-          # Scaled Dot-Product Attention über T
-          # scores: (N, T, T)
           scale <- sqrt(as.numeric(self$d_model))
           scores <- torch_matmul(q, k$transpose(2, 3)) / scale
-          attn   <- nnf_softmax(scores, dim = 3)
-          attn   <- self$attn_drop(attn)
+          attn <- nnf_softmax(scores, dim = 3)
+          attn <- self$attn_drop(attn)
           
-          # Context: (N, T, d_model)
           ctx <- torch_matmul(attn, v)
           
-          # Residual + Norm
           h2 <- self$norm1(h + ctx)
-          # FFN + Residual + Norm
           h3 <- self$ffn(h2)
           h3 <- self$norm2(h2 + h3)
           
-          # Global (Temporal) Pooling: Mittelwert über T -> (N, d_model)
           z <- torch_mean(h3, dim = 2)
           
-          # Klassifikationskopf: (N, class_count) [Logits]
           self$head(z)
         }
       )
       
       LightTAE(
-        settings    = params,
-        input_cols  = input_data_columns,
-        time_steps  = time_steps,
+        settings = params,
+        input_cols = input_data_columns,
+        time_steps = time_steps,
         class_count = class_count
       )
     }
     
     list(
-      parameters    = params,
-      create_model  = create_model,
+      parameters = params,
+      create_model = create_model,
       classification = TRUE,
-      subtype       = "mlm-model"
+      subtype = "mlm-model"
     )
   }
 )
@@ -2892,7 +2863,6 @@ mlm_class_stgf <- Process$new(
     create_model <- function(input_data_columns, time_steps, class_count) {
       library(torch)
       
-      ## ---------- Helpers: robuste Typ-Casts + Defaults + Logging ----------
       to_int1  <- function(x, name="") {
         if (inherits(x, "torch_tensor")) x <- as.numeric(torch::as_array(x)[1])
         if (is.list(x)) x <- unlist(x, use.names = FALSE)
@@ -2900,8 +2870,8 @@ mlm_class_stgf <- Process$new(
         if (is.character(x)) {
           y <- suppressWarnings(as.numeric(x))
           if (all(is.na(y))) {
-            x2 <- gsub("[^0-9\\-]+", "", x)  # "7L"->"7", "NA"->""
-            y  <- suppressWarnings(as.numeric(x2))
+            x2 <- gsub("[^0-9\\-]+", "", x)  
+            y <- suppressWarnings(as.numeric(x2))
           }
         } else y <- as.numeric(x)
         y <- suppressWarnings(as.integer(y[1]))
@@ -2948,20 +2918,18 @@ mlm_class_stgf <- Process$new(
         s
       }
       log_shape <- function(tag, ten) {
-        message(sprintf("[%s] size=(%s) dtype=%s",
-                        tag, paste(as.integer(ten$size()), collapse="x"), ten$dtype))
+        message(sprintf("[%s] size=(%s) dtype=%s", tag, paste(as.integer(ten$size()), collapse="x"), ten$dtype))
       }
       
-      ## ---------- STGF-Block ----------
       STGFBlock <- nn_module(
         "STGFBlock",
         initialize = function(in_ch, d_model, ksize, dilation, pdrop, time_mixer="attention") {
-          in_ch   <- to_int1(in_ch, "block.in_ch")
+          in_ch <- to_int1(in_ch, "block.in_ch")
           d_model <- to_int1(d_model, "block.d_model")
-          ksize   <- to_int1(ksize, "block.kernel")
+          ksize <- to_int1(ksize, "block.kernel")
           dilation<- to_int1(dilation, "block.dilation")
-          pdrop   <- to_num1(pdrop, "block.dropout")
-          tmix    <- as.character(time_mixer)
+          pdrop <- to_num1(pdrop, "block.dropout")
+          tmix <- as.character(time_mixer)
           
           pad <- as.integer(((ksize - 1L) %/% 2L) * dilation)
           message(sprintf("[STGFBlock.init] in_ch=%d d=%d k=%d dil=%d pad=%d mixer=%s pdrop=%.3f",
@@ -2977,15 +2945,15 @@ mlm_class_stgf <- Process$new(
           
           if (self$time_mixer == "attention") {
             self$ln1 <- nn_layer_norm(d_model)
-            self$q   <- nn_linear(d_model, d_model)
-            self$k   <- nn_linear(d_model, d_model)
-            self$v   <- nn_linear(d_model, d_model)
+            self$q <- nn_linear(d_model, d_model)
+            self$k <- nn_linear(d_model, d_model)
+            self$v <- nn_linear(d_model, d_model)
             self$attn_drop <- nn_dropout(p=pdrop)
           } else {
             self$ln1    <- nn_layer_norm(d_model)
             self$gate_u <- nn_linear(d_model, d_model)
             self$gate_f <- nn_linear(d_model, d_model)
-            self$cand   <- nn_linear(d_model, d_model)
+            self$cand <- nn_linear(d_model, d_model)
           }
           
           self$ff <- nn_sequential(
@@ -3005,7 +2973,6 @@ mlm_class_stgf <- Process$new(
           )
         },
         forward = function(x) {
-          message("[STGFBlock.fwd] ----")
           log_shape("x", x)
           
           h <- self$dw(x); log_shape("dw", h)
@@ -3033,7 +3000,7 @@ mlm_class_stgf <- Process$new(
             log_shape("u", u); log_shape("f", f); log_shape("g", g)
             
             Tlen <- as.integer(h_t$size(2))
-            s <- torch_zeros_like(g[, 1, ])  # (N,d)
+            s <- torch_zeros_like(g[, 1, ])  
             s_list <- vector("list", Tlen)
             for (t in 1:Tlen) {
               gt <- g[, t, ]
@@ -3045,26 +3012,24 @@ mlm_class_stgf <- Process$new(
             log_shape("S(state)", S)
             ctx <- u * S                     
             log_shape("ctx(mamba)", ctx)
-            h1  <- self$ln1(h_t + ctx)
+            h1 <- self$ln1(h_t + ctx)
           }
           
           h2  <- self$ff(h1)
           h2  <- self$ln2(h1 + h2)                              
           log_shape("post-ffn", h2)
           
-          # SE-Gate (kanalweise)
-          z   <- torch_mean(h2, dim=2)                          # (N,d)
-          gch <- self$se(z)$unsqueeze(2)                        # (N,1,d)
-          h2g <- h2 * gch                                       # (N,T,d)
+          z <- torch_mean(h2, dim=2)                         
+          gch <- self$se(z)$unsqueeze(2)                        
+          h2g <- h2 * gch                                       
           log_shape("after-SE", h2g)
           
-          y <- h2g$permute(c(1,3,2))                            # -> (N,d,T)
+          y <- h2g$permute(c(1,3,2))                            
           log_shape("block-out(N,d,T)", y)
           y
         }
       )
       
-      ## ---------- STGF-Top ----------
       STGF <- nn_module(
         "STGF",
         initialize = function(settings, C, T, class_count) {
@@ -3111,9 +3076,8 @@ mlm_class_stgf <- Process$new(
             )
             in_ch <- self$d
           }
-          self$nb <- nb  # Anzahl der Blöcke merken
+          self$nb <- nb  
           
-          # Soft-Attention-Pooling über T: Query-Parameter (d,)
           self$pool_query <- nn_parameter(torch_randn(self$d))
           
           self$head <- nn_sequential(
@@ -3122,24 +3086,21 @@ mlm_class_stgf <- Process$new(
           )
         },
         forward = function(x) {
-          message("[STGF.fwd] =====")
           log_shape("x_in", x)
           
           h <- x
-          # Index-basierte Iteration über ModuleList (R/torch)
           n_blocks <- if (!is.null(self$nb)) as.integer(self$nb) else length(self$blocks)
           if (is.na(n_blocks) || n_blocks < 1) stop("STGF has no blocks.")
           for (i in seq_len(n_blocks)) {
-            h <- self$blocks[[i]](h)          # (N, d, T)
+            h <- self$blocks[[i]](h)          
           }
           log_shape("h_after_blocks", h)
           
-          # Soft-Attention-Pooling
-          ht <- h$permute(c(1,3,2))           # (N, T, d)
+          ht <- h$permute(c(1,3,2))           
           log_shape("ht(N,T,d)", ht)
           
-          logits_t <- torch_matmul(ht, self$pool_query)$squeeze(-1)  # (N,T)
-          w <- nnf_softmax(logits_t, dim=2)$unsqueeze(3)             # (N,T,1)
+          logits_t <- torch_matmul(ht, self$pool_query)$squeeze(-1)  
+          w <- nnf_softmax(logits_t, dim=2)$unsqueeze(3)             
           
           lt_arr <- as.numeric(torch::as_array(logits_t))
           if (length(lt_arr) > 0) {
@@ -3147,10 +3108,10 @@ mlm_class_stgf <- Process$new(
                             as.integer(ht$size(2)), min(lt_arr), max(lt_arr)))
           }
           
-          z <- torch_sum(ht * w, dim=2)      # (N,d)
+          z <- torch_sum(ht * w, dim=2)      
           log_shape("z(N,d)", z)
           
-          y <- self$head(z)                  # (N, classes) [Logits]
+          y <- self$head(z)                  
           log_shape("head_out(N,classes)", y)
           y
         }
@@ -3162,10 +3123,10 @@ mlm_class_stgf <- Process$new(
     }
     
     list(
-      parameters     = params,
+      parameters = params,
       create_model   = create_model,
       classification = TRUE,
-      subtype        = "mlm-model"
+      subtype = "mlm-model"
     )
   }
 )
@@ -3464,9 +3425,14 @@ load_ml_model <- Process$new(
       ),
       schema = list(type = "string")
     )
+    
+    
   ),
   
-  returns = ml_model,
+  returns = list(
+    description = "A machine learning model to be used with machine learning processes such as ``ml_predict()``.", 
+    schema = list(type = "object", subtype = "ml-model")
+  ),
   
   operation = function(url, job) {
     library(tools)
@@ -3773,6 +3739,8 @@ load_ml_model <- Process$new(
       } else if (is_yaml_text(url)) {
         use_yaml <- TRUE
       }
+      
+      destfile
     }
     
     if (use_yaml) {
@@ -3998,7 +3966,7 @@ save_ml_model <- Process$new(
         }, silent = TRUE)
       }
       py3 <- Sys.which("python3"); if (nzchar(py3)) return(py3)
-      py  <- Sys.which("python");  if (nzchar(py))  return(py)
+      py <- Sys.which("python");  if (nzchar(py))  return(py)
       stop("No suitable Python interpreter found!")
     }
     
@@ -4018,11 +3986,11 @@ save_ml_model <- Process$new(
     detect_svm_kernel <- function(train_obj) {
       stopifnot(is_caret_svm(train_obj))
       kobj <- train_obj$finalModel@kernelf
-      kcl  <- tolower(class(kobj))
+      kcl <- tolower(class(kobj))
       message("kernlab kernel classes: ", paste(kcl, collapse = ", "))
       if (any(kcl %in% c("vanilladot", "vanillakernel", "lineardot", "linear"))) return("linear")
-      if (any(kcl %in% c("rbfdot", "rbfkernel", "gaussiandot", "gaussian")))     return("rbf")
-      if (any(kcl %in% c("polydot", "polykernel", "poly")))                      return("poly")
+      if (any(kcl %in% c("rbfdot", "rbfkernel", "gaussiandot", "gaussian"))) return("rbf")
+      if (any(kcl %in% c("polydot", "polykernel", "poly"))) return("poly")
       ktxt <- paste(kcl, collapse = " ")
       if (grepl("vanilla|linear", ktxt)) return("linear")
       if (grepl("rbf|gauss|radial", ktxt)) return("rbf")
@@ -4040,29 +4008,27 @@ save_ml_model <- Process$new(
         if (!inherits(kern, "try-error") && nzchar(kern)) {
           return(switch(tolower(kern),
                         linear = "svmLinear",
-                        rbf    = "svmRadial",
-                        poly   = "svmPoly",
+                        rbf = "svmRadial",
+                        poly = "svmPoly",
                         "svmLinear"  
           ))
         }
         
         kcls <- tolower(if (!inherits(kcls_vec, "try-error")) kcls_vec[1] else "")
         if (kcls %in% c("vanilladot","vanillakernel","lineardot","linear")) return("svmLinear")
-        if (kcls %in% c("rbfdot","rbfkernel","gaussiandot","gaussian"))     return("svmRadial")
-        if (kcls %in% c("polydot","polykernel","poly"))                      return("svmPoly")
+        if (kcls %in% c("rbfdot","rbfkernel","gaussiandot","gaussian")) return("svmRadial")
+        if (kcls %in% c("polydot","polykernel","poly")) return("svmPoly")
         ktxt <- tolower(paste(kcls_vec, collapse = " "))
         if (grepl("vanilla|linear", ktxt)) return("svmLinear")
         if (grepl("rbf|gauss|radial", ktxt)) return("svmRadial")
         if (grepl("poly", ktxt)) return("svmPoly")
-        
-        warning("Unbekannter ksvm-Kernel (", ktxt, "); setze 'svmLinear' als Fallback.")
+        warning("Unknown ksvm kernel (", ktxt, "); setting 'svmLinear' as fallback.")
         return("svmLinear")
       }
       
-      # Nicht-SVM
       safe_text <- paste(c(model$modelInfo$label %||% "", model$method %||% ""), collapse = " ")
       has <- function(pat) isTRUE(grepl(pat, safe_text, ignore.case = TRUE))
-      if (has("random[ ]*forest|^rf$"))         return("random_forest")
+      if (has("random[ ]*forest|^rf$")) return("random_forest")
       if (has("xgboost|xgb|gradient[ ]*boost")) return("xgbTree")
       
       stop("Model type could not be recognized (finalModel class: ",
@@ -4096,17 +4062,16 @@ save_ml_model <- Process$new(
       stopifnot(inherits(train_obj, "train"), inherits(train_obj$finalModel, "ksvm"))
       
       model_r <- train_obj
-      model   <- model_r$finalModel
+      model <- model_r$finalModel
       
       classes <- as.character(model_r$levels)
-      K       <- length(classes)                  
-      feat    <- setdiff(colnames(model_r$trainingData), ".outcome")
-      pp      <- model_r$preProcess
-      means   <- as.numeric(pp$mean[feat]); names(means) <- feat
-      sds     <- as.numeric(pp$std[feat]);  names(sds)   <- feat
-      
-      
-      
+      K <- length(classes)                  
+      feat <- setdiff(colnames(model_r$trainingData), ".outcome")
+      pp <- model_r$preProcess
+      means <- as.numeric(pp$mean[feat])
+      names(means) <- feat
+      sds <- as.numeric(pp$std[feat])
+      names(sds) <- feat
       
       Xscaled <- as.matrix(model_r$trainingData[, feat, drop = FALSE])
       storage.mode(Xscaled) <- "double"
@@ -4121,11 +4086,8 @@ save_ml_model <- Process$new(
         dec <- kernlab::decision(model, X)
         dec <- as.matrix(dec); storage.mode(dec) <- "double"; dec
       }
-      
-      
-      
+  
       dec <- get_decision_matrix(model, Xscaled)
-      
       
       C2 <- ncol(dec)
       expected_C2 <- K * (K - 1) / 2
@@ -4163,7 +4125,7 @@ save_ml_model <- Process$new(
       pair_name <- function(ci, cj) paste0(ci, "_vs_", cj)
       
       weights_aligned <- vector("list", C2)
-      posneg_pairs    <- vector("list", C2)  
+      posneg_pairs <- vector("list", C2)  
       for (j in 1:C2) {
         p <- assign_j_to_p[j]
         a <- all_pairs[[p]][1]; b <- all_pairs[[p]][2]
@@ -4172,7 +4134,7 @@ save_ml_model <- Process$new(
         if (m_a >= m_b) { ci <- a; cj <- b } else { ci <- b; cj <- a }
         wj <- weights_from_dec[[j]]
         weights_aligned[[j]] <- c(wj, list(class_pair = c(ci, cj), name = pair_name(ci, cj)))
-        posneg_pairs[[j]]    <- c(ci, cj)
+        posneg_pairs[[j]] <- c(ci, cj)
       }
       
       Z_hat <- sapply(seq_len(C2), function(j) as.numeric(Xscaled %*% weights_aligned[[j]]$W + weights_aligned[[j]]$b))
@@ -4184,7 +4146,7 @@ save_ml_model <- Process$new(
       
       pred_from_dec <- function(dec_rowmat, classes, posneg_pairs, rule = c("majority","margin","signedsum")) {
         rule <- match.arg(rule)
-        K    <- length(classes); C2 <- length(posneg_pairs)
+        K <- length(classes); C2 <- length(posneg_pairs)
         apply(dec_rowmat, 1, function(zrow) {
           acc <- setNames(numeric(K), classes)
           for (j in 1:C2) {
@@ -4207,11 +4169,11 @@ save_ml_model <- Process$new(
       rows <- sample(seq_len(nrow(Xscaled)), size = min(100, nrow(Xscaled)))
       pred_caret <- sapply(rows, function(r) {
         x_raw <- unscale_vec(as.numeric(Xscaled[r, ]), means, sds)
-        df    <- as.data.frame(t(x_raw)); colnames(df) <- feat
+        df <- as.data.frame(t(x_raw)); colnames(df) <- feat
         as.character(predict(model_r, newdata = df))
       })
       
-      pred_major  <- pred_from_dec(dec[rows, , drop=FALSE], classes, posneg_pairs, "majority")
+      pred_major <- pred_from_dec(dec[rows, , drop=FALSE], classes, posneg_pairs, "majority")
       pred_margin <- pred_from_dec(dec[rows, , drop=FALSE], classes, posneg_pairs, "margin")
       pred_signed <- pred_from_dec(dec[rows, , drop=FALSE], classes, posneg_pairs, "signedsum")
       
@@ -4222,18 +4184,17 @@ save_ml_model <- Process$new(
       
       use_rule <- "majority"
       
-      # ONNX bauen
-      onnx_path   <- paste0(out_base, "_svm_ovo_linear_", use_rule, ".onnx")
+      onnx_path <- paste0(out_base, "_svm_ovo_linear_", use_rule, ".onnx")
       labels_json <- sub("\\.onnx$", "_labels.json", onnx_path)
       
       build_onnx_for_rule(
-        use_rule        = use_rule,
+        use_rule = use_rule,
         weights_aligned = weights_aligned,
-        feature_names   = feat,
-        classes         = classes,
-        means           = means,
-        sds             = sds,
-        out_path        = onnx_path
+        feature_names = feat,
+        classes = classes,
+        means = means,
+        sds = sds,
+        out_path = onnx_path
       )
       
       lbls <- setNames(as.list(classes), as.character(seq_along(classes)))
@@ -4257,7 +4218,7 @@ save_ml_model <- Process$new(
       model_r <- train_obj
       model_ksvm <- model_r$finalModel              
       
-      classes       <- as.character(model_r$levels)
+      classes <- as.character(model_r$levels)
       feature_names <- setdiff(colnames(model_r$trainingData), ".outcome")
       
       pp <- model_r$preProcess
@@ -4265,18 +4226,18 @@ save_ml_model <- Process$new(
       sds <- as.numeric(pp$std[feature_names]);  names(sds) <- feature_names
       
       Xraw_train <- as.data.frame(model_r$trainingData[, feature_names, drop = FALSE])
-      Xscaled    <- as.matrix(predict(pp, Xraw_train))
+      Xscaled <- as.matrix(predict(pp, Xraw_train))
       storage.mode(Xscaled) <- "double"
       colnames(Xscaled) <- feature_names 
       
-      K  <- length(classes)
+      K <- length(classes)
       C2 <- K * (K - 1) / 2
       stopifnot(C2 >= 1)
       library(kernlab)
-      kp     <- kernlab::kpar(model_ksvm@kernelf)
-      deg    <- as.numeric(kp$degree)
+      kp <- kernlab::kpar(model_ksvm@kernelf)
+      deg <- as.numeric(kp$degree)
       scaleK <- as.numeric(kp$scale)
-      offK   <- as.numeric(kp$offset)
+      offK <- as.numeric(kp$offset)
       
       
       message("decsion started...")
@@ -4411,9 +4372,9 @@ save_ml_model <- Process$new(
         best <- best_two_swap_once(dec_raw, pair_id_for_k, pos_class_k, neg_class_k, rn, pv, tie_rule)
         if (best$gain <= 0) break
         pair_id_for_k <- best$pid
-        pos_class_k   <- best$pos
-        neg_class_k   <- best$neg
-        l1_cur        <- best$l1
+        pos_class_k <- best$pos
+        neg_class_k <- best$neg
+        l1_cur <- best$l1
         cat(sprintf("Swap k=%d<->k=%d  → L1=%.12f\n", best$k1, best$k2, l1_cur))
         if (l1_cur < 1e-12 || iter_sw > 200) break
       }
@@ -4421,7 +4382,7 @@ save_ml_model <- Process$new(
       
       
       our_votes <- build_votes_from_state_tie(dec_raw, pair_id_for_k, pos_class_k, neg_class_k, rn, tie_rule)
-      l1_final  <- mean(colSums(abs(our_votes - pv)))
+      l1_final <- mean(colSums(abs(our_votes - pv)))
       acc_final <- mean(rn[apply(our_votes, 2, which.max)] == rn[apply(pv, 2, which.max)])
       cat(sprintf("Votes-Check (Tie %s): L1=%.12f | Top1-Acc=%.3f\n", tie_rule, l1_final, acc_final))
       stopifnot(l1_final < 1e-12, acc_final >= 0.999)
@@ -4431,13 +4392,13 @@ save_ml_model <- Process$new(
       stopifnot(length(ai_list) == C2)
       
       Kmats <- vector("list", C2)
-      SVs   <- vector("list", C2)
+      SVs <- vector("list", C2)
       for (j in 1:C2) {
         ai <- suppressWarnings(as.integer(ai_list[[j]]))
         stopifnot(length(ai) >= 1L,
                   all(is.finite(ai)),
                   all(ai >= 1L & ai <= nrow(Xscaled)))
-        SVs[[j]]   <- Xscaled[ai, , drop = FALSE]
+        SVs[[j]] <- Xscaled[ai, , drop = FALSE]
         Kmats[[j]] <- kernlab::kernelMatrix(model_ksvm@kernelf, Xscaled, SVs[[j]])  # [N x m_j]
       }
       
@@ -4481,14 +4442,14 @@ save_ml_model <- Process$new(
       }
       
       corr_mat <- matrix(0, nrow=C2, ncol=C2)
-      fits     <- vector("list", C2)     
+      fits <- vector("list", C2)     
       for (j in 1:C2) {
         fits[[j]] <- vector("list", C2)
         for (k in 1:C2) {
           yk <- as.numeric(dec_raw[,k])
           fk <- fit_one(Kmats[[j]], yk, tie_rule)
           fits[[j]][[k]] <- fk
-          corr_mat[j,k]  <- fk$corr
+          corr_mat[j,k] <- fk$corr
         }
       }
       
@@ -4496,18 +4457,18 @@ save_ml_model <- Process$new(
       stopifnot(length(unique(assign_j_to_k)) == C2)
       
       bin_models <- vector("list", C2)
-      corr_used  <- numeric(C2)
+      corr_used <- numeric(C2)
       for (k in 1:C2) {
         j <- which(assign_j_to_k == k)
         fk <- fits[[j]][[k]]
         ci <- pos_class_k[k]; cj <- neg_class_k[k]
         bin_models[[k]] <- list(
           name = paste0(ci, "_vs_", cj),
-          ci   = ci,
-          cj   = cj,
-          SV   = SVs[[j]],          
+          ci = ci,
+          cj = cj,
+          SV = SVs[[j]],          
           coef = fk$alpha,
-          b    = fk$b
+          b = fk$b
         )
         corr_used[k] <- fk$corr
       }
@@ -4528,12 +4489,12 @@ save_ml_model <- Process$new(
         if (tie_rule == ">=0") {
           for (j in seq_along(bm_list)) {
             if (z[j] >= 0) acc[bm_list[[j]]$ci] <- acc[bm_list[[j]]$ci] + 1
-            else           acc[bm_list[[j]]$cj] <- acc[bm_list[[j]]$cj] + 1
+            else acc[bm_list[[j]]$cj] <- acc[bm_list[[j]]$cj] + 1
           }
         } else {
           for (j in seq_along(bm_list)) {
             if (z[j] >  0) acc[bm_list[[j]]$ci] <- acc[bm_list[[j]]$ci] + 1
-            else           acc[bm_list[[j]]$cj] <- acc[bm_list[[j]]$cj] + 1
+            else acc[bm_list[[j]]$cj] <- acc[bm_list[[j]]$cj] + 1
           }
         }
         acc
@@ -4551,7 +4512,7 @@ save_ml_model <- Process$new(
       
       out_classes <- rn
       
-      onnx_path   <- paste0(out_base, "_svm_ovo_linear_", use_rule, ".onnx")
+      onnx_path <- paste0(out_base, "_svm_ovo_linear_", use_rule, ".onnx")
       labels_json <- sub("\\.onnx$", "_labels.json", onnx_path)
       
       build_onnx_poly_ovo(
@@ -4585,15 +4546,15 @@ save_ml_model <- Process$new(
       model_r <- train_obj
       model_ksvm <- model_r$finalModel
       
-      classes       <- as.character(model_r$levels)
+      classes <- as.character(model_r$levels)
       feature_names <- setdiff(colnames(model_r$trainingData), ".outcome")
       
-      pp    <- model_r$preProcess
+      pp <- model_r$preProcess
       means <- as.numeric(pp$mean[feature_names]); names(means) <- feature_names
-      sds   <- as.numeric(pp$std[feature_names]);  names(sds)   <- feature_names
+      sds <- as.numeric(pp$std[feature_names]);  names(sds)   <- feature_names
       
       Xraw_train <- as.data.frame(model_r$trainingData[, feature_names, drop = FALSE])
-      Xscaled    <- as.matrix(predict(pp, Xraw_train))
+      Xscaled <- as.matrix(predict(pp, Xraw_train))
       storage.mode(Xscaled) <- "double"
       colnames(Xscaled) <- feature_names
       
@@ -4601,7 +4562,7 @@ save_ml_model <- Process$new(
       C2 <- K * (K - 1) / 2
       stopifnot(C2 >= 1)
       
-      kp    <- kernlab::kpar(model_ksvm@kernelf)
+      kp <- kernlab::kpar(model_ksvm@kernelf)
       sigma <- as.numeric(kp$sigma) 
       
       
@@ -4715,7 +4676,7 @@ save_ml_model <- Process$new(
             a <- all_pairs[[pid[k2]]][1]; b <- all_pairs[[pid[k2]]][2]
             if (o2==0) { pos_tmp[k2] <- a; neg_tmp[k2] <- b } else { pos_tmp[k2] <- b; neg_tmp[k2] <- a }
             l1_new <- l1_state_tie(dec_raw, pid, pos_tmp, neg_tmp, rn, pv, tie_rule)
-            gain   <- l1_cur - l1_new
+            gain <- l1_cur - l1_new
             if (gain > best$gain + 1e-12) best <- list(gain=gain, pid=pid, pos=pos_tmp, neg=neg_tmp, l1=l1_new, k1=k1, k2=k2)
           }
         }
@@ -4727,9 +4688,9 @@ save_ml_model <- Process$new(
         best <- best_two_swap_once(dec_raw, pair_id_for_k, pos_class_k, neg_class_k, rn, pv, tie_rule)
         if (best$gain <= 0) break
         pair_id_for_k <- best$pid
-        pos_class_k   <- best$pos
-        neg_class_k   <- best$neg
-        l1_cur        <- best$l1
+        pos_class_k <- best$pos
+        neg_class_k <- best$neg
+        l1_cur <- best$l1
         cat(sprintf("Swap k=%d<->k=%d  → L1=%.12f\n", best$k1, best$k2, l1_cur))
         if (l1_cur < 1e-12 || iter_sw > 200) break
       }
@@ -4737,7 +4698,7 @@ save_ml_model <- Process$new(
       
       
       our_votes <- build_votes_from_state_tie(dec_raw, pair_id_for_k, pos_class_k, neg_class_k, rn, tie_rule)
-      l1_final  <- mean(colSums(abs(our_votes - pv)))
+      l1_final <- mean(colSums(abs(our_votes - pv)))
       acc_final <- mean(rn[apply(our_votes, 2, which.max)] == rn[apply(pv, 2, which.max)])
       cat(sprintf("Votes-Check (Tie %s): L1=%.12f | Top1-Acc=%.3f\n", tie_rule, l1_final, acc_final))
       stopifnot(l1_final < 1e-12, acc_final >= 0.999)
@@ -4747,13 +4708,13 @@ save_ml_model <- Process$new(
       stopifnot(length(ai_list) == C2)
       
       Kmats <- vector("list", C2)
-      SVs   <- vector("list", C2)
+      SVs <- vector("list", C2)
       for (j in 1:C2) {
         ai <- suppressWarnings(as.integer(ai_list[[j]]))
         stopifnot(length(ai) >= 1L,
                   all(is.finite(ai)),
                   all(ai >= 1L & ai <= nrow(Xscaled)))
-        SVs[[j]]   <- Xscaled[ai, , drop = FALSE]
+        SVs[[j]] <- Xscaled[ai, , drop = FALSE]
         Kmats[[j]] <- kernlab::kernelMatrix(model_ksvm@kernelf, Xscaled, SVs[[j]])  # [N x m_j]
       }
       
@@ -4773,7 +4734,7 @@ save_ml_model <- Process$new(
         if (cr < 0) { a <- -a; b <- -b; z <- -z; cr <- -cr }
         
         y_pos <- if (tie_rule == ">=0") (y >= 0) else (y > 0)
-        t_i   <- -z
+        t_i <- -z
         if (all(y_pos)) {
           delta <- max(t_i) + 1.0
         } else if (all(!y_pos)) {
@@ -4790,7 +4751,7 @@ save_ml_model <- Process$new(
       }
       
       corr_mat <- matrix(0, nrow=C2, ncol=C2)
-      fits     <- vector("list", C2)
+      fits <- vector("list", C2)
       for (j in 1:C2) {
         fits[[j]] <- vector("list", C2)
         for (k in 1:C2) {
@@ -4811,11 +4772,11 @@ save_ml_model <- Process$new(
         ci <- pos_class_k[k]; cj <- neg_class_k[k]
         bin_models[[k]] <- list(
           name = paste0(ci, "_vs_", cj),
-          ci   = ci,
-          cj   = cj,
-          SV   = SVs[[j]],     # caret-Skala
+          ci = ci,
+          cj = cj,
+          SV = SVs[[j]],     
           coef = fk$alpha,
-          b    = fk$b
+          b = fk$b
         )
         corr_used[k] <- fk$corr
       }
@@ -4824,17 +4785,17 @@ save_ml_model <- Process$new(
       
       out_classes <- rn
       
-      onnx_path   <- paste0(out_base, "_svm_ovo_rbf_", use_rule, ".onnx")
+      onnx_path <- paste0(out_base, "_svm_ovo_rbf_", use_rule, ".onnx")
       labels_json <- sub("\\.onnx$", "_labels.json", onnx_path)
       
       build_onnx_rbf_ovo(
-        use_rule       = use_rule,
+        use_rule = use_rule,
         bin_models, feature_names, classes, means, sds, sigma, onnx_path,
-        dtype          = dtype,
-        reorder_idx    = NULL,
-        add_debug      = TRUE,
+        dtype = dtype,
+        reorder_idx = NULL,
+        add_debug = TRUE,
         primary_output = primary_output,
-        tie_rule       = tie_rule
+        tie_rule = tie_rule
       )
       
       lbls <- setNames(as.list(out_classes), as.character(seq_along(out_classes)))
@@ -4855,9 +4816,9 @@ save_ml_model <- Process$new(
       switch(k,
              linear = { message("→ export_ksvm_linear_onnx()"); 
                export_ksvm_linear_onnx(train_obj, out_base, use_rule, primary_output, dtype, do_checks) },
-             poly   = { message("→ export_ksvm_poly_onnx()");   
+             poly = { message("→ export_ksvm_poly_onnx()");   
                export_ksvm_poly_onnx(  train_obj, out_base, use_rule, primary_output, dtype, do_checks) },
-             rbf    = { message("→ export_ksvm_rbf_onnx()");    
+             rbf = { message("→ export_ksvm_rbf_onnx()");    
                export_ksvm_rbf_onnx(   train_obj, out_base, use_rule, primary_output, dtype, do_checks) },
              stop("Unsupported kernel: ", k)
       )
@@ -4902,10 +4863,10 @@ save_ml_model <- Process$new(
         i_left <- pick("left daughter"); i_right <- pick("right daughter")
         i_svar <- pick("split var");     i_spt   <- pick("split point")
         i_stat <- pick("status")
-        left   <- suppressWarnings(as.integer(tr[, i_left ]))
-        right  <- suppressWarnings(as.integer(tr[, i_right]))
-        svar   <- suppressWarnings(as.integer(tr[, i_svar ]))
-        spt    <- suppressWarnings(as.numeric(tr[, i_spt ]))
+        left <- suppressWarnings(as.integer(tr[, i_left ]))
+        right <- suppressWarnings(as.integer(tr[, i_right]))
+        svar <- suppressWarnings(as.integer(tr[, i_svar ]))
+        spt <- suppressWarnings(as.numeric(tr[, i_spt ]))
         status <- if (is.finite(i_stat)) suppressWarnings(as.integer(tr[, i_stat])) else rep(NA_integer_, nrow(tr))
         n_local <- nrow(tr)
         is_leaf_row <- (left == 0L & right == 0L) | (svar == 0L) | (!is.na(status) & status == -1L)
@@ -4953,16 +4914,16 @@ save_ml_model <- Process$new(
         tr_idx <- randomForest::getTree(rf, k = t, labelVar = FALSE)
         tr_lab <- tryCatch(randomForest::getTree(rf, k = t, labelVar = TRUE), error = function(e) NULL)
         cn <- colnames(tr_idx)
-        i_left  <- pick_col(cn, c("left daughter","left_daughter","left"))
+        i_left <- pick_col(cn, c("left daughter","left_daughter","left"))
         i_right <- pick_col(cn, c("right daughter","right_daughter","right"))
-        i_svar  <- pick_col(cn, c("split var","split_var","splitvar"))
-        i_spt   <- pick_col(cn, c("split point","split_point","splitpoint","cutoff"))
-        i_stat  <- pick_col(cn, c("status"))
-        i_pred  <- pick_col(cn, c("prediction","pred"))
-        left   <- suppressWarnings(as.integer(tr_idx[, i_left ]))
-        right  <- suppressWarnings(as.integer(tr_idx[, i_right]))
-        svar   <- suppressWarnings(as.integer(tr_idx[, i_svar ]))
-        spt    <- suppressWarnings(as.numeric(tr_idx[, i_spt ]))
+        i_svar <- pick_col(cn, c("split var","split_var","splitvar"))
+        i_spt <- pick_col(cn, c("split point","split_point","splitpoint","cutoff"))
+        i_stat <- pick_col(cn, c("status"))
+        i_pred <- pick_col(cn, c("prediction","pred"))
+        left <- suppressWarnings(as.integer(tr_idx[, i_left ]))
+        right <- suppressWarnings(as.integer(tr_idx[, i_right]))
+        svar <- suppressWarnings(as.integer(tr_idx[, i_svar ]))
+        spt <- suppressWarnings(as.numeric(tr_idx[, i_spt ]))
         status <- if (is.finite(i_stat)) suppressWarnings(as.integer(tr_idx[, i_stat])) else rep(NA_integer_, nrow(tr_idx))
         pred_i <- tr_idx[, i_pred]
         
@@ -5008,7 +4969,7 @@ save_ml_model <- Process$new(
           }
           if (any(is.na(cid))) {
             pn <- suppressWarnings(as.integer(as.character(pred_i[lf_idx])))
-            ok1 <- which(is.na(cid) & is.finite(pn) & pn >= 1L & pn <= length(out_classes));      if (length(ok1)) cid[ok1] <- pn[ok1]
+            ok1 <- which(is.na(cid) & is.finite(pn) & pn >= 1L & pn <= length(out_classes)); if (length(ok1)) cid[ok1] <- pn[ok1]
             ok0 <- which(is.na(cid) & is.finite(pn) & pn >= 0L & pn <= (length(out_classes)-1L)); if (length(ok0)) cid[ok0] <- pn[ok0] + 1L
           }
           if (any(is.na(cid))) {
@@ -5032,7 +4993,7 @@ save_ml_model <- Process$new(
           nodes_nodeids <- c(nodes_nodeids, df_leaf$nid)
           nodes_featureids <- c(nodes_featureids, rep(0L, nL))
           nodes_values <- c(nodes_values, rep(0.0, nL))
-          nodes_truenodeids  <- c(nodes_truenodeids,  rep(-1L, nL))
+          nodes_truenodeids <- c(nodes_truenodeids,  rep(-1L, nL))
           nodes_falsenodeids <- c(nodes_falsenodeids, rep(-1L, nL))
           nodes_modes <- c(nodes_modes, rep("LEAF", nL))
           nodes_missing_value_tracks_true <- c(nodes_missing_value_tracks_true, rep(0L, nL))
@@ -5040,18 +5001,18 @@ save_ml_model <- Process$new(
       }
       
       list(
-        nodes_treeids  = as.integer(nodes_treeids),
-        nodes_nodeids  = as.integer(nodes_nodeids),
+        nodes_treeids = as.integer(nodes_treeids),
+        nodes_nodeids = as.integer(nodes_nodeids),
         nodes_featureids = as.integer(nodes_featureids),
-        nodes_values   = as.numeric(nodes_values),
+        nodes_values = as.numeric(nodes_values),
         nodes_truenodeids  = as.integer(nodes_truenodeids),
         nodes_falsenodeids = as.integer(nodes_falsenodeids),
-        nodes_modes    = as.character(nodes_modes),
+        nodes_modes = as.character(nodes_modes),
         nodes_missing_value_tracks_true = as.integer(nodes_missing_value_tracks_true),
-        leaf_treeids   = as.integer(leaf_treeids),
-        leaf_nodeids   = as.integer(leaf_nodeids),
-        leaf_targets   = as.integer(leaf_targets),
-        leaf_weights   = as.numeric(leaf_weights)
+        leaf_treeids = as.integer(leaf_treeids),
+        leaf_nodeids = as.integer(leaf_nodeids),
+        leaf_targets = as.integer(leaf_targets),
+        leaf_weights = as.numeric(leaf_weights)
       )
     }
     
@@ -5093,7 +5054,7 @@ save_ml_model <- Process$new(
       if (!is.null(pp) && !is.null(pp$mean) && !is.null(pp$std)) {
         if (all(feature_names %in% names(pp$mean)) && all(feature_names %in% names(pp$std))) {
           means <- as.numeric(pp$mean[feature_names]); names(means) <- feature_names
-          sds   <- as.numeric(pp$std[feature_names]);  names(sds)   <- feature_names
+          sds  <- as.numeric(pp$std[feature_names]);  names(sds)   <- feature_names
           if (any(!is.finite(sds)) || any(sds == 0)) means <- sds <- NULL
         }
       }
@@ -5115,6 +5076,7 @@ save_ml_model <- Process$new(
       
       onnx_path <- paste0(out_base, "_rf_teclassifier.onnx")
       message("feature names", feature_names)
+
       build_rf_teclassifier_onnx(
         arr = arr,
         feature_names  = feature_names,
@@ -5182,14 +5144,13 @@ save_ml_model <- Process$new(
         rows <- sample(seq_len(nrow(X_ref)), N)
         X_raw_N <- X_ref[rows, , drop=FALSE]; colnames(X_raw_N) <- feature_names
         
-        onnx_idx1  <- onnx_predict_idx1_batch(sess, input_name, X_raw_N)
+        onnx_idx1 <- onnx_predict_idx1_batch(sess, input_name, X_raw_N)
         caret_idx1 <- rf_predict_idx1(model_r, X_raw_N, out_classes)
         
         cat(sprintf("\n--- Batch check on %d training rows ---\n", N))
         cat("Mismatch-Rate:", mean(onnx_idx1 != caret_idx1), "\n")
         cat("ONNX class distribution:\n");  print(sort(table(onnx_idx1)))
         cat("Caret class distribution:\n"); print(sort(table(caret_idx1)))
-        # --------------------------------------------------------------------
       }
       
       invisible(list(
@@ -5202,9 +5163,7 @@ save_ml_model <- Process$new(
     
     
     
-    build_onnx_for_rule <- function(use_rule,
-                                    weights_aligned, feature_names, classes,
-                                    means, sds, out_path) {
+    build_onnx_for_rule <- function(use_rule, weights_aligned, feature_names, classes, means, sds, out_path) {
       
       
       library(reticulate)
@@ -5604,7 +5563,7 @@ save_ml_model <- Process$new(
       tp <- reticulate::tuple
       
       is_f64 <- (dtype == "float64")
-      TNUM   <- if (is_f64) TensorProto$DOUBLE else TensorProto$FLOAT
+      TNUM <- if (is_f64) TensorProto$DOUBLE else TensorProto$FLOAT
       as_fp_vec <- function(x) np$array(as.numeric(x), dtype = if (is_f64) "float64" else "float32")
       as_fp_mat <- function(M){ if (is.vector(M)) M <- matrix(M, nrow=1L); np$array(M, dtype = if (is_f64) "float64" else "float32") }
       as_i64_vec <- function(x){ xv <- as.integer(x); np$array(xv, dtype = "int64")$reshape(tp(length(xv))) }
@@ -5618,7 +5577,7 @@ save_ml_model <- Process$new(
       outs  <- list(out_i, out_vv)
       if (use_rule == "margin") {
         out_sv <- helper$make_tensor_value_info("scores_vector", TNUM, list(1L,K))
-        outs   <- c(outs, list(out_sv))
+        outs <- c(outs, list(out_sv))
       }
       if (isTRUE(add_debug)) {
         out_xs <- helper$make_tensor_value_info("X_scaled_dbg", TNUM, list(1L,n_feat))
@@ -5687,11 +5646,11 @@ save_ml_model <- Process$new(
                    helper$make_node("Identity", list("std_safe"), list("std_safe_dbg"), name="DbgStdSafe"))
       }
       
-      acc_votes_vecs  <- character(0)
+      acc_votes_vecs <- character(0)
       acc_scores_vecs <- character(0)
-      z_list    <- character(0)
+      z_list <- character(0)
       mask_list <- character(0)
-      vbp_rows  <- character(0)
+      vbp_rows <- character(0)
       
       ge_op <- if (tie_rule == ">=0") "GreaterOrEqual" else "Greater"
       
@@ -5838,12 +5797,12 @@ save_ml_model <- Process$new(
     
     
     build_rf_teclassifier_onnx <- function(
-    arr,
-    feature_names, classes, out_path,
-    means = NULL, sds = NULL,
-    dtype = c("float32","float64"),
-    primary_output = c("idx1","scores"),
-    tie_eps = 1e-6
+      arr,
+      feature_names, classes, out_path,
+      means = NULL, sds = NULL,
+      dtype = c("float32","float64"),
+      primary_output = c("idx1","scores"),
+      tie_eps = 1e-6
     ) {
       
       dtype <- match.arg(dtype)
@@ -5930,7 +5889,7 @@ save_ml_model <- Process$new(
                    class_ids = as.integer(arr$leaf_targets),    
                    class_weights = as.numeric(arr$leaf_weights),
                    classlabels_int64s = as.integer(0:(K-1)),
-                   post_transform   = "NONE"
+                   post_transform  = "NONE"
                  )
       )
       
@@ -5968,9 +5927,6 @@ save_ml_model <- Process$new(
     }
     
     
-    
-    
-    
     save_torch_model <- function(model, filepath,
                                  input_channels = NULL,
                                  time_steps     = NULL) {
@@ -5981,11 +5937,11 @@ save_ml_model <- Process$new(
                            error = function(e) FALSE)
       
       if (has_conv) {
-        first_conv     <- model$conv_layers[[1]][[1]]
+        first_conv <- model$conv_layers[[1]][[1]]
         input_channels <- as.integer(first_conv$in_channels)
-        time_steps     <- as.integer(model$time_steps %||% stop("'time_steps' fehlt am TempCNN-Modell"))
+        time_steps <- as.integer(model$time_steps %||% stop("‘time_steps’ is missing from the TempCNN model"))
         
-        B     <- 1L
+        B <- 1L
         dummy <- torch::torch_randn(c(B, input_channels, time_steps))
         model$eval()
         script_model <- torch::jit_trace(model, dummy)
@@ -5997,23 +5953,23 @@ save_ml_model <- Process$new(
                     input_layout = "NCT"))
       }
       
-      ic_from_model <- tryCatch(model$input_channels,     error = function(e) NULL)
-      ts_from_model <- tryCatch(model$time_steps,         error = function(e) NULL)
-      il_from_model <- tryCatch(model$input_layout,       error = function(e) NULL)
+      ic_from_model <- tryCatch(model$input_channels, error = function(e) NULL)
+      ts_from_model <- tryCatch(model$time_steps, error = function(e) NULL)
+      il_from_model <- tryCatch(model$input_layout, error = function(e) NULL)
       cols_from_mod <- tryCatch(model$input_data_columns, error = function(e) NULL)
       
       
       input_channels <- input_channels %||% ic_from_model %||%
         (if (!is.null(cols_from_mod)) length(cols_from_mod) else NULL)
-      time_steps   <- time_steps   %||% ts_from_model    %||% 1L
+      time_steps <- time_steps   %||% ts_from_model    %||% 1L
       
       input_layout <- if (!is.null(il_from_model)) il_from_model else "NCT"
       
       if (is.null(input_channels) || input_channels < 1L)
-        stop("Für Torch-Export fehlt 'input_channels'. Hänge es beim Training ans Modell oder übergib es als Argument.")
+        stop("‘input_channels’ is missing for Torch export. Attach it to the model during training or pass it as an argument.")
       if (is.null(time_steps) || time_steps < 1L)
-        stop("Für Torch-Export fehlt 'time_steps'. Hänge es beim Training ans Modell oder übergib es als Argument.")
-      
+        stop("‘time_steps’ is missing for Torch export. Attach it to the model during training or pass it as an argument.")
+
       if (inherits(model, "jit_script_module")) {
         torch::jit_save(model, filepath)
         return(list(pt_path = filepath,
@@ -6129,11 +6085,10 @@ return(onnx_path)
       library(reticulate)
       tryCatch({
         onnxmltools <- import("onnxmltools")
-        skl2onnx    <- import("skl2onnx")
-        onnx        <- import("onnx")
-        joblib      <- import("joblib")
+        skl2onnx <- import("skl2onnx")
+        onnx <- import("onnx")
+        joblib <- import("joblib")
         
-        # WICHTIG: richtiger Datentyp-Import
         oc_types <- import("onnxconverter_common.data_types")
         FloatTensorType <- oc_types$FloatTensorType
         
@@ -6143,12 +6098,12 @@ return(onnx_path)
           xgb_mod <- import("xgboost")
           booster_py <- xgb_mod$Booster()
           booster_py$load_model(paste0(filepath, ".bin"))
-          model_py   <- booster_py
+          model_py <- booster_py
           n_features <- booster_py$num_features()
         } else if (model_type == "random_forest") {
           rf_model_py <- joblib$load(paste0(filepath, ".pkl"))
-          n_features  <- rf_model_py$n_features_in_
-          model_py    <- rf_model_py
+          n_features <- rf_model_py$n_features_in_
+          model_py <- rf_model_py
         } else {
           stop("Model type is not supported!")
         }
@@ -6201,16 +6156,15 @@ return(onnx_path)
           cost <- tryCatch(model$finalModel@kernelf@kpar$C, error = function(e) 1.0)
           nSV <- model$finalModel@nSV
           model_info$"mlm:total_parameters" <- nSV
-          hyperparameters <- list(cost = cost, nSV = nSV,
-                                  kernel = if (model_type == "svmLinear") "linear" else if (model_type == "svmRadial") "radial" else "poly")
+          hyperparameters <- list(cost = cost, nSV = nSV, kernel = if (model_type == "svmLinear") "linear" else if (model_type == "svmRadial") "radial" else "poly")
         } else if (model_type == "xgbTree") {
           nrounds <- model$finalModel$niter
           model_info$"mlm:total_parameters" <- nrounds
           hyperparameters <- list(
             max_depth = model$finalModel$tuneValue$max_depth,
-            nrounds   = nrounds,
-            eta       = model$finalModel$tuneValue$eta,
-            gamma     = model$finalModel$tuneValue$gamma
+            nrounds = nrounds,
+            eta = model$finalModel$tuneValue$eta,
+            gamma = model$finalModel$tuneValue$gamma
           )
         } else hyperparameters <- list()
         if (length(hyperparameters) > 0) model_info$"mlm:hyperparameters" <- hyperparameters
@@ -6308,19 +6262,23 @@ return(onnx_path)
           }
         }, error = function(e) NA_integer_)
         
-        model_info$"mlm:name"                <- basename(sub("\\.json$", "", filepath))
-        model_info$"mlm:architecture"        <- "TempCNN"
-        model_info$"mlm:tasks"               <- tasks
-        model_info$"mlm:framework"           <- "R (torch)"
-        model_info$"mlm:framework_version"   <- paste0("R ", R.version$major, ".", R.version$minor)
-        model_info$"mlm:total_parameters"    <- if (isTRUE(is.finite(total_params))) as.integer(total_params) else NULL
-        model_info$"mlm:hyperparameters"     <- list(conv_layers = length(model$conv_layers), dense_layers = tryCatch(length(model$dense), error=function(e) 0L))
-        model_info$"mlm:pretrained"          <- FALSE
-        model_info$"mlm:pretrained_source"   <- NULL
+        model_info$"mlm:name" <- basename(sub("\\.json$", "", filepath))
+        model_info$"mlm:architecture" <- "TempCNN"
+        model_info$"mlm:tasks" <- tasks
+        model_info$"mlm:framework" <- "R (torch)"
+        model_info$"mlm:framework_version" <- paste0("R ", R.version$major, ".", R.version$minor)
+        model_info$"mlm:total_parameters" <- if (isTRUE(is.finite(total_params))) as.integer(total_params) else NULL
+        model_info$"mlm:hyperparameters" <- list(conv_layers = length(model$conv_layers), dense_layers = tryCatch(length(model$dense), error=function(e) 0L))
+        model_info$"mlm:pretrained" <- FALSE
+        model_info$"mlm:pretrained_source" <- NULL
         model_info$"mlm:batch_size_suggestion" <- 1
-        model_info$"mlm:accelerator"         <- "gpu"
+        model_info$"mlm:accelerator" <- "gpu"
         model_info$"mlm:accelerator_constrained" <- FALSE
-        model_info$"mlm:accelerator_count"   <- 1
+        model_info$"mlm:accelerator_count" <- 1
+        
+        #input_channels <- model$conv_layers[[1]][[1]]$in_channels
+        params <- model$parameters
+        input_channels <- params[[1]]$size()[2]
         
         #input_channels <- model$conv_layers[[1]][[1]]$in_channels
         params <- model$parameters
@@ -6331,14 +6289,14 @@ return(onnx_path)
         bands <- tryCatch(model$input_data_columns, error = function(e) NULL)
         
         if (is.null(input_channels)) stop("Could not extract input_channels from conv_layers!")
-        if (is.null(time_steps))     stop("time_steps is missing in the model!")
+        if (is.null(time_steps)) stop("time_steps is missing in the model!")
         
         model_info$"mlm:input" <- list(
           list(
-            name  = "Temporal CNN Input",
+            name = "Temporal CNN Input",
             bands = if (!is.null(bands)) as.list(bands) else list("unknown"),
             input = list(
-              shape     = list(1, as.integer(input_channels), as.integer(time_steps)),
+              shape = list(1, as.integer(input_channels), as.integer(time_steps)),
               dim_order = list("batch", "channels", "time_steps"),
               data_type = "float32"
             ),
@@ -6381,10 +6339,10 @@ return(onnx_path)
         
         model_info$"mlm:output" <- list(
           list(
-            name  = "CNN Output",
+            name = "CNN Output",
             tasks = tasks,
             result = list(
-              shape     = list(1, as.integer(output_size)),
+              shape = list(1, as.integer(output_size)),
               dim_order = list("batch", "features"),
               data_type = "float32"
             ),
@@ -6419,23 +6377,23 @@ return(onnx_path)
           }
         }, error = function(e) NA_integer_)
         
-        model_info$"mlm:name"                 <- basename(sub("\\.json$", "", filepath))
-        model_info$"mlm:architecture"         <- arch_name
-        model_info$"mlm:tasks"                <- tasks
-        model_info$"mlm:framework"            <- "R (torch)"
-        model_info$"mlm:framework_version"    <- paste0("R ", R.version$major, ".", R.version$minor)
-        model_info$"mlm:total_parameters"     <- if (isTRUE(is.finite(total_params))) as.integer(total_params) else NULL
-        model_info$"mlm:pretrained"           <- FALSE
-        model_info$"mlm:pretrained_source"    <- NULL
+        model_info$"mlm:name" <- basename(sub("\\.json$", "", filepath))
+        model_info$"mlm:architecture" <- arch_name
+        model_info$"mlm:tasks" <- tasks
+        model_info$"mlm:framework" <- "R (torch)"
+        model_info$"mlm:framework_version" <- paste0("R ", R.version$major, ".", R.version$minor)
+        model_info$"mlm:total_parameters" <- if (isTRUE(is.finite(total_params))) as.integer(total_params) else NULL
+        model_info$"mlm:pretrained" <- FALSE
+        model_info$"mlm:pretrained_source" <- NULL
         model_info$"mlm:batch_size_suggestion" <- 1
-        model_info$"mlm:accelerator"          <- "gpu"
+        model_info$"mlm:accelerator" <- "gpu"
         model_info$"mlm:accelerator_constrained" <- FALSE
-        model_info$"mlm:accelerator_count"    <- 1
+        model_info$"mlm:accelerator_count" <- 1
         
         input_channels <- tryCatch(model$input_channels, error = function(e) NULL)
-        time_steps     <- tryCatch(model$time_steps,     error = function(e) NULL)
-        bands          <- tryCatch(model$input_data_columns, error = function(e) NULL)
-        layout         <- tryCatch(toupper(model$input_layout), error = function(e) "NCT")
+        time_steps <- tryCatch(model$time_steps, error = function(e) NULL)
+        bands <- tryCatch(model$input_data_columns, error = function(e) NULL)
+        layout <- tryCatch(toupper(model$input_layout), error = function(e) "NCT")
         if (is.null(layout) || is.na(layout)) layout <- "NCT"
         
         if (is.null(input_channels) && !is.null(bands)) input_channels <- length(bands)
@@ -6455,7 +6413,7 @@ return(onnx_path)
         
         model_info$"mlm:input" <- list(
           list(
-            name  = paste(arch_name, "Input"),
+            name = paste(arch_name, "Input"),
             bands = if (!is.null(bands)) as.list(bands) else list("unknown"),
             input = list(shape = shape, dim_order = dim_order, data_type = "float32"),
             description = desc,
@@ -6502,10 +6460,10 @@ return(onnx_path)
         
         model_info$"mlm:output" <- list(
           list(
-            name  = paste(arch_name, "Output"),
+            name = paste(arch_name, "Output"),
             tasks = tasks,
             result = list(
-              shape     = list(1, as.integer(output_size)),
+              shape = list(1, as.integer(output_size)),
               dim_order = list("batch", "features"),
               data_type = "float32"
             ),
@@ -6566,7 +6524,7 @@ return(onnx_path)
     
     if (is.character(data) && length(data) == 1 && file.exists(data) && grepl("\\.pt$", data, ignore.case = TRUE)) {
       `%||%` <- function(a,b) if (!is.null(a) && length(a) > 0) a else b
-      nz1    <- function(x) if (is.null(x) || length(x) == 0) NULL else x
+      nz1 <- function(x) if (is.null(x) || length(x) == 0) NULL else x
       is_bad_dim <- function(x) { is.null(x) || length(x) != 1L || !is.finite(x) || x < 1 }
       
       model <- torch::torch_load(data)
@@ -6578,18 +6536,17 @@ return(onnx_path)
         error = function(e) FALSE
       )
       if (has_conv) {
-        first_conv     <- model$conv_layers[[1]][[1]]
+        first_conv <- model$conv_layers[[1]][[1]]
         input_channels <- first_conv$in_channels
-        time_steps     <- model$time_steps
-        message(" → input_channels = ", input_channels,
-                ", time_steps = ", time_steps)
+        time_steps <- model$time_steps
+        message(" → input_channels = ", input_channels, ", time_steps = ", time_steps)
         
         
         pt_meta <- save_torch_model(
           model,
           file.path(shared_dir, paste0(base_name, ".pt")),
           input_channels = input_channels,
-          time_steps     = time_steps
+          time_steps = time_steps
         )
       }
       else {
@@ -6600,11 +6557,11 @@ return(onnx_path)
       }
       
       result$onnx <- convert_torch_to_onnx_from_pt(
-        script_pt    = pt_meta$pt_path,
-        input_chan   = pt_meta$input_chan,
-        time_steps   = pt_meta$time_steps,
-        base_name    = base_name,
-        output_dir   = shared_dir
+        script_pt = pt_meta$pt_path,
+        input_chan = pt_meta$input_chan,
+        time_steps = pt_meta$time_steps,
+        base_name = base_name,
+        output_dir = shared_dir
       )
       
       json_file <- file.path(shared_dir, ensure_extension(base_name, "json"))
@@ -6629,12 +6586,12 @@ return(onnx_path)
       if (inherits(data$finalModel, "ksvm")) {
         message("Detected SVM (kernlab::ksvm) → custom ONNX path.")
         res <- export_caret_ksvm_to_onnx(
-          train_obj      = data,
-          out_base       = file.path(tmp, base_name),
-          use_rule       = "majority",
+          train_obj = data,
+          out_base = file.path(tmp, base_name),
+          use_rule = "majority",
           primary_output = "idx1",
-          dtype          = "float32",
-          do_checks      = TRUE
+          dtype = "float32",
+          do_checks = TRUE
         )
         result$onnx <- res$onnx
         

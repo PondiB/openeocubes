@@ -267,6 +267,11 @@ addEndpoint = function() {
   Session$createEndpoint(path = "/collections",
                          method = "GET",
                          handler = .collections)
+
+  Session$createEndpoint(path = "/collections",
+                         method = "OPTIONS",
+                         handler = .cors_option,
+                         filter = FALSE)
   
   Session$createEndpoint(path = "/collections",
                          method = "OPTIONS",

@@ -24,6 +24,7 @@ SessionInstance <- R6Class(
 
     #' @description Create a new session
     #' @param configuration Session configuration
+    #' 
     initialize = function(configuration = NULL) {
 
       self$graphs = list()
@@ -64,6 +65,7 @@ SessionInstance <- R6Class(
       private$token = NULL
       private$token = new
     },
+
 
     #' @description Start the session
     startSession = function(){

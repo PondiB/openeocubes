@@ -271,7 +271,7 @@ aggregate_spatial <- Process$new(
       optional = TRUE
     )
   ),
-  returns = vec_datacube,
+  returns = eo_datacube,
   operation = function(data, geometries, reducer = NULL, target_dimension = NULL, context = NULL, job) {
     library(sf)
     library(gdalcubes)
@@ -479,6 +479,7 @@ aggregate_spatial <- Process$new(
       buffer = 0,
       trim = FALSE
     )
+
     geometries_in_bbox <- keep$filtered
     message("n features in bbox: ", keep$n_kept, " (von ", keep$n_in, ")")
     if (nrow(geometries_in_bbox) == 0) {
@@ -672,6 +673,7 @@ filter_bbox <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, extent, job) {
+
     crs <- gdalcubes::srs(data)
     nw <- c(extent$west, extent$north)
     sw <- c(extent$west, extent$south)
@@ -708,11 +710,9 @@ filter_spatial <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, geometries, job) {
-    # read geojson url and convert to geometry
     geo_data <- sf::read_sf(geometries)
     geo_data <- geo_data$geometry
     geo_data <- sf::st_transform(geo_data, 3857)
-    # filter using geom
     cube <- gdalcubes::filter_geom(data, geo_data)
     return(cube)
   }
