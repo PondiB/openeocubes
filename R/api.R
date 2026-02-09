@@ -33,15 +33,15 @@ NULL
     )
   
   out = list()
-  out$api_version    = config$api_version
+  out$api_version = config$api_version
   out$backend_version = config$backend_version
-  out$stac_version   = config$stac_version
-  out$id             = config$id
-  out$title          = config$title
-  out$description    = config$description
-  out$endpoints      = endpoints$paths
-  out$links          = list(list(
-    rel  = "self",
+  out$stac_version = config$stac_version
+  out$id = config$id
+  out$title = config$title
+  out$description = config$description
+  out$endpoints = endpoints$paths
+  out$links = list(list(
+    rel = "self",
     href = paste(config$base_url, "", sep = "/")
   ))
   
@@ -338,24 +338,56 @@ addEndpoint = function() {
                          handler = .executeSynchronous,
                          filter = TRUE)
   
-  Session$createEndpoint(
-    path = "/download/list",
-    method = "GET",
-    handler = function(req, res) {
-      shared_dir <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
-      files <- list.files(shared_dir)
-      return(list(files = files))
+Session$createEndpoint(
+  path = "/download/list",
+  method = "GET",
+  handler = function(req, res) {
+    shared_dir <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
+    files <- list.files(shared_dir)
+
+    tifs <- files[grepl("\\.tif(f)?$", files, ignore.case = TRUE)]
+    pred <- "prediction.tif"
+    if (!pred %in% files && length(tifs) >= 1) {
+      file.copy(
+        from = file.path(shared_dir, tifs[1]),
+        to = file.path(shared_dir, pred),
+        overwrite = TRUE
+      )
     }
-  )
+    files <- list.files(shared_dir)
+    files <- files[!grepl("^cube_.*\\.tif(f)?$", files, ignore.case = TRUE)]
+    return(list(files = files))
+  }
+)
+
 
   Session$createEndpoint(
     path = "/download/{filename}",
     method = "GET",
-    handler = function(filename, req, res) {
+    handler = function(req, res, filename) {
       message("Download requested for filename: ", filename)
-      return(download(filename, res))
+      tryCatch({
+        return(download(filename, res))
+      }, error = function(e) {
+        err <- handleError(e)
+        res$status <- 500
+        res$setHeader("Content-Type", "application/json; charset=utf-8")
+        res$body <- charToRaw(jsonlite::toJSON(err, auto_unbox = TRUE))
+        return(res)
+      })
     }
   )
+
+  Session$createEndpoint(
+  path = "/favicon.ico",
+  method = "GET",
+  handler = function(req, res) {
+    res$status <- 204
+    return(res)
+  },
+  filter = FALSE
+  )
+
 
   # assign data collection
   Session$assignData(sentinel_s2_l2a_cogs)

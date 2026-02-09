@@ -224,14 +224,24 @@ SessionInstance <- R6Class(
     enqueueJob = function(job) {
       shared_dir <- Sys.getenv("SHARED_TEMP_DIR", unset = "")
       callr::r_bg(
-        func = function(job_obj, config, shared_dir) {
-          Sys.setenv(SHARED_TEMP_DIR = shared_dir)
-          library(openeocubes)
-          createSessionInstance(config)
-          Session$initDirectory(cleanup = TRUE)
-          Session$assignJob(job_obj)
-          Session$runJob(job_obj)
-        },
+      func = function(job_obj, config, shared_dir) {
+        Sys.setenv(SHARED_TEMP_DIR = shared_dir)
+        library(openeocubes)
+        gdalcubes::gdalcubes_options(parallel = 8)
+        gdalcubes::gdalcubes_set_gdal_config("VSI_CACHE", "TRUE")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_CACHEMAX", "20%")
+        gdalcubes::gdalcubes_set_gdal_config("VSI_CACHE_SIZE", "5000000")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MULTIPLEX", "YES")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_INGESTED_BYTES_AT_OPEN", "32000")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_VERSION", "2")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES", "YES")
+
+        createSessionInstance(config)
+        Session$initDirectory(cleanup = TRUE)
+        Session$assignJob(job_obj)
+        Session$runJob(job_obj)
+      },
         args = list(job, Session$getConfig(), shared_dir),
         stdout = "",
         stderr = ""
