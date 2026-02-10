@@ -209,10 +209,19 @@ ml_fit <- Process$new(
                                                time_steps = time_steps)
       
       labels <- as.numeric(as.factor(training_data[[target]]))
-      
       library(torch)
-      if (!is.null(model$parameters$seed)) torch_manual_seed(as.integer(model$parameters$seed))
-      
+  
+      seed <- model$parameters$seed
+      message("Vor dem seed", seed)
+
+      tryCatch({
+        if (!is.null(seed) && length(seed) == 1 && is.finite(seed)) {
+          torch::torch_manual_seed(as.integer(seed))
+        }
+      }, error = function(e) {
+        message("Error in setting torch manual seed: ", e$message)
+      })
+
       x_train <- tryCatch({
         if (!is.array(features) && !is.matrix(features))
           stop("`features` must be array/matrix; got: ", paste(class(features), collapse = ", "))
@@ -221,7 +230,6 @@ ml_fit <- Process$new(
         torch::torch_tensor(features, dtype = torch_float())
       }, error = function(e) {
       })
-      
       y_train <- tryCatch({
         if (!is.numeric(labels)) labels <- as.numeric(labels)
         torch::torch_tensor(labels, dtype = torch_long())
@@ -231,7 +239,7 @@ ml_fit <- Process$new(
       
       
       class_count <- length(unique(labels))
-      
+      message("Number of classes detected: ", class_count)
       dl_model <- model$create_model(
         input_data_columns = features_data,
         time_steps = time_steps,
@@ -282,14 +290,15 @@ ml_fit <- Process$new(
       )
       message("Confusion Matrix:"); print(confusion_matrix)
       
-      dl_model$time_steps         <- as.integer(time_steps)
-      dl_model$input_channels     <- as.integer(length(features_data))
+      dl_model$time_steps <- as.integer(time_steps)
+      dl_model$input_channels <- as.integer(length(features_data))
       dl_model$input_data_columns <- features_data
       dl_model$input_layout <- "NCT"
       
       
       model_file <- tempfile(fileext = ".pt")
       torch_save(dl_model, model_file)
+
       message("Model saved in Torch file: ", model_file)
       
       return(model_file)
@@ -344,10 +353,173 @@ ml_fit <- Process$new(
     predictor_names <- identify_predictors(training_set)
     if (length(predictor_names) == 0) stop("No valid predictors detected. Please check.")
     message("Automatically recognized predictors: ", paste(predictor_names, collapse = ", "))
-    
+
     x <- as.data.frame(lapply(training_set[, predictor_names, drop = FALSE], as.numeric))
     if (ncol(x) == 0) stop("No predictors detected.")
-    
+
+
+    if (!is.null(model$method) && identical(model$method, "xgbTree")) {
+      message("Training with xgboost::xgb.train (direct engine).")
+
+      if (!is.null(model$seed) && length(model$seed) > 0) {
+        set.seed(as.integer(model$seed[1]))
+        message("Seed: ", as.integer(model$seed[1]))
+      } else {
+        message("Seed: <NULL>")
+      }
+
+      train_data <- as.matrix(x)
+      message("X dims: ", paste(dim(train_data), collapse = " x "))
+
+      labels <- NULL
+      if (is_classification) {
+        y_fac <- as.factor(training_set[[target]])
+        labels <- levels(y_fac)
+        y_num <- as.integer(y_fac) - 1L
+        message("Task: classification")
+        message("Class counts:")
+        print(table(y_fac))
+      } else {
+        y_num <- as.numeric(training_set[[target]])
+        message("Task: regression")
+        message("y summary:")
+        print(summary(y_num))
+      }
+
+      params <- model$params
+      message("Base params (from model$params):")
+      print(params)
+
+      if (is_classification) {
+        if (length(labels) > 2) {
+          params$objective <- "multi:softprob"
+          params$num_class <- length(labels)
+          params$eval_metric <- "mlogloss"
+        } else {
+          params$objective <- "binary:logistic"
+          params$eval_metric <- "logloss"
+        }
+      } else {
+        params$objective <- "reg:squarederror"
+        params$eval_metric <- "rmse"
+      }
+
+      dtrain <- xgboost::xgb.DMatrix(train_data, label = y_num)
+
+      message("Starting cross-validation to determine best nrounds...")
+      cv <- xgboost::xgb.cv(
+        params = params,
+        data = dtrain,
+        nrounds = 2000,
+        nfold = 5,
+        stratified = is_classification,
+        early_stopping_rounds = 30,
+        maximize = FALSE,
+        verbose = 0
+      )
+      ev <- cv$evaluation_log
+
+      best_iter <- cv$best_iteration
+      if (is.null(best_iter) || length(best_iter) == 0) {
+
+        test_mean_col <- grep("^test_.*_mean$", names(ev), value = TRUE)[1]
+        if (length(test_mean_col) == 0) {
+          message("No test_*_mean column found, fallback to last iteration.")
+          best_iter <- nrow(ev)
+        } else {
+          message("Using metric column for best iteration: ", test_mean_col)
+          metric <- ev[[test_mean_col]]
+          best_iter <- which.min(metric)
+          message("Best iteration by which.min(", test_mean_col, "): ", best_iter,
+                  " (metric=", metric[best_iter], ")")
+        }
+      } else {
+        message("Using cv$best_iteration: ", best_iter)
+      }
+
+      n_rounds <- as.integer(best_iter)[1]
+      if (is.na(n_rounds) || n_rounds < 1L) n_rounds <- 100L
+
+      split_idx <- function(y, p = 0.8) {
+        n <- length(y)
+        if (is.factor(y)) {
+          idx <- integer(0)
+          for (lv in levels(y)) {
+            ii <- which(y == lv)
+            if (length(ii) == 0) next
+            k  <- max(1L, floor(length(ii) * p))
+            idx <- c(idx, sample(ii, k))
+          }
+          sort(unique(idx))
+        } else {
+          sample.int(n, size = max(1L, floor(n * p)))
+        }
+      }
+
+      train_idx <- split_idx(if (is_classification) y_fac else y_num, p = 0.8)
+      valid_idx <- setdiff(seq_len(nrow(train_data)), train_idx)
+
+      message("n train: ", length(train_idx), " | n valid: ", length(valid_idx))
+      if (is_classification) {
+        message("Holdout class counts:")
+        print(table(y_fac[valid_idx]))
+        baseline <- max(prop.table(table(y_fac[valid_idx])))
+      }
+
+      dtr <- xgboost::xgb.DMatrix(train_data[train_idx, , drop = FALSE], label = y_num[train_idx])
+      dva <- xgboost::xgb.DMatrix(train_data[valid_idx, , drop = FALSE], label = y_num[valid_idx])
+
+      booster <- xgboost::xgb.train(
+        params = params,
+        data = dtr,
+        nrounds = n_rounds,
+        evals = list(train = dtr, valid = dva),
+        early_stopping_rounds = 30,
+        verbose = 1
+      )
+
+      pred_valid <- predict(booster, train_data[valid_idx, , drop = FALSE])
+
+      if (is_classification) {
+        if (length(labels) > 2) {
+          K <- length(labels)
+          p_mat <- matrix(pred_valid, ncol = K, byrow = TRUE)
+          pred_idx <- max.col(p_mat) - 1L
+          acc <- mean(pred_idx == y_num[valid_idx])
+          message("Accuracy (holdout): ", round(acc * 100, 2), "%")
+
+          pred_lab <- factor(labels[pred_idx + 1L], levels = labels)
+          true_lab <- factor(y_fac[valid_idx], levels = labels)
+          message("Confusion matrix (holdout):")
+          print(table(Pred = pred_lab, True = true_lab))
+        } else {
+          pred_cls <- ifelse(pred_valid >= 0.5, 1L, 0L)
+          acc <- mean(pred_cls == y_num[valid_idx])
+          message("Accuracy (holdout): ", round(acc * 100, 2), "%")
+        }
+      } else {
+        rmse <- sqrt(mean((pred_valid - y_num[valid_idx])^2))
+        message("RMSE (holdout): ", round(rmse, 4))
+      }
+
+      dfull <- xgboost::xgb.DMatrix(train_data, label = y_num)
+      model <- xgboost::xgb.train(
+        params = params,
+        data = dfull,
+        nrounds = n_rounds,
+        verbose = 0
+      )
+
+      attr(model, "model") <- "xgboost"
+      attr(model, "classification") <- is_classification
+      attr(model, "class_levels") <- labels
+      attr(model, "predictor_names") <- predictor_names
+      attr(model, "params") <- params
+      attr(model, "nrounds") <- n_rounds
+
+      return(model)
+    }
+
     tryCatch({
       if (model$method == "rf") {
         if (!is.null(model$seed)) set.seed(as.integer(model$seed))
@@ -358,10 +530,10 @@ ml_fit <- Process$new(
         if (!is.null(mm)) {
           if (is.character(mm)) {
             mtry <- switch(tolower(mm),
-                           "sqrt"     = max(1L, floor(sqrt(p))),
-                           "log2"     = max(1L, floor(log2(p))),
+                           "sqrt" = max(1L, floor(sqrt(p))),
+                           "log2" = max(1L, floor(log2(p))),
                            "onethird" = max(1L, floor(p/3)),
-                           "all"      = p,
+                           "all" = p,
                            suppressWarnings(as.integer(mm))
             )
           } else if (is.numeric(mm)) {
@@ -369,7 +541,7 @@ ml_fit <- Process$new(
           }
         }
         if (is.null(mtry) || is.na(mtry) || mtry < 1L || mtry > p) {
-          mtry <- max(1L, floor(sqrt(p)))  # robuster Default
+          mtry <- max(1L, floor(sqrt(p)))  
         }
         
         model$tuneGrid <- expand.grid(mtry = mtry)
@@ -380,15 +552,10 @@ ml_fit <- Process$new(
       } else if (model$method %in% c("svmRadial","svmLinear","svmPoly")) {
         if (is.null(model$tuneGrid)) stop("SVM models require a defined tuneGrid")
         model$preProcess <- c("center","scale")
-      } else if (model$method == "xgbTree") {
-        if (is.null(model$tuneGrid)) stop("XGBoost model requires a defined tuneGrid")
-        if (is.null(model$trControl)) {
-          model$trControl <- caret::trainControl(method = "cv", number = 5, search = "grid")
-        }
       } else {
-        stop("Undetected method! Allowed: 'rf', 'svmRadial', 'svmLinear', 'svmPoly', 'xgbTree'.")
+        stop("Undetected method! Allowed: 'rf', 'svmRadial', 'svmLinear', 'svmPoly'")
       }
-      
+    
       model <- caret::train(
         x = x, y = training_set[[target]],
         method = model$method,
@@ -453,6 +620,7 @@ ml_predict <- Process$new(
   returns = eo_datacube,
   operation = function(data, model, job) {
     
+
     # ---------- Helpers ----------
     is_torch_model <- function(model) {
       inherits(model, "nn_module") ||
@@ -476,10 +644,6 @@ ml_predict <- Process$new(
       is.list(m) && !is.null(m$type) && m$type %in% c("terratorch-ckpt","terratorch-backbone")
     }
     
-
-    
-    
-    # ---------- Classic ----------
     mlm_single <- function(data_cube, model) {
       message("Preparing prediction with apply_pixel using temporary directory...")
       tmp <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
@@ -540,12 +704,53 @@ ml_predict <- Process$new(
         } else {
           local_model <- readRDS(model_file)
         }
-        
-        if (is_torch_model(local_model)) {
+
+        infer_torch_layout <- function(model, n_bands, nsteps) {
+          candidates <- list(
+            NCT = torch::torch_randn(1, n_bands, nsteps),
+            NTC = torch::torch_randn(1, nsteps, n_bands)
+          )
+          for (k in names(candidates)) {
+            ok <- tryCatch({ model(candidates[[k]]); TRUE }, error = function(e) FALSE)
+            if (ok) return(list(kind="torch", layout=k))
+          }
+          stop("Torch model accepts neither NCT nor NTC with given dims.")
+        }
+
+
+        if (inherits(local_model, "xgb.Booster")) {
+          is_class <- attr(local_model, "classification")
+          labels <- attr(local_model, "class_levels")
+          
+          dmat <- xgboost::xgb.DMatrix(as.matrix(pixel_df))
+          raw_pred <- predict(local_model, dmat)
+          
+          if (isTRUE(is_class) && length(labels) > 2) {
+            p_mat <- matrix(raw_pred, ncol = length(labels), byrow = TRUE)
+            pred_value <- max.col(p_mat)  
+          } else if (isTRUE(is_class)) {
+            pred_value <- ifelse(raw_pred >= 0.5, 2L, 1L) 
+          } else {
+            pred_value <- raw_pred
+          }
+          return(as.numeric(pred_value))
+        } else if (is_torch_model(local_model)) {
           message("Deep Learning model detected in predict_pixel_fun")
           pixel_matrix <- as.matrix(pixel_df)
           n_channels <- length(local_bands)
-          pixel_tensor <- torch::torch_tensor(pixel_matrix, dtype = torch_float())$view(c(1, n_channels, 1))
+          layout_info <- infer_torch_layout(local_model, n_bands = n_channels, nsteps = 1)
+          pixel_tensor <- torch::torch_tensor(pixel_matrix, dtype = torch_float())
+
+          if (layout_info$layout == "NCT") {
+              message("Using NCT layout for prediction")
+            pixel_tensor <- pixel_tensor$view(c(1, n_channels, 1))
+          } else if (layout_info$layout == "NTC") {
+            message("Using NTC layout for prediction")
+            pixel_tensor <- pixel_tensor$transpose(1,2)$view(c(1, 1, n_channels))
+          } else {
+            stop("Unknown torch layout: ", layout_info$layout)
+          }
+
           message("Shape of pixel_tensor: ", paste(dim(pixel_tensor), collapse = " x "))
           local_model$eval()
           with_no_grad({ preds <- local_model(pixel_tensor) })
@@ -641,11 +846,63 @@ ml_predict <- Process$new(
         } else {
           local_model <- readRDS(model_file)
         }
-        
-        if (is_torch_model(local_model)){
+
+        infer_torch_layout <- function(model, n_bands, nsteps) {
+          candidates <- list(
+            NCT = torch::torch_randn(1, n_bands, nsteps),
+            NTC = torch::torch_randn(1, nsteps, n_bands)
+          )
+          for (k in names(candidates)) {
+            ok <- tryCatch({ model(candidates[[k]]); TRUE }, error = function(e) FALSE)
+            if (ok) return(list(kind="torch", layout=k))
+          }
+          stop("Torch model accepts neither NCT nor NTC with given dims.")
+        }
+
+
+        if (inherits(local_model, "xgb.Booster")) {
+          is_class <- attr(local_model, "classification")
+          labels <- attr(local_model, "class_levels")
+
+          wide_vec <- as.vector(x)
+          wide_mat <- matrix(wide_vec, nrow = 1)
+          wide_names <- unlist(lapply(seq_len(local_nsteps), function(i) paste0(local_bands, "_T", i)))
+          message("Wide names: ", paste(wide_names, collapse = ", "))
+          if (length(wide_vec) != length(wide_names)) {
+            stop("Mismatch: vector length is ", length(wide_vec), " but expected ", length(wide_names))
+          }
+          colnames(wide_mat) <- wide_names
+          pixel_df <- as.data.frame(wide_mat)
+          
+          dmat <- xgboost::xgb.DMatrix(as.matrix(pixel_df))
+          raw_pred <- predict(local_model, dmat)
+          
+          if (isTRUE(is_class) && length(labels) > 2) {
+            p_mat <- matrix(raw_pred, ncol = length(labels), byrow = TRUE)
+            pred_value <- max.col(p_mat)  
+          } else if (isTRUE(is_class)) {
+            pred_value <- ifelse(raw_pred >= 0.5, 2L, 1L) 
+          } else {
+            pred_value <- raw_pred
+          }
+          result_matrix <- matrix(rep(pred_value, local_nsteps), nrow = 1)
+          return(result_matrix)
+        } else if (is_torch_model(local_model)){
           message("Deep Learning model detected")
           library(torch)
-          pixel_tensor <- torch::torch_tensor(x, dtype = torch_float())$view(c(1, n_bands, local_nsteps))
+          layout_info <- infer_torch_layout(local_model, n_bands = n_bands, nsteps = local_nsteps)
+          pixel_tensor <- torch::torch_tensor(x, dtype = torch_float())
+
+          if (layout_info$layout == "NCT") {
+              message("Using NCT layout for prediction")
+            pixel_tensor <- pixel_tensor$view(c(1, n_bands, local_nsteps))
+          } else if (layout_info$layout == "NTC") {
+            message("Using NTC layout for prediction")
+            pixel_tensor <- pixel_tensor$transpose(1,2)$view(c(1, local_nsteps, n_bands))
+          } else {
+            stop("Unknown torch layout: ", layout_info$layout)
+          }
+
           local_model$eval()
           with_no_grad({ preds <- local_model(pixel_tensor) })
           pred_class_tensor <- torch::torch_argmax(preds, dim = 2)
@@ -687,9 +944,7 @@ ml_predict <- Process$new(
     
     detected_model_type <- function(model_path) {
       stopifnot(file.exists(model_path))
-      
       onnxruntime <- reticulate::import("onnxruntime", delay_load = TRUE)
-      
       session <- tryCatch(
         onnxruntime$InferenceSession(model_path),
         error = function(e) stop("ONNXRuntime InferenceSession failed: ", conditionMessage(e))
@@ -757,7 +1012,6 @@ ml_predict <- Process$new(
       message("Number of time steps: ", nsteps)
       
       model <- detected_model_type(model_file)
-      message("Now go to the predict_pixel_fun (ONNX)")
       
       predict_pixel_fun <- function(x) {
         local_tmp <- Sys.getenv("TMPDIRPATH")
@@ -768,11 +1022,42 @@ ml_predict <- Process$new(
         
         local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
         if (is.null(colnames(x))) colnames(x) <- local_bands
+        n_bands <- length(local_bands)
+        nsteps_local <- nsteps
+
+        infer_onnx_dl_layout <- function(onnx_path, n_bands, nsteps) {
+          ort <- reticulate::import("onnxruntime")
+          sess <- ort$InferenceSession(onnx_path)
+          inp <- sess$get_inputs()[[1]]
+          input_name <- inp$name
+          candidates <- list(
+            NCT = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands, nsteps)),
+            NTC = array(rnorm(1 * nsteps * n_bands), dim = c(1, nsteps, n_bands))
+          )
+          for (k in names(candidates)) {
+            ok <- tryCatch({
+              x_np <- reticulate::np_array(candidates[[k]], dtype = "float32")
+              sess$run(NULL, setNames(list(x_np), input_name))
+              TRUE
+            }, error = function(e) FALSE)
+
+            if (ok) return(list(kind = "onnx", layout = k, input_name = input_name))
+          }
+          stop("ONNX model accepts neither NCT nor NTC with given dims.")
+        }
         
         onnx_dl_flag <- Sys.getenv("ONNX_DL_FLAG")
         if (onnx_dl_flag == "TRUE") {
-          message("Deep Learning ONNX model detected; reshaping input to [1, n_channels, 1]")
-          x <- array(x, dim = c(1, ncol(x), 1))
+           layout_info <- infer_onnx_dl_layout(model_file, n_bands = n_bands, nsteps = nsteps_local)
+            if (layout_info$layout == "NCT") {
+              message("Using ONNX NCT layout for prediction")
+              x <- array(x, dim = c(1, n_bands, nsteps_local))
+            } else if (layout_info$layout == "NTC") {
+              message("Using ONNX NTC layout for prediction")
+              x <- array(t(x), dim = c(1, nsteps_local, n_bands))  
+            } else {
+              stop("Unknown ONNX layout: ", layout_info$layout)
+            }
         } else {
           message("Classic ML ONNX model detected; using 2D input")
           x <- matrix(x, nrow = 1)
@@ -787,7 +1072,7 @@ ml_predict <- Process$new(
           reticulate::py_install("onnxruntime", pip = TRUE)
           message("onnxruntime installed")
         }
-        np <- reticulate::import("numpy")
+        #np <- reticulate::import("numpy")
         onnxruntime <- reticulate::import("onnxruntime")
         
         session <- onnxruntime$InferenceSession(Sys.getenv("MODEL_FILE"))
@@ -795,8 +1080,7 @@ ml_predict <- Process$new(
         input_name <- input_details$name
         
         np_x <- reticulate::np_array(x, dtype = "float32")
-        pred <- session$run(output_names = NULL,
-                            input_feed = setNames(list(np_x), input_name))[[1]]
+        pred <- session$run(output_names = NULL, input_feed = setNames(list(np_x), input_name))[[1]]
         if (onnx_dl_flag == "TRUE") {
           pred <- as.numeric(apply(pred, 1, which.max))
         }
@@ -844,10 +1128,8 @@ ml_predict <- Process$new(
       nsteps <- length(time_steps)
       Sys.setenv(NSTEPS = nsteps)
       message("Number of time steps: ", nsteps)
-      message("pfad", tmp)
       
       model <- detected_model_type(model_file)
-      
       
       predict_time_fun <- function(x) {
         local_tmp <- Sys.getenv("TMPDIRPATH")
@@ -863,10 +1145,41 @@ ml_predict <- Process$new(
         local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
         n_bands <- length(local_bands)
         if (is.null(colnames(x))) colnames(x) <- local_bands
+
+        infer_onnx_dl_layout <- function(onnx_path, n_bands, nsteps) {
+          ort <- reticulate::import("onnxruntime")
+          sess <- ort$InferenceSession(onnx_path)
+          inp <- sess$get_inputs()[[1]]
+          input_name <- inp$name
+          candidates <- list(
+            NCT = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands, nsteps)),
+            NTC = array(rnorm(1 * nsteps * n_bands), dim = c(1, nsteps, n_bands))
+          )
+          for (k in names(candidates)) {
+            ok <- tryCatch({
+              x_np <- reticulate::np_array(candidates[[k]], dtype = "float32")
+              sess$run(NULL, setNames(list(x_np), input_name))
+              TRUE
+            }, error = function(e) FALSE)
+
+            if (ok) return(list(kind = "onnx", layout = k, input_name = input_name))
+          }
+          stop("ONNX model accepts neither NCT nor NTC with given dims.")
+        }
+
         
         onnx_dl_flag <- Sys.getenv("ONNX_DL_FLAG")
         if (onnx_dl_flag == "TRUE") {
-          x <- array(x, dim = c(1, n_bands, nsteps_local))
+           layout_info <- infer_onnx_dl_layout(model_file, n_bands = n_bands, nsteps = nsteps_local)
+            if (layout_info$layout == "NCT") {
+              message("Using ONNX NCT layout for prediction")
+              x <- array(x, dim = c(1, n_bands, nsteps_local))
+            } else if (layout_info$layout == "NTC") {
+              message("Using ONNX NTC layout for prediction")
+              x <- array(t(x), dim = c(1, nsteps_local, n_bands))  
+            } else {
+              stop("Unknown ONNX layout: ", layout_info$layout)
+            }
         } else {
           wide_vec <- as.vector(x)
           wide_mat <- matrix(wide_vec, nrow = 1, ncol = n_bands * nsteps_local)
@@ -877,20 +1190,15 @@ ml_predict <- Process$new(
           colnames(wide_mat) <- wide_names
           x <- wide_mat
         }
-        
         if (!reticulate::py_module_available("numpy")) reticulate::py_install("numpy", pip = TRUE)
         if (!reticulate::py_module_available("onnxruntime")) reticulate::py_install("onnxruntime", pip = TRUE)
-        np <- reticulate::import("numpy")
+        #np <- reticulate::import("numpy")
         onnxruntime <- reticulate::import("onnxruntime")
-        
         session <- onnxruntime$InferenceSession(Sys.getenv("MODEL_FILE"))
-        input_details <- session$get_inputs()[[1]]
-        input_name <- input_details$name
-        
+        input_name <- session$get_inputs()[[1]]$name
         np_x <- reticulate::np_array(x, dtype = "float32")
         
-        pred <- session$run(output_names = NULL,
-                            input_feed = setNames(list(np_x), input_name))[[1]]
+        pred <- session$run(output_names = NULL, input_feed = setNames(list(np_x), input_name))[[1]]
         if (onnx_dl_flag == "TRUE") {
           pred_class <- as.numeric(apply(pred, 1, which.max))
         } else {
@@ -916,55 +1224,52 @@ ml_predict <- Process$new(
       return(prediction_cube)
     }
     
-    # ---------- TerraTorch (pred_class only) ----------
     mlm_single_terratorch <- function(data_cube, desc) {
       message("TerraTorch single-timestep via apply_pixel() [pred_class only]")
       
       tmp <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
       Sys.setenv(TMPDIRPATH = tmp)
-      Sys.setenv(WANDB_DISABLED = "true")  # vermeidet Protobuf/W&B-Import
+      Sys.setenv(WANDB_DISABLED = "true")  
       
-      raw_band_names  <- gdalcubes::bands(data_cube)$name
+      raw_band_names <- gdalcubes::bands(data_cube)$name
       cube_band_names <- sanitize_band_names(raw_band_names)
       saveRDS(cube_band_names, file.path(tmp, "band_names.rds"))
       
-      # Descriptor aus YAML + Defaults
       tt_desc <- list(
-        expected_bands   = if (!is.null(desc$bands)) desc$bands else c("B02","B03","B04","B8A","B11","B12"),
-        num_frames       = if (!is.null(desc$num_frames)) as.integer(desc$num_frames) else 3L,
-        backbone         = if (!is.null(desc$backbone)) desc$backbone else "terratorch_prithvi_eo_v2_100_tl",
-        ckpt             = if (!is.null(desc$ckpt)) desc$ckpt else NULL,
-        backbone_pt      = if (!is.null(desc$backbone_pt)) desc$backbone_pt else NULL,
-        num_classes      = if (!is.null(desc$num_classes)) as.integer(desc$num_classes) else 13L,
-        backbone_bands   = if (!is.null(desc$backbone_bands)) as.character(desc$backbone_bands) else
+        expected_bands = if (!is.null(desc$bands)) desc$bands else c("B02","B03","B04","B8A","B11","B12"),
+        num_frames = if (!is.null(desc$num_frames)) as.integer(desc$num_frames) else 3L,
+        backbone = if (!is.null(desc$backbone)) desc$backbone else "terratorch_prithvi_eo_v2_100_tl",
+        ckpt = if (!is.null(desc$ckpt)) desc$ckpt else NULL,
+        backbone_pt = if (!is.null(desc$backbone_pt)) desc$backbone_pt else NULL,
+        num_classes = if (!is.null(desc$num_classes)) as.integer(desc$num_classes) else 13L,
+        backbone_bands = if (!is.null(desc$backbone_bands)) as.character(desc$backbone_bands) else
           c("BLUE","GREEN","RED","NIR_NARROW","SWIR_1","SWIR_2"),
-        neck_indices     = if (!is.null(desc$neck_indices)) as.integer(desc$neck_indices) else c(2L,5L,8L,11L),
-        decoder_name     = if (!is.null(desc$decoder)) desc$decoder else "UNetDecoder",
+        neck_indices = if (!is.null(desc$neck_indices)) as.integer(desc$neck_indices) else c(2L,5L,8L,11L),
+        decoder_name = if (!is.null(desc$decoder)) desc$decoder else "UNetDecoder",
         decoder_channels = if (!is.null(desc$decoder_channels)) as.integer(desc$decoder_channels) else c(512L,256L,128L,64L),
-        head_dropout     = if (!is.null(desc$head_dropout)) as.numeric(desc$head_dropout) else 0.1,
-        model_factory    = if (!is.null(desc$factory)) desc$factory else "EncoderDecoderFactory",
-        loss_name        = if (!is.null(desc$loss)) desc$loss else "ce",
-        optimizer_name   = if (!is.null(desc$optimizer)) desc$optimizer else "AdamW",
-        freeze_backbone  = if (!is.null(desc$freeze_backbone)) isTRUE(desc$freeze_backbone) else TRUE,
-        freeze_decoder   = if (!is.null(desc$freeze_decoder)) isTRUE(desc$freeze_decoder) else FALSE
+        head_dropout = if (!is.null(desc$head_dropout)) as.numeric(desc$head_dropout) else 0.1,
+        model_factory = if (!is.null(desc$factory)) desc$factory else "EncoderDecoderFactory",
+        loss_name = if (!is.null(desc$loss)) desc$loss else "ce",
+        optimizer_name = if (!is.null(desc$optimizer)) desc$optimizer else "AdamW",
+        freeze_backbone = if (!is.null(desc$freeze_backbone)) isTRUE(desc$freeze_backbone) else TRUE,
+        freeze_decoder = if (!is.null(desc$freeze_decoder)) isTRUE(desc$freeze_decoder) else FALSE
       )
       desc_file <- file.path(tmp, "terratorch_desc.rds")
       saveRDS(tt_desc, desc_file)
       Sys.setenv(TT_DESC_FILE = desc_file)
       
       predict_pixel_fun <- function(x) {
-        local_tmp   <- Sys.getenv("TMPDIRPATH")
-        desc_file   <- Sys.getenv("TT_DESC_FILE")
+        local_tmp <- Sys.getenv("TMPDIRPATH")
+        desc_file <- Sys.getenv("TT_DESC_FILE")
         local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
-        tt          <- readRDS(desc_file)
+        tt <- readRDS(desc_file)
         
         if (!is.matrix(x)) x <- matrix(x, nrow = length(local_bands))
         
         resolve_tt_band_indices <- function(expected_bands, cube_bands) {
           expected_bands <- as.character(expected_bands)
-          cube_bands     <- as.character(cube_bands)
+          cube_bands <- as.character(cube_bands)
           
-          # Vollständige Mapping-Tabellen S2 B01–B12 ↔ „sprechende“ Namen
           s2_to_hls_all <- c(
             B01 = "COASTAL",
             B02 = "BLUE",
@@ -985,23 +1290,19 @@ ml_predict <- Process$new(
           known_hls <- names(hls_to_s2_all)
           known_s2  <- names(s2_to_hls_all)
           
-          # 0) Einfachster Fall: expected_bands stehen schon 1:1 im Cube
           if (all(expected_bands %in% cube_bands)) {
             idx <- match(expected_bands, cube_bands)
             return(list(idx = idx, effective_expected = expected_bands))
           }
           
-          # 1) expected = HLS (BLUE, RED, NIR, ...) -> map nach S2 (B02, B04, B08, ...)
           if (any(expected_bands %in% known_hls)) {
             mapped_s2 <- unname(hls_to_s2_all[expected_bands])
-            # nur die, die wirklich gemappt werden konnten
             if (!all(is.na(mapped_s2)) && all(mapped_s2 %in% cube_bands)) {
               idx <- match(mapped_s2, cube_bands)
               return(list(idx = idx, effective_expected = mapped_s2))
             }
           }
           
-          # 2) expected = S2 (B02, B03, ...) -> map nach HLS (BLUE, GREEN, ...) -> Cube
           if (any(expected_bands %in% known_s2)) {
             mapped_hls <- unname(s2_to_hls_all[expected_bands])
             if (!all(is.na(mapped_hls)) && all(mapped_hls %in% cube_bands)) {
@@ -1010,13 +1311,8 @@ ml_predict <- Process$new(
             }
           }
           
-          # 3) Debug-Infos: was wäre S2->HLS und HLS->S2 für die expected_bands?
-          mapped_from_s2 <- ifelse(expected_bands %in% known_s2,
-                                   unname(s2_to_hls_all[expected_bands]),
-                                   NA_character_)
-          mapped_from_hls <- ifelse(expected_bands %in% known_hls,
-                                    unname(hls_to_s2_all[expected_bands]),
-                                    NA_character_)
+          mapped_from_s2 <- ifelse(expected_bands %in% known_s2, unname(s2_to_hls_all[expected_bands]), NA_character_)
+          mapped_from_hls <- ifelse(expected_bands %in% known_hls, unname(hls_to_s2_all[expected_bands]), NA_character_)
           
           msg_extra <- paste0(
             "S2->HLS: ", paste(expected_bands, "→", mapped_from_s2, collapse = ", "), " | ",
@@ -1031,22 +1327,19 @@ ml_predict <- Process$new(
         }
         
         
-        # Bands aus Cube auf erwartete Reihenfolge mappen
         band_res <- resolve_tt_band_indices(tt$expected_bands, local_bands)
         idx <- band_res$idx
-        x   <- x[idx, , drop = FALSE]
-        
-        # Zeitdimension an Backbone-FRAMES anpassen
-        K    <- tt$num_frames
+        x <- x[idx, , drop = FALSE]
+
+        K <- tt$num_frames
         Tnow <- ncol(x)
         if (Tnow < K) {
           pad <- matrix(x[, Tnow, drop = FALSE], nrow = nrow(x), ncol = K - Tnow)
-          x   <- cbind(x, pad)
+          x <- cbind(x, pad)
         } else if (Tnow > K) {
           x <- x[, (Tnow - K + 1):Tnow, drop = FALSE]
         }
         
-        # Per-worker Cache für Python-Objekte
         if (!requireNamespace("reticulate", quietly = TRUE)) stop("reticulate required")
         cache_name <- "..mlp_tt_cache"
         if (!exists(cache_name, envir = .GlobalEnv, inherits = FALSE)) {
@@ -1062,7 +1355,6 @@ ml_predict <- Process$new(
           if (!ok) stop("TerraTorch Python package not found in worker interpreter: ",
                         if (!is.null(cfg)) cfg$python else "(unknown)")
           
-          # --- Python-Helfer in diesem Worker definieren ---
           reticulate::py_run_string("
 import torch
 import torch.nn.functional as F
@@ -1132,7 +1424,6 @@ def run_forward(backbone_name,
                 freeze_decoder=False):
     from terratorch.tasks import SemanticSegmentationTask
 
-    # NumPy-Arrays oder andere Sequenzen -> Python-Listen
     if neck_indices is None:
         neck_indices = [2, 5, 8, 11]
     else:
@@ -1245,7 +1536,7 @@ def infer_pixel(model, x_np, min_multiple=32):
           stop(e)
         })
         
-        cls1 <- as.numeric(cls0) + 1  # 1-based
+        cls1 <- as.numeric(cls0) + 1 
         return(cls1)
       }
       
@@ -1269,23 +1560,23 @@ def infer_pixel(model, x_np, min_multiple=32):
       saveRDS(cube_band_names, file.path(tmp, "band_names.rds"))
       
       tt_desc <- list(
-        expected_bands   = if (!is.null(desc$bands)) desc$bands else c("B02","B03","B04","B8A","B11","B12"),
-        num_frames       = if (!is.null(desc$num_frames)) as.integer(desc$num_frames) else 3L,
-        backbone         = if (!is.null(desc$backbone)) desc$backbone else "terratorch_prithvi_eo_v2_100_tl",
-        ckpt             = if (!is.null(desc$ckpt)) desc$ckpt else NULL,
-        backbone_pt      = if (!is.null(desc$backbone_pt)) desc$backbone_pt else NULL,
-        num_classes      = if (!is.null(desc$num_classes)) as.integer(desc$num_classes) else 13L,
-        backbone_bands   = if (!is.null(desc$backbone_bands)) as.character(desc$backbone_bands) else
+        expected_bands = if (!is.null(desc$bands)) desc$bands else c("B02","B03","B04","B8A","B11","B12"),
+        num_frames = if (!is.null(desc$num_frames)) as.integer(desc$num_frames) else 3L,
+        backbone = if (!is.null(desc$backbone)) desc$backbone else "terratorch_prithvi_eo_v2_100_tl",
+        ckpt = if (!is.null(desc$ckpt)) desc$ckpt else NULL,
+        backbone_pt = if (!is.null(desc$backbone_pt)) desc$backbone_pt else NULL,
+        num_classes = if (!is.null(desc$num_classes)) as.integer(desc$num_classes) else 13L,
+        backbone_bands = if (!is.null(desc$backbone_bands)) as.character(desc$backbone_bands) else
           c("BLUE","GREEN","RED","NIR_NARROW","SWIR_1","SWIR_2"),
-        neck_indices     = if (!is.null(desc$neck_indices)) as.integer(desc$neck_indices) else c(2L,5L,8L,11L),
-        decoder_name     = if (!is.null(desc$decoder)) desc$decoder else "UNetDecoder",
+        neck_indices = if (!is.null(desc$neck_indices)) as.integer(desc$neck_indices) else c(2L,5L,8L,11L),
+        decoder_name = if (!is.null(desc$decoder)) desc$decoder else "UNetDecoder",
         decoder_channels = if (!is.null(desc$decoder_channels)) as.integer(desc$decoder_channels) else c(512L,256L,128L,64L),
-        head_dropout     = if (!is.null(desc$head_dropout)) as.numeric(desc$head_dropout) else 0.1,
-        model_factory    = if (!is.null(desc$factory)) desc$factory else "EncoderDecoderFactory",
-        loss_name        = if (!is.null(desc$loss)) desc$loss else "ce",
-        optimizer_name   = if (!is.null(desc$optimizer)) desc$optimizer else "AdamW",
-        freeze_backbone  = if (!is.null(desc$freeze_backbone)) isTRUE(desc$freeze_backbone) else TRUE,
-        freeze_decoder   = if (!is.null(desc$freeze_decoder)) isTRUE(desc$freeze_decoder) else FALSE
+        head_dropout = if (!is.null(desc$head_dropout)) as.numeric(desc$head_dropout) else 0.1,
+        model_factory = if (!is.null(desc$factory)) desc$factory else "EncoderDecoderFactory",
+        loss_name = if (!is.null(desc$loss)) desc$loss else "ce",
+        optimizer_name = if (!is.null(desc$optimizer)) desc$optimizer else "AdamW",
+        freeze_backbone = if (!is.null(desc$freeze_backbone)) isTRUE(desc$freeze_backbone) else TRUE,
+        freeze_decoder = if (!is.null(desc$freeze_decoder)) isTRUE(desc$freeze_decoder) else FALSE
       )
       desc_file <- file.path(tmp, "terratorch_desc.rds")
       saveRDS(tt_desc, desc_file)
@@ -1295,19 +1586,18 @@ def infer_pixel(model, x_np, min_multiple=32):
       Sys.setenv(NSTEPS = nsteps)
       
       predict_time_fun <- function(x) {
-        local_tmp   <- Sys.getenv("TMPDIRPATH")
-        desc_file   <- Sys.getenv("TT_DESC_FILE")
-        nsteps_loc  <- as.numeric(Sys.getenv("NSTEPS"))
+        local_tmp <- Sys.getenv("TMPDIRPATH")
+        desc_file <- Sys.getenv("TT_DESC_FILE")
+        nsteps_loc <- as.numeric(Sys.getenv("NSTEPS"))
         local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
-        tt          <- readRDS(desc_file)
+        tt <- readRDS(desc_file)
         
         if (!is.matrix(x)) x <- matrix(x, nrow = length(local_bands))
         
         resolve_tt_band_indices <- function(expected_bands, cube_bands) {
           expected_bands <- as.character(expected_bands)
-          cube_bands     <- as.character(cube_bands)
+          cube_bands <- as.character(cube_bands)
           
-          # Vollständige Mapping-Tabellen S2 B01–B12 ↔ „sprechende“ Namen
           s2_to_hls_all <- c(
             B01 = "COASTAL",
             B02 = "BLUE",
@@ -1326,7 +1616,7 @@ def infer_pixel(model, x_np, min_multiple=32):
           hls_to_s2_all <- setNames(names(s2_to_hls_all), s2_to_hls_all)
           
           known_hls <- names(hls_to_s2_all)
-          known_s2  <- names(s2_to_hls_all)
+          known_s2 <- names(s2_to_hls_all)
           
           if (all(expected_bands %in% cube_bands)) {
             idx <- match(expected_bands, cube_bands)
@@ -1335,7 +1625,6 @@ def infer_pixel(model, x_np, min_multiple=32):
           
           if (any(expected_bands %in% known_hls)) {
             mapped_s2 <- unname(hls_to_s2_all[expected_bands])
-            # nur die, die wirklich gemappt werden konnten
             if (!all(is.na(mapped_s2)) && all(mapped_s2 %in% cube_bands)) {
               idx <- match(mapped_s2, cube_bands)
               return(list(idx = idx, effective_expected = mapped_s2))
@@ -1369,19 +1658,17 @@ def infer_pixel(model, x_np, min_multiple=32):
           )
         }
         
-        # Bands mappen
         band_res <- resolve_tt_band_indices(tt$expected_bands, local_bands)
         idx <- band_res$idx
-        x   <- x[idx, , drop = FALSE]
+        x <- x[idx, , drop = FALSE]
         
         
         
-        # Zeitdimension normalisieren
-        K    <- tt$num_frames
+        K <- tt$num_frames
         Tnow <- ncol(x)
         if (Tnow < K) {
           pad <- matrix(x[, Tnow, drop = FALSE], nrow = nrow(x), ncol = K - Tnow)
-          x   <- cbind(x, pad)
+          x <- cbind(x, pad)
         } else if (Tnow > K) {
           x <- x[, (Tnow - K + 1):Tnow, drop = FALSE]
         }
@@ -1470,7 +1757,6 @@ def run_forward(backbone_name,
                 freeze_decoder=False):
     from terratorch.tasks import SemanticSegmentationTask
 
-    # NumPy-Arrays oder andere Sequenzen -> Python-Listen
     if neck_indices is None:
         neck_indices = [2, 5, 8, 11]
     else:
@@ -1597,23 +1883,19 @@ def infer_pixel(model, x_np, min_multiple=32):
     }
     
     
-    # ---------- Dispatch ----------
     time_count <- gdalcubes::dimensions(data)$t$count
     multi_timesteps <- time_count > 1
     
-    # RAW bytes -> ONNX path
     if (is.raw(model)) {
       tmp_file <- tempfile(fileext = ".onnx"); writeBin(model, tmp_file)
       message("RAW model treated as ONNX at: ", tmp_file)
       model <- tmp_file
     }
-    # list -> onnx path
     if (is.list(model) && !is.null(model$onnx) && endsWith(tolower(model$onnx), ".onnx")) {
       message("Model provided as list – using ONNX: ", model$onnx)
       model <- model$onnx
     }
     
-    # TerraTorch?
     if (is_terratorch_desc(model)) {
       
       if (multi_timesteps) {
@@ -1624,11 +1906,120 @@ def infer_pixel(model, x_np, min_multiple=32):
         return(prediction)
         
       }
+    }
+
+    stac_mlm_identification <- function(model) {
+      if (is.list(model) && model$subtype == "stac-mlm-model") {
+        input_index <- model$input_index
+        output_index <- model$output_index
+        input_spec <- model$input_spec
+        output_spec <- model$output_spec
+        shape <- model$output_spec$result$shape
+        input_shape <- model$input_spec$input$shape
+        message("nun hier")
+        bands_in <- model$input_spec$bands
+        model <- model$path
+        return(list(model = model, input_index = input_index, output_index = output_index, input_spec = input_spec, output_spec = output_spec, shape = shape, input_shape = input_shape, bands_in = bands_in))
+      }
+      return(NULL)
+    }
+
+
+
+    message("external model loading...")
+    if (is.list(model) && identical(model$subtype, "stac-mlm-model")) {
+      message("STAC MLM model detected.")
+      stac_info <- stac_mlm_identification(model)
+      if (!is.null(stac_info)) {
+        message("STAC MLM model detected.")
+        model <- stac_info$model
+        input_index <- stac_info$input_index
+        output_index <- stac_info$output_index
+        inout_spec <- stac_info$input_spec
+        output_spec <- stac_info$output_spec
+        shape <- stac_info$shape
+        output_shape <- shape[[2]]
+        input_shape <- stac_info$input_shape
+        bands_in <- input_shape[[2]]
+        timesteps_in <- input_shape[[3]]
+        bands_in <- stac_info$bands_in
+        message("Model path: ", model)
+        message("Input index: ", input_index)
+        message("Output index: ", output_index)
+        message("Input spec: ", inout_spec)
+        message("Output spec: ", output_spec)
+        message("shape: ", paste(shape, collapse = ", "))
+        message("output shape:", output_shape)
+        message("input shape:", paste(input_shape, collapse = ", "))
+        message("bands in:", bands_in)
+        message("timesteps in:", timesteps_in) 
+      }
+    }
+  
+    compare_input_stac_cube <- function(data, bands_in, timesteps_in, shape, input_shape) {
+      cube_bands <- gdalcubes::bands(data)$name
+      cube_bands <- sanitize_band_names(cube_bands)
+      time_count <- gdalcubes::dimensions(data)$t$count
+      message("shape from stac model: ", paste(shape, collapse = ", "))
+      message("bands from data cube: ", paste(cube_bands, collapse = ", "))
+      message("timesteps from data cube: ", time_count)
+      message("input shape from stac model: ", paste(input_shape, collapse = ", "))
       
+      if (length(bands_in) != length(cube_bands)) {
+        stop("Band count mismatch between STAC model and data cube.")
+      }
+      if (!all(bands_in %in% cube_bands)) {
+        stop("Band names mismatch between STAC model and data cube.")
+      }
+      if (timesteps_in != time_count) {
+        stop("Timestep count mismatch between STAC model and data cube.")
+      }
+      message("STAC model input matches data cube.")
+    }
+
+    detect_shape <- function(input_shape, timesteps_in, bands_in){
+      shape <- input_shape
+      if(length(shape) == 3 ) {
+        if(shape[2] == length(bands_in) && shape[3] == timesteps_in){
+          return("NDT")
+        }
+        if(shape[2] == timesteps_in && shape[3] == length(bands_in)){
+          return("NTD")
+        }
+      }
+      if(length(shape) == 2 ) {
+        if(shape[1] == length(bands_in) && shape[2] == timesteps_in){
+          return("DT")
+        }
+        if(shape[1] == timesteps_in && shape[2] == length(bands_in)){
+          return("TD")
+        }
+      }
+    stop("Cannot infer shape format from input shape.", paste("Input shape:", paste(input_shape, collapse = ", ")), "Bands: ", length(bands_in), "Timesteps: ", timesteps_in)
+
+    }
+
+    reshape_input_stac_cube <- function(input_shape, bands_in, timesteps_in){
+      shape <- detect_shape(input_shape, timesteps_in, bands_in)
+      message("Inferred shape format: ", shape)
+
+      shape_info <- list(
+        shape = shape, 
+        bands_in = bands_in,
+        timesteps_in = timesteps_in,
+        batches = if(length(input_shape) == 3) input_shape[1] else 10L,
+        target_shape = "NDT"
+      )
+
+      return(shape_info)
       
     }
-    
-    # ONNX?
+
+
+    if (exists("bands_in") && exists("timesteps_in") && exists("shape")) {
+      compare_input_stac_cube(data, bands_in, timesteps_in, shape)
+    }
+
     if (is.character(model) && endsWith(tolower(model), ".onnx")) {
       if (multi_timesteps) {
         prediction <- mlm_multi_onnx(data, model)
@@ -1636,11 +2027,9 @@ def infer_pixel(model, x_np, min_multiple=32):
       }else{
         prediction <- mlm_single_onnx(data, model)
         return(prediction)
-      }
-      
+      } 
     }
-    
-    # extern .pt/.rds laden
+
     if (is.character(model)) {
       message("Loading external model...")
       if (endsWith(tolower(model), ".pt")) {
@@ -1735,9 +2124,9 @@ mlm_svm_envelope <- function(kernel,
   if (is.null(method)) stop("Unsupported kernel type.")
   
   tuneGrid <- switch(kernel,
-                     rbf    = expand.grid(C = C, sigma = gamma),                 
+                     rbf = expand.grid(C = C, sigma = gamma),                 
                      linear = expand.grid(C = C),                               
-                     poly   = expand.grid(C = C, degree = degree, scale = gamma) 
+                     poly = expand.grid(C = C, degree = degree, scale = gamma) 
   )
   
   
@@ -2100,48 +2489,53 @@ mlm_regr_random_forest <- Process$new(
 #' @examples
 #' # Classification example
 #' params <- mlm_class_xgboost(
-#'   learning_rate    = 0.1,
-#'   max_depth        = 6,
+#'   learning_rate = 0.1,
+#'   max_depth = 6,
 #'   min_child_weight = 1,
-#'   subsample        = 0.8,
-#'   min_split_loss   = 0,
-#'   seed             = 123
+#'   subsample = 0.8,
+#'   min_split_loss = 0,
+#'   seed = 123
 #' )
 #'
 #' # Regression example
 #' params <- mlm_regr_xgboost(
-#'   learning_rate    = 0.05,
-#'   max_depth        = 4,
+#'   learning_rate = 0.05,
+#'   max_depth = 4,
 #'   min_child_weight = 3,
-#'   subsample        = 0.7,
-#'   min_split_loss   = 1,
-#'   seed             = 42
+#'   subsample = 0.7,
+#'   min_split_loss = 1,
+#'   seed = 42
 #' )
 
 
 mlm_xgboost_envelope <- function(learning_rate = 0.15,
-                                 max_depth = 5,
-                                 min_child_weight = 1,
-                                 subsample = 0.8,
-                                 min_split_loss = 1,
-                                 seed = NULL,
-                                 classification) {
+                                        max_depth = 5,
+                                        min_child_weight = 1,
+                                        subsample = 0.8,
+                                        min_split_loss = 1,
+                                        seed = NULL,
+                                        classification) {
+  params <- list(
+    eta = learning_rate,
+    max_depth = max_depth,
+    min_child_weight = min_child_weight,
+    subsample = subsample,
+    gamma = min_split_loss,
+    colsample_bytree = 1
+  )
+  if(!is.null(seed)){
+    params$seed <- seed
+  }
+
   list(
     method = "xgbTree",
-    tuneGrid = expand.grid(
-      nrounds = 100,  
-      max_depth = max_depth,
-      eta = learning_rate,
-      gamma = min_split_loss,
-      colsample_bytree = 1,  
-      min_child_weight = min_child_weight,
-      subsample = subsample
-    ),
-    trControl = caret::trainControl(method = "cv", number = 5, search = "grid"),
-    seed = seed,
-    classification = classification
+    params = params,
+    nrounds = 100,
+    classification = classification,
+    seed = seed
   )
 }
+
 
 
 mlm_class_xgboost <- Process$new(
@@ -2422,11 +2816,7 @@ mlm_class_tempcnn <- Process$new(
               
               self$conv_layers$append(
                 nn_sequential(
-                  nn_conv1d(in_channels = in_ch,
-                            out_channels = out_ch,
-                            kernel_size = k,
-                            stride = 1,
-                            padding = k %/% 2),
+                  nn_conv1d(in_channels = in_ch, out_channels = out_ch, kernel_size = k, stride = 1, padding = k %/% 2),
                   nn_batch_norm1d(out_ch),
                   nn_relu(),
                   nn_dropout(p = drop)
@@ -2450,10 +2840,8 @@ mlm_class_tempcnn <- Process$new(
             x <- x$view(c(n, feat_dim))
             
             if (self$dense1$in_features != feat_dim) {
-              self$dense1 <- nn_linear(in_features = feat_dim,
-                                       out_features = self$dense1$out_features)$to(device = x$device)
+              self$dense1 <- nn_linear(in_features = feat_dim, out_features = self$dense1$out_features)$to(device = x$device)
             }
-            
             x <- self$dense1(x); x <- self$act1(x); x <- self$drop1(x)
             self$out(x)
           }
@@ -2578,8 +2966,8 @@ mlm_class_mlp <- Process$new(
       library(torch)
       
       act_ctor <- switch(tolower(params$activation),
-                         "relu"     = nn_relu,
-                         "tanh"     = nn_tanh,
+                         "relu" = nn_relu,
+                         "tanh" = nn_tanh,
                          "logistic" = nn_sigmoid,
                          nn_relu)
       
@@ -2587,26 +2975,21 @@ mlm_class_mlp <- Process$new(
         "MLPModule",
         initialize = function(settings, input_cols, time_steps, class_count) {
           self$flatten <- nn_flatten()
-          
           input_dim <- length(input_cols) * time_steps
           hls <- as.integer(unlist(settings$hidden_layer_sizes))
           dr <- as.numeric(unlist(settings$dropout_rates))
           if (length(dr) < length(hls)) dr <- c(dr, rep(tail(dr,1), length(hls)-length(dr)))
-          
+
           layers <- list()
           last <- input_dim
           for (i in seq_along(hls)) {
-            layers <- append(layers, list(
-              nn_linear(in_features = last, out_features = hls[[i]]),
-              act_ctor(),
-              nn_dropout(p = dr[[i]])
-            ))
+            layers <- append(layers, list(nn_linear(in_features = last, out_features = hls[[i]]), act_ctor(), nn_dropout(p = dr[[i]])))
             last <- hls[[i]]
           }
           layers <- append(layers, list(
             nn_linear(in_features = last, out_features = class_count)
           ))
-          
+
           self$mlp <- do.call(nn_sequential, layers)
         },
         forward = function(x) {
@@ -2932,16 +3315,12 @@ mlm_class_stgf <- Process$new(
           tmix <- as.character(time_mixer)
           
           pad <- as.integer(((ksize - 1L) %/% 2L) * dilation)
-          message(sprintf("[STGFBlock.init] in_ch=%d d=%d k=%d dil=%d pad=%d mixer=%s pdrop=%.3f",
-                          in_ch, d_model, ksize, dilation, pad, tmix, pdrop))
+          message(sprintf("[STGFBlock.init] in_ch=%d d=%d k=%d dil=%d pad=%d mixer=%s pdrop=%.3f", in_ch, d_model, ksize, dilation, pad, tmix, pdrop))
           
           self$time_mixer <- tmix
           
-          self$dw <- nn_conv1d(in_channels=in_ch, out_channels=in_ch,
-                               kernel_size=ksize, stride=1, padding=pad,
-                               dilation=dilation, groups=in_ch, bias=TRUE)
-          self$pw <- nn_conv1d(in_channels=in_ch, out_channels=d_model,
-                               kernel_size=1, bias=TRUE)
+          self$dw <- nn_conv1d(in_channels=in_ch, out_channels=in_ch, kernel_size=ksize, stride=1, padding=pad, dilation=dilation, groups=in_ch, bias=TRUE)
+          self$pw <- nn_conv1d(in_channels=in_ch, out_channels=d_model, kernel_size=1, bias=TRUE)
           
           if (self$time_mixer == "attention") {
             self$ln1 <- nn_layer_norm(d_model)
@@ -2950,7 +3329,7 @@ mlm_class_stgf <- Process$new(
             self$v <- nn_linear(d_model, d_model)
             self$attn_drop <- nn_dropout(p=pdrop)
           } else {
-            self$ln1    <- nn_layer_norm(d_model)
+            self$ln1 <- nn_layer_norm(d_model)
             self$gate_u <- nn_linear(d_model, d_model)
             self$gate_f <- nn_linear(d_model, d_model)
             self$cand <- nn_linear(d_model, d_model)
@@ -3015,8 +3394,8 @@ mlm_class_stgf <- Process$new(
             h1 <- self$ln1(h_t + ctx)
           }
           
-          h2  <- self$ff(h1)
-          h2  <- self$ln2(h1 + h2)                              
+          h2 <- self$ff(h1)
+          h2 <- self$ln2(h1 + h2)                              
           log_shape("post-ffn", h2)
           
           z <- torch_mean(h2, dim=2)                         
@@ -3041,7 +3420,6 @@ mlm_class_stgf <- Process$new(
           self$C <- get_int_def(C, default = 1L, name = "C")
           self$T <- get_int_def(T, default = 1L, name = "T")
           
-          # d_model mit Fallback-Heuristik aus C
           d_raw <- settings$d_model
           d_parsed <- tryCatch(to_int1(d_raw, "d_model"), error=function(e) NA_integer_)
           if (is.na(d_parsed) || d_parsed <= 0) {
@@ -3050,7 +3428,7 @@ mlm_class_stgf <- Process$new(
             self$d <- d_fallback
           } else self$d <- d_parsed
           
-          nb  <- get_int_def(settings$num_blocks,  default = 3L, name = "num_blocks")
+          nb <- get_int_def(settings$num_blocks,  default = 3L, name = "num_blocks")
           ksz <- get_int_def(settings$kernel_size, default = 7L, name = "kernel_size")
           if (ksz < 3L) { message("[cfg] kernel_size < 3 -> 3"); ksz <- 3L }
           if ((ksz %% 2L) == 0L) { ksz <- ksz + 1L; message(sprintf("[cfg] kernel_size forced odd -> %d", ksz)) }
@@ -3058,15 +3436,12 @@ mlm_class_stgf <- Process$new(
           drp <- get_num_def(settings$dropout, default = 0.2, name = "dropout")
           drp <- max(0, min(1, drp))
           
-          tmx <- get_choice_def(settings$time_mixer, c("attention","mamba"),
-                                default = "attention", name = "time_mixer")
+          tmx <- get_choice_def(settings$time_mixer, c("attention","mamba"), default = "attention", name = "time_mixer")
           
           dil <- tryCatch(to_intv(settings$dilations, "dilations"), error=function(e) c(1L,2L,4L))
           if (length(dil) < nb) dil <- c(dil, rep(tail(dil, 1), nb - length(dil)))
           
-          message(sprintf("[STGF.init] C=%d T=%d d=%d nb=%d k=%d dilations=%s drop=%.3f mixer=%s",
-                          self$C, self$T, self$d, nb, ksz, paste(dil, collapse=","),
-                          drp, tmx))
+          message(sprintf("[STGF.init] C=%d T=%d d=%d nb=%d k=%d dilations=%s drop=%.3f mixer=%s", self$C, self$T, self$d, nb, ksz, paste(dil, collapse=","), drp, tmx))
           
           self$blocks <- nn_module_list()
           in_ch <- self$C
@@ -3104,8 +3479,7 @@ mlm_class_stgf <- Process$new(
           
           lt_arr <- as.numeric(torch::as_array(logits_t))
           if (length(lt_arr) > 0) {
-            message(sprintf("[pool] T=%d; logits min/max: %.4f / %.4f",
-                            as.integer(ht$size(2)), min(lt_arr), max(lt_arr)))
+            message(sprintf("[pool] T=%d; logits min/max: %.4f / %.4f", as.integer(ht$size(2)), min(lt_arr), max(lt_arr)))
           }
           
           z <- torch_sum(ht * w, dim=2)      
@@ -3117,21 +3491,22 @@ mlm_class_stgf <- Process$new(
         }
       )
       
-      message(sprintf("[factory] input C=%d, T=%d, classes=%d",
-                      length(input_data_columns), time_steps, class_count))
+      message(sprintf("[factory] input C=%d, T=%d, classes=%d", length(input_data_columns), time_steps, class_count))
       STGF(settings=params, C=length(input_data_columns), T=time_steps, class_count=class_count)
     }
     
     list(
       parameters = params,
-      create_model   = create_model,
+      create_model = create_model,
       classification = TRUE,
       subtype = "mlm-model"
     )
   }
 )
 
-
+#'
+#'load_stac_ml 
+#' 
 
 load_stac_ml <- Process$new(
   id = "load_stac_ml",
@@ -3272,16 +3647,30 @@ load_stac_ml <- Process$new(
         }
       }
       
-      destfile
+      return(destfile)
     }
+
     
     materialize_model_asset <- function(href, out_dir, filename = NULL) {
       dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
       
       if (is.null(filename) || !nzchar(filename)) {
-        filename <- basename(href)
-        if (!nzchar(filename) || grepl("download$", filename)) filename <- "model.bin"
+        clean_href <- sub("\\?.*$", "", href)     
+        filename <- basename(clean_href)
       }
+
+      if (!nzchar(filename)) {
+        stop("Cannot derive a filename from href. Please provide a filename or ensure href ends with a filename.")
+      }
+
+      ext <- tools::file_ext(filename)
+      if (!nzchar(ext)) {
+        stop(sprintf(
+          "Asset href does not contain a file extension ('%s'). Please provide an explicit filename with extension in the STAC asset href (or add metadata so it can be derived).",
+          href
+        ))
+      }
+
       dest <- file.path(out_dir, filename)
       
       if (is_url(href)) {
@@ -3305,13 +3694,23 @@ load_stac_ml <- Process$new(
     if (!dir.exists(shared_dir)) {
       dir.create(shared_dir, recursive = TRUE, showWarnings = FALSE)
     }
+
+    make_filename <- function(asset) {
+      base <- if (!is.null(asset$title) && nzchar(asset$title)) {
+        gsub("[^A-Za-z0-9._-]+", "_", asset$title)
+      } else {
+        "model"
+      }
+
+      art <- asset$`mlm:artifact_type`
+      if (!is.null(art) && grepl("RDS", art, ignore.case = TRUE)) return(paste0(base, ".rds"))
+      if (!is.null(art) && grepl("ONNX", art, ignore.case = TRUE)) return(paste0(base, ".onnx"))
+
+      stop("Cannot determine model file extension. Provide an href with extension or add file name metadata.")
+    }
     
-    
-    
-    message("start")
     item <- read_stac_item(uri)
     properties <- item$properties
-    message("link")
     message(item)
     message("input = ", jsonlite::toJSON(properties$`mlm:input`, auto_unbox = TRUE))
     message("output = ", jsonlite::toJSON(properties$`mlm:output`, auto_unbox = TRUE))
@@ -3319,7 +3718,6 @@ load_stac_ml <- Process$new(
     
     if (is.null(properties$`mlm:input`) || is.null(properties$`mlm:output`)) { stop("STAC Item missing 'mlm:input' or 'mlm:output' (MLM extension not present?).") }
     
-    message("here")
     
     if(!is.null(model_asset)){
       sel <- pick_mlm_model_asset(item, model_asset)
@@ -3327,29 +3725,25 @@ load_stac_ml <- Process$new(
       sel <- pick_mlm_model_asset(item)
     }
     
-    message("nun hier")
     asset_name <- sel$name
     message(asset_name)
     asset <- sel$asset
     if (is.null(asset$href)) stop(sprintf("Asset '%s' has no href.", asset_name))
-    message("model wird geladen")
-    model_id  <- if (!is.null(properties$id) && nzchar(properties$id)) item$id else "stac_model"
+    model_id <- if (!is.null(item$id) && nzchar(item$id)) item$id else "stac_model"
     model_dir <- file.path(shared_dir, "ml_models", model_id)
-    
-    filename <- "model.bin"
-    if (!is.null(asset$title) && nzchar(asset$title)) {
-      filename <- paste0(gsub("[^A-Za-z0-9._-]+", "_", asset$title), ".bin")
-    }
-    message("model assets")
+   
+    filename <- make_filename(asset)
     model_path <- materialize_model_asset(asset$href, model_dir, filename = filename)
-    
+    message("model path: ", model_path)
+
+
     get_indexed <- function(x, idx, what) {
       if (!is.list(x)) stop(sprintf("'%s' must be an array/list.", what))
       i <- as.integer(idx) + 1L
       if (i < 1L || i > length(x)) stop(sprintf("'%s' index %d out of range.", what, idx))
       x[[i]]
     }
-    input_spec  <- get_indexed(properties$`mlm:input`,  input_index,  "mlm:input")
+    input_spec <- get_indexed(properties$`mlm:input`,  input_index,  "mlm:input")
     output_spec <- get_indexed(properties$`mlm:output`, output_index, "mlm:output")
     
     message("input_spec: ", jsonlite::toJSON(input_spec, auto_unbox = TRUE))
@@ -3357,10 +3751,9 @@ load_stac_ml <- Process$new(
     
     
     list(
-      subtype = "ml-model",
+      subtype = "stac-mlm-model",
       stac_item = properties,
       model_asset = asset_name,
-      href = asset$href,
       path = model_path,
       input_index = input_index,
       output_index = output_index,
@@ -3394,11 +3787,11 @@ load_stac_ml <- Process$new(
 #' - einer YAML-Konfiguration für TerraTorch (Pfad zu .yaml oder YAML-Text).
 #'
 #' Regeln:
-#' - .rds  -> R-Objekt (classic / torch / caret)
+#' - .rds -> R-Objekt (classic / torch / caret)
 #' - .onnx -> raw bytes (wird in ml_predict() zu Datei geschrieben)
-#' - .pt   -> Pfad zur Torch-Datei (ml_predict lädt selbst)
+#' - .pt -> Pfad zur Torch-Datei (ml_predict lädt selbst)
 #' - .ckpt -> **nicht erlaubt** (Fehler; bitte YAML mit paths.ckpt_pfad verwenden)
-#' - YAML  -> TerraTorch-Descriptor mit CKPT
+#' - YAML -> TerraTorch-Descriptor mit CKPT
 #'     * wenn paths.ckpt_pfad != null: CKPT wird aus URL/Pfad nach SHARED_TEMP_DIR geladen
 #'     * wenn paths.ckpt_pfad == null: generic_terra.py trainiert CKPT mit paths.data_pfad
 #'
@@ -3438,12 +3831,11 @@ load_ml_model <- Process$new(
     library(tools)
     library(httr2)
     library(yaml)
-    library(jsonlite)  # neu für STAC-MLM
+    library(jsonlite)  
     
-    # ---- Helpers ----
     `%||%` <- function(a, b) if (!is.null(a)) a else b
     
-    norm   <- function(x) trimws(as.character(x))
+    norm  <- function(x) trimws(as.character(x))
     is_http <- function(x) is.character(x) && grepl("^https?://", x, ignore.case = TRUE)
     is_file_url <- function(x) is.character(x) && grepl("^file://", x, ignore.case = TRUE)
     looks_like_path <- function(x) is.character(x) && !is_http(x) && !is_file_url(x)
@@ -3496,7 +3888,7 @@ load_ml_model <- Process$new(
         url_parts <- url_parse(u2)
         url_parts$query$dl <- "1"
         u2 <- url_build(url_parts)
-        message("[download_to_shared] Dropbox-URL normalisiert: ", u2)
+        message("Dropbox-URL normalisiert: ", u2)
       }
       
       resp <- request(u2) |> req_perform()
@@ -3527,7 +3919,7 @@ load_ml_model <- Process$new(
       if (looks_like_path(u) && file.exists(u)) {
         p <- normalizePath(u)
         if (!endsWith(tolower(p), ".ckpt"))
-          stop("paths.ckpt_pfad muss auf .ckpt enden: ", p)
+          stop("paths.ckpt_path must end with .ckpt: ", p)
         return(p)
       }
       
@@ -3535,7 +3927,7 @@ load_ml_model <- Process$new(
         p <- sub("^file://", "", u)
         if (!file.exists(p)) stop("file:// path not found: ", p)
         if (!endsWith(tolower(p), ".ckpt"))
-          stop("file:// .ckpt Pfad ungültig: ", p)
+          stop("file:// .ckpt path invalid: ", p)
         return(normalizePath(p))
       }
       
@@ -3543,30 +3935,27 @@ load_ml_model <- Process$new(
       if (!is.null(p_int)) {
         p_int <- normalizePath(p_int)
         if (!endsWith(tolower(p_int), ".ckpt"))
-          stop("Interner CKPT-Pfad endet nicht auf .ckpt")
+          stop("Internal CKPT path does not end with .ckpt")
         return(p_int)
       }
       
       if (!is_http(u)) {
-        stop("paths.ckpt_pfad muss lokaler Pfad, file:// oder HTTP/HTTPS sein: ", u)
+        stop("paths.ckpt_path must be a local path, file:// or HTTP/HTTPS: ", u)
       }
-      
-      # Google Drive
+
       u2 <- normalize_gdrive(u)
       
-      # Dropbox
       if (grepl("dropbox.com", u2, ignore.case = TRUE)) {
         url_parts <- url_parse(u2)
         url_parts$query$dl <- "1"
         u2 <- url_build(url_parts)
-        message("[download_ckpt] Dropbox-CKPT-URL normalisiert: ", u2)
+        message(" Dropbox-CKPT-URL normalisiert: ", u2)
       }
       
-      # ---- httr2 Request ----
       resp <- request(u2) |> req_perform()
       
       if (resp_status(resp) != 200)
-        stop("HTTP error beim CKPT-Download: ", resp_status(resp))
+        stop("HTTP error during CKPT download: ", resp_status(resp))
       
       hdr <- resp_headers(resp)
       cd  <- hdr[["content-disposition"]]
@@ -3587,7 +3976,7 @@ load_ml_model <- Process$new(
       writeBin(resp$body, out)
       
       if (!endsWith(tolower(out), ".ckpt"))
-        stop("Gespeicherte CKPT-Datei endet nicht auf .ckpt")
+        stop("Saved CKPT file does not end with .ckpt")
       
       normalizePath(out)
     }
@@ -3604,13 +3993,11 @@ load_ml_model <- Process$new(
       "unknown"
     }
     
-    # YAML-Erkennung: Datei .yaml oder Text, der parsebar ist
     is_yaml_text <- function(x) {
       if (!is.character(x) || length(x) != 1L) return(FALSE)
       if (is_http(x) || is_file_url(x)) return(FALSE)
       if (file.exists(x)) return(FALSE)
       if (!grepl(":", x)) return(FALSE)
-      # schneller sanity check (experiment_name / dataset / model / paths etc.)
       if (!grepl("experiment_name\\s*:", x) && !grepl("paths\\s*:", x)) return(FALSE)
       out <- tryCatch(yaml::yaml.load(x), error = function(e) NULL)
       is.list(out) && !is.null(out)
@@ -3634,86 +4021,77 @@ load_ml_model <- Process$new(
       dcfg <- cfg$dataset %||% list()
       mcfg <- cfg$model   %||% list()
       
-      # Bänder MÜSSEN in der Konfiguration gesetzt sein
       bands_yaml <- dcfg$bands
       if (is.null(bands_yaml) || length(bands_yaml) == 0L) {
-        stop("dataset$bands muss in der Konfiguration gesetzt sein (z.B. [BLUE, GREEN, RED, ...] oder [B02, B03, ...]).")
+        stop("dataset$bands must be set in the configuration (e.g., [BLUE, GREEN, RED, ...] or [B02, B03, ...]).")
       }
       
-      # Genau so übernehmen, wie in der Konfiguration angegeben
       expected_bands <- as.character(bands_yaml)
       backbone_bands <- expected_bands
       
       structure(list(
-        type            = "terratorch-ckpt",
-        backbone        = mcfg$backbone        %||% "terratorch_prithvi_eo_v2_100_tl",
-        num_frames      = as.integer(dcfg$num_frames %||% 1L),
-        bands           = expected_bands,
-        backbone_bands  = backbone_bands,
-        num_classes     = as.integer(mcfg$num_classes %||% 13L),
-        ckpt            = ckpt_local,
-        backbone_pt     = NULL,
-        factory         = mcfg$factory        %||% "EncoderDecoderFactory",
-        decoder         = mcfg$decoder        %||% "UNetDecoder",
-        neck_indices    = mcfg$neck_indices   %||% c(2L, 5L, 8L, 11L),
+        type = "terratorch-ckpt",
+        backbone = mcfg$backbone %||% "terratorch_prithvi_eo_v2_100_tl",
+        num_frames = as.integer(dcfg$num_frames %||% 1L),
+        bands = expected_bands,
+        backbone_bands = backbone_bands,
+        num_classes = as.integer(mcfg$num_classes %||% 13L),
+        ckpt = ckpt_local,
+        backbone_pt = NULL,
+        factory = mcfg$factory %||% "EncoderDecoderFactory",
+        decoder = mcfg$decoder %||% "UNetDecoder",
+        neck_indices = mcfg$neck_indices %||% c(2L, 5L, 8L, 11L),
         decoder_channels= mcfg$decoder_channels %||% c(512L, 256L, 128L, 64L),
-        head_dropout    = mcfg$head_dropout   %||% 0.1,
-        loss            = mcfg$loss           %||% "ce",
-        optimizer       = mcfg$optimizer      %||% "AdamW",
+        head_dropout = mcfg$head_dropout %||% 0.1,
+        loss = mcfg$loss %||% "ce",
+        optimizer = mcfg$optimizer %||% "AdamW",
         freeze_backbone = mcfg$freeze_backbone %||% TRUE,
-        freeze_decoder  = mcfg$freeze_decoder  %||% FALSE,
-        config          = cfg,
-        config_path     = cfg_path
+        freeze_decoder = mcfg$freeze_decoder  %||% FALSE,
+        config = cfg,
+        config_path = cfg_path
       ), class = "mlm-model")
     }
     
-    # ---------- STAC-MLM-Helper ----------
     
     is_stac_mlm_file <- function(path) {
       if (!file.exists(path)) return(FALSE)
       if (!grepl("\\.geo?json$", path, ignore.case = TRUE) &&
-          !grepl("\\.json$",    path, ignore.case = TRUE)) {
+          !grepl("\\.json$", path, ignore.case = TRUE)) {
         return(FALSE)
       }
-      x <- tryCatch(jsonlite::read_json(path, simplifyVector = TRUE),
-                    error = function(e) NULL)
+      x <- tryCatch(jsonlite::read_json(path, simplifyVector = TRUE), error = function(e) NULL)
       if (is.null(x) || is.null(x$properties)) return(FALSE)
       props <- x$properties
       any(startsWith(names(props), "mlm:"))
     }
     
-    # übersetzt STAC-MLM (wie das Beispiel-Item) in die gleiche cfg-Struktur wie YAML
     stac_mlm_to_cfg <- function(path) {
       x <- jsonlite::read_json(path, simplifyVector = TRUE)
       props <- x$properties %||% list()
       
       cfg <- list(
         experiment_name = props[["mlm:experiment_name"]] %||% x$id %||% "stac_mlm_experiment",
-        paths     = props[["mlm:paths"]]      %||% list(),
-        dataset   = props[["mlm:dataset"]]    %||% list(),
-        model     = props[["mlm:model"]]      %||% list(),
-        train     = props[["mlm:train"]]      %||% list(),
-        inference = props[["mlm:inference"]]  %||% list()
+        paths = props[["mlm:paths"]] %||% list(),
+        dataset = props[["mlm:dataset"]] %||% list(),
+        model = props[["mlm:model"]] %||% list(),
+        train = props[["mlm:train"]] %||% list(),
+        inference = props[["mlm:inference"]] %||% list()
       )
       
       cfg
     }
     
-    # ----------------- Einstieg -----------------
     url <- norm(url)
     if (is.na(url) || url == "") {
-      stop("Parameter 'url' darf nicht leer sein.")
+      stop("The ‘url’ parameter must not be empty.")
     }
     
-    message("load_ml_model: url = ", substr(url, 1, 80), if (nchar(url) > 80) "…" else "")
     
-    # ---- FALL 1: Konfiguration (YAML ODER STAC-MLM) ----
     use_yaml <- FALSE
     use_stac <- FALSE
     cfg <- NULL
     cfg_path <- NA_character_
     
-    # 1a) STAC-MLM lokal?
     if (file.exists(url) && is_stac_mlm_file(url)) {
       use_stac <- TRUE
       cfg <- stac_mlm_to_cfg(url)
@@ -3721,7 +4099,6 @@ load_ml_model <- Process$new(
       message("Detected STAC-MLM configuration (lokale Datei) – TerraTorch-Pipeline.")
     }
     
-    # 1b) STAC-MLM per HTTP/HTTPS?
     if (!use_stac && (is_http(url) || is_file_url(url))) {
       tmp <- tryCatch(download_to_shared(url), error = function(e) NULL)
       if (!is.null(tmp) && is_stac_mlm_file(tmp)) {
@@ -3732,7 +4109,6 @@ load_ml_model <- Process$new(
       }
     }
     
-    # 1c) YAML (nur wenn keine STAC-MLM-Konfiguration erkannt wurde)
     if (!use_stac) {
       if (file.exists(url) && grepl("\\.ya?ml$", url, ignore.case = TRUE)) {
         use_yaml <- TRUE
@@ -3750,79 +4126,70 @@ load_ml_model <- Process$new(
       cfg_path <- y$cfg_path
     }
     
-    # Gemeinsamer Pfad für YAML + STAC-MLM
     if (use_yaml || use_stac) {
       exp_name <- cfg$experiment_name %||% "experiment"
       paths_cfg <- cfg$paths %||% list()
       icfg <- cfg$inference %||% list()
       
-      # Basis-Workdir im SHARED_TEMP_DIR
       terra_base <- file.path(shared_dir, "terra_work")
       if (!dir.exists(terra_base)) {
         dir.create(terra_base, recursive = TRUE, showWarnings = FALSE)
       }
-      work_root  <- file.path(terra_base, exp_name)
-      ckpt_dir   <- file.path(work_root, "output", "checkpoints")
+      work_root <- file.path(terra_base, exp_name)
+      ckpt_dir <- file.path(work_root, "output", "checkpoints")
       if (!dir.exists(ckpt_dir)) {
         dir.create(ckpt_dir, recursive = TRUE, showWarnings = FALSE)
       }
       
       ckpt_pfad  <- paths_cfg$ckpt_pfad %||% NULL
       
-      # --- A) Externes CKPT (kein Training nötig) ---
       if (!is.null(ckpt_pfad)) {
         msg_prefix <- if (use_yaml) "[YAML]" else "[STAC-MLM]"
-        message(msg_prefix, " paths.ckpt_pfad angegeben: ", ckpt_pfad)
+        message(msg_prefix, " paths.ckpt_path specified: ", ckpt_pfad)
         ckpt_local <- download_ckpt(ckpt_pfad)
         if (!endsWith(tolower(ckpt_local), ".ckpt")) {
-          stop("paths.ckpt_pfad muss auf .ckpt enden: ", ckpt_local)
+          stop("paths.ckpt_path must end with .ckpt: ", ckpt_local)
         }
         desc <- make_terratorch_descriptor(cfg, cfg_path, ckpt_local)
-        message(msg_prefix, " Verwende externes CKPT: ", ckpt_local)
+        message(msg_prefix, " Using external CKPT: ", ckpt_local)
         return(desc)
       }
       
-      # --- B) Kein CKPT -> Training via generic_terra.py ---
       data_pfad <- paths_cfg$data_pfad %||% NULL
       if (is.null(data_pfad)) {
         stop(if (use_yaml) {
-          "YAML enthält kein paths.ckpt_pfad und kein paths.data_pfad – für Training ist mindestens data_pfad nötig."
+          "YAML does not contain paths.ckpt_path or paths.data_path – at least data_path is required for training."
         } else {
-          "STAC-MLM enthält kein paths.ckpt_pfad und kein paths.data_pfad – für Training ist mindestens data_pfad nötig."
+          "STAC-MLM does not contain paths.ckpt_path or paths.data_path – at least data_path is required for training."
         })
       }
       
-      # Welches Script?
       terra_script <- Sys.getenv(
         "TERRATORCH_SCRIPT",
         file.path("Python", "terra_for_R.py")
       )
       
-      # Welches Python-Binary?
       terra_python <- Sys.getenv("TERRATORCH_PYTHON", "python")
       
-      message("[TerraTorch] Verwende Python-Binary: ", terra_python)
-      message("[TerraTorch] Verwende TerraTorch-Skript: ", normalizePath(terra_script))
-      
-      # Zusätzliche Info: welcher Pfad steckt wirklich hinter 'python'?
+      message("[TerraTorch] Use Python-Binary: ", terra_python)
+      message("[TerraTorch] Use TerraTorch-Skript: ", normalizePath(terra_script))
+
       py_which <- Sys.which(terra_python)
       message("[TerraTorch] Sys.which('", terra_python, "') = ", ifelse(py_which == "", "<nicht gefunden>", py_which))
       
-      # Optional: sehr simpler Versions-Check
       py_info <- tryCatch(
         system2(terra_python, args = "--version", stdout = TRUE, stderr = TRUE),
-        error = function(e) paste("Fehler beim Abfragen von Python --version: ", e$message)
+        error = function(e) paste("Error when querying Python --version: ", e$message)
       )
       
       message("[TerraTorch] Python --version:\n", paste(py_info, collapse = "\n"))
       
       if (!file.exists(terra_script)) {
-        stop("generic_terra.py nicht gefunden. Bitte ENV TERRATORCH_SCRIPT setzen oder Pfad im Code anpassen: ",
-             terra_script)
+        stop("generic_terra.py not found. Please set ENV TERRATORCH_SCRIPT or adjust the path in the code:", terra_script)
       }
       
       msg_prefix <- if (use_yaml) "[YAML]" else "[STAC-MLM]"
-      message(msg_prefix, " Kein CKPT angegeben – starte Python-Training mit generic_terra.py …")
+      message(msg_prefix, " No CKPT specified – start Python training with generic_terra.py ...")
       cmd_args <- c(
         shQuote(terra_script),
         "--config", shQuote(cfg_path),
@@ -3830,27 +4197,24 @@ load_ml_model <- Process$new(
       )
       status <- system2("python", args = cmd_args, stdout = "", stderr = "")
       if (!identical(status, 0L)) {
-        stop("generic_terra.py ist mit Status ", status, " zurückgekehrt.")
+        stop("generic_terra.py returned with status ", status, ".")
       }
       
       ckpt_name  <- icfg$ckpt_filename %||% "best.ckpt"
       ckpt_local <- file.path(ckpt_dir, ckpt_name)
       if (!file.exists(ckpt_local)) {
-        # Fallback: neueste .ckpt im ckpt_dir
         candidates <- list.files(ckpt_dir, pattern = "\\.ckpt$", full.names = TRUE)
         if (!length(candidates)) {
-          stop("Nach Training wurde kein CKPT in ", ckpt_dir, " gefunden.")
+          stop("No CKPT found in ", ckpt_dir, " after training.")
         }
         ckpt_local <- candidates[which.max(file.info(candidates)$mtime)]
       }
-      message(msg_prefix, " Training fertig, CKPT: ", ckpt_local)
+      
+      message(msg_prefix, " Training ready, CKPT: ", ckpt_local)
       
       desc <- make_terratorch_descriptor(cfg, cfg_path, ckpt_local)
       return(desc)
     }
-    
-    # ---- FALL 2: Normale Datei (kein YAML/STAC-MLM) ----
-    #   -> .rds / .onnx / .pt (KEIN .ckpt!)
     
     local_file <- NULL
     if (looks_like_path(url) && file.exists(url)) {
@@ -3867,8 +4231,7 @@ load_ml_model <- Process$new(
     message("Detected file: ", local_file, " (type=", mtype, ")")
     
     if (identical(mtype, "ckpt")) {
-      stop("Direkte .ckpt-Dateien sind nicht erlaubt. Bitte eine YAML- oder STAC-MLM-Konfiguration ",
-           "mit paths.ckpt_pfad oder paths.data_pfad verwenden.")
+      stop("Direct .ckpt files are not allowed. Please use a YAML or STAC-MLM configuration with paths.ckpt_path or paths.data_path.")
     }
     
     if (identical(mtype, "rds")) {
@@ -3888,8 +4251,7 @@ load_ml_model <- Process$new(
       return(local_file)
     }
     
-    stop("Unknown or unsupported file type: ", ext, " (", local_file, "). ",
-         "Erlaubt sind .rds, .onnx, .pt, YAML (Pfad/Text) oder STAC-MLM-GeoJSON.")
+    stop("Unknown or unsupported file type: ", ext, " (", local_file, "). ", "Allowed are .rds, .onnx, .pt, YAML (Path/Text) or STAC-MLM-GeoJSON.")
   }
 )
 
@@ -3970,9 +4332,6 @@ save_ml_model <- Process$new(
       stop("No suitable Python interpreter found!")
     }
     
-    
-    
-    
     ensure_extension <- function(filename, ext) {
       if (!grepl(paste0("\\.", ext, "$"), filename, ignore.case = TRUE)) paste0(filename, ".", ext) else filename
     }
@@ -3998,6 +4357,9 @@ save_ml_model <- Process$new(
       stop("Unsupported/unknown SVM kernel (kernlab). Class vector = ", paste(class(kobj), collapse="/"))
     }
     
+
+
+
     detect_model_type <- function(model) {
       fm <- model$finalModel
       
@@ -4029,14 +4391,12 @@ save_ml_model <- Process$new(
       safe_text <- paste(c(model$modelInfo$label %||% "", model$method %||% ""), collapse = " ")
       has <- function(pat) isTRUE(grepl(pat, safe_text, ignore.case = TRUE))
       if (has("random[ ]*forest|^rf$")) return("random_forest")
-      if (has("xgboost|xgb|gradient[ ]*boost")) return("xgbTree")
+      if (has("xgboost|xgb.Booster|xgb|gradient[ ]*boost")) return("xgbTree")
       
       stop("Model type could not be recognized (finalModel class: ",
            paste(class(fm), collapse = "/"),
            ", method: ", model$method %||% "?", ").")
     }
-    
-    
     
     
     unscale_vec <- function(x, mu, sig) mu + x * sig
@@ -4054,11 +4414,7 @@ save_ml_model <- Process$new(
     }
     
     # ---------- ONNX linear (OvO) ----------
-    export_ksvm_linear_onnx <- function(train_obj, out_base,
-                                        use_rule = "majority",
-                                        primary_output = "idx1",
-                                        dtype = "float32",
-                                        do_checks = TRUE) {
+    export_ksvm_linear_onnx <- function(train_obj, out_base, use_rule = "majority", primary_output = "idx1", dtype = "float32", do_checks = TRUE) {
       stopifnot(inherits(train_obj, "train"), inherits(train_obj$finalModel, "ksvm"))
       
       model_r <- train_obj
@@ -4076,8 +4432,8 @@ save_ml_model <- Process$new(
       Xscaled <- as.matrix(model_r$trainingData[, feat, drop = FALSE])
       storage.mode(Xscaled) <- "double"
       y_true <- as.character(model_r$trainingData$.outcome)
-      
-      library(kernlab)
+      #library(kernlab)
+
       get_decision_matrix <- function(model, X) {
         dec <- try(predict(model, X, type = "decision"), silent = TRUE)
         if (!inherits(dec, "try-error")) {
@@ -4086,27 +4442,24 @@ save_ml_model <- Process$new(
         dec <- kernlab::decision(model, X)
         dec <- as.matrix(dec); storage.mode(dec) <- "double"; dec
       }
-  
+
       dec <- get_decision_matrix(model, Xscaled)
-      
       C2 <- ncol(dec)
       expected_C2 <- K * (K - 1) / 2
       if (is.null(C2) || C2 != expected_C2) {
         stop(sprintf("OvO columns mismatch: NCOL(dec)=%s, expected %s (K=%s).",
                      as.character(C2), expected_C2, K))
       }
-      
       X_aug <- cbind(Xscaled, 1.0)
       storage.mode(X_aug) <- "double"
       n_feat <- ncol(Xscaled)
-      
+
       ls_fit <- function(y, X) as.numeric(qr.solve(X, y))
       weights_from_dec <- vector("list", C2)
       for (j in 1:C2) {
         th <- ls_fit(dec[, j], X_aug)
         weights_from_dec[[j]] <- list(W = th[1:n_feat], b = th[n_feat + 1])
       }
-      
       all_pairs <- combn(classes, 2, simplify = FALSE)   
       score_mat <- matrix(0, nrow = C2, ncol = C2)
       for (p in seq_along(all_pairs)) {
@@ -4118,12 +4471,28 @@ save_ml_model <- Process$new(
         sc[!is.finite(sc)] <- 0
         score_mat[, p] <- sc  
       }
-      
       cost <- 1 - score_mat
-      library(clue)        
-      assign_j_to_p <- as.integer(solve_LSAP(cost))   
+      if(!is.matrix(cost)) stop("cost is not a matrix")
+      if(length(dim(cost)) != 2) stop("cost is not 2-dimensional")
+      if(nrow(cost) != C2 || ncol(cost) != C2) stop("cost matrix has incorrect dimensions")
+      if (nrow(cost) != ncol(cost)) stop("cost must be square", call.=FALSE)
+
+
+      assign_j_to_p <- tryCatch(
+        as.integer(clue::solve_LSAP(cost)),
+        error = function(e) {
+          msg <- paste0(
+            "solve_LSAP failed for assigning decision functions to class pairs\n",
+            "cost dim = ", paste(dim(cost), collapse = "x"), "\n",
+            "underlying error = ", conditionMessage(e)
+          )
+          message(msg)
+          stop(msg, call. = FALSE)
+        }
+      )
+
       pair_name <- function(ci, cj) paste0(ci, "_vs_", cj)
-      
+
       weights_aligned <- vector("list", C2)
       posneg_pairs <- vector("list", C2)  
       for (j in 1:C2) {
@@ -4136,7 +4505,7 @@ save_ml_model <- Process$new(
         weights_aligned[[j]] <- c(wj, list(class_pair = c(ci, cj), name = pair_name(ci, cj)))
         posneg_pairs[[j]] <- c(ci, cj)
       }
-      
+
       Z_hat <- sapply(seq_len(C2), function(j) as.numeric(Xscaled %*% weights_aligned[[j]]$W + weights_aligned[[j]]$b))
       cors  <- diag(abs(cor(Z_hat, dec)))
       cat("Min/Median/Max |cor(Z_hat, dec)|: ",
@@ -4209,11 +4578,7 @@ save_ml_model <- Process$new(
     
     
     # --------- POLY ----------
-    export_ksvm_poly_onnx <- function(train_obj, out_base,
-                                      use_rule = "majority",
-                                      primary_output = "idx1",
-                                      dtype = "float32",
-                                      do_checks = TRUE) {
+    export_ksvm_poly_onnx <- function(train_obj, out_base, use_rule = "majority", primary_output = "idx1", dtype = "float32", do_checks = TRUE) {
       message("Export SVM Poly start...")
       model_r <- train_obj
       model_ksvm <- model_r$finalModel              
@@ -4239,9 +4604,7 @@ save_ml_model <- Process$new(
       scaleK <- as.numeric(kp$scale)
       offK <- as.numeric(kp$offset)
       
-      
-      message("decsion started...")
-      library(kernlab)
+      #library(kernlab)
       get_decision_matrix <- function(model, Xscaled) {
         dec <- try(predict(model, Xscaled, type = "decision"), silent = TRUE)
         if (!inherits(dec, "try-error")) return(as.matrix(dec))
@@ -4249,7 +4612,6 @@ save_ml_model <- Process$new(
       }
       dec_raw <- get_decision_matrix(model_ksvm, Xscaled)
       stopifnot(ncol(dec_raw) == C2)
-      message("decssion done")
       
       pv <- try(predict(model_ksvm, Xscaled, type = "votes"), silent = TRUE)
       if (inherits(pv, "try-error")) stop("This ksvm does not provide any ‘votes’ – cancel.")
@@ -4306,7 +4668,6 @@ save_ml_model <- Process$new(
         mean(colSums(abs(v - pv)))
       }
       
-      # Teste beide Tie-Regeln
       our_votes_gt <- build_votes_from_state_tie(dec_raw, pair_id_for_k, pos_class_k, neg_class_k, rn, tie_rule=">0")
       our_votes_ge <- build_votes_from_state_tie(dec_raw, pair_id_for_k, pos_class_k, neg_class_k, rn, tie_rule=">=0")
       l1_gt <- mean(colSums(abs(our_votes_gt - pv)))
@@ -4538,11 +4899,7 @@ save_ml_model <- Process$new(
     }
     
     # --------- RBF ----------
-    export_ksvm_rbf_onnx <- function(train_obj, out_base,
-                                     use_rule = "majority",
-                                     primary_output = "idx1",
-                                     dtype = "float32",
-                                     do_checks = TRUE) {
+    export_ksvm_rbf_onnx <- function(train_obj, out_base, use_rule = "majority", primary_output = "idx1", dtype = "float32", do_checks = TRUE) {
       model_r <- train_obj
       model_ksvm <- model_r$finalModel
       
@@ -4633,11 +4990,11 @@ save_ml_model <- Process$new(
       l1_ge <- mean(colSums(abs(our_votes_ge - pv)))
       acc_gt <- mean(rn[apply(our_votes_gt, 2, which.max)] == rn[apply(pv, 2, which.max)])
       acc_ge <- mean(rn[apply(our_votes_ge, 2, which.max)] == rn[apply(pv, 2, which.max)])
+
       cat(sprintf("Tie '>0':   L1=%.12f | Top1-Acc=%.3f\n", l1_gt, acc_gt))
       cat(sprintf("Tie '>=0':  L1=%.12f | Top1-Acc=%.3f\n", l1_ge, acc_ge))
       tie_rule <- if (l1_ge <= l1_gt) ">=0" else ">0"
       cat("→ Verwende Tie-Regel: ", tie_rule, "\n", sep="")
-      
       
       l1_cur <- l1_state_tie(dec_raw, pair_id_for_k, pos_class_k, neg_class_k, rn, pv, tie_rule)
       cat(sprintf("Greedy-Init: L1=%.6f\n", l1_cur))
@@ -4703,7 +5060,6 @@ save_ml_model <- Process$new(
       cat(sprintf("Votes-Check (Tie %s): L1=%.12f | Top1-Acc=%.3f\n", tie_rule, l1_final, acc_final))
       stopifnot(l1_final < 1e-12, acc_final >= 0.999)
       
-      
       ai_list <- kernlab::alphaindex(model_ksvm)     
       stopifnot(length(ai_list) == C2)
       
@@ -4724,7 +5080,7 @@ save_ml_model <- Process$new(
                           error = function(e) {
                             XtX <- crossprod(Xls); lam <- 1e-10
                             solve(XtX + diag(lam, nrow(XtX)), crossprod(Xls, y))
-                          })
+        })
         m <- ncol(Kmat)
         a <- as.numeric(coefb[seq_len(m)])
         b <- as.numeric(coefb[m + 1L])
@@ -4780,8 +5136,7 @@ save_ml_model <- Process$new(
         )
         corr_used[k] <- fk$corr
       }
-      cat(sprintf("LS corr(z_recon, dec_raw) pro k: min/median/max = %.6f / %.6f / %.6f\n",
-                  min(corr_used), median(corr_used), max(corr_used)))
+      cat(sprintf("LS corr(z_recon, dec_raw) pro k: min/median/max = %.6f / %.6f / %.6f\n", min(corr_used), median(corr_used), max(corr_used)))
       
       out_classes <- rn
       
@@ -4806,19 +5161,15 @@ save_ml_model <- Process$new(
     
     
     
-    export_caret_ksvm_to_onnx <- function(train_obj, out_base,
-                                          use_rule = "majority",
-                                          primary_output = "idx1",
-                                          dtype = "float32",
-                                          do_checks = TRUE) {
+    export_caret_ksvm_to_onnx <- function(train_obj, out_base, use_rule = "majority", primary_output = "idx1", dtype = "float32", do_checks = TRUE) {
       k <- detect_svm_kernel(train_obj)
       message("SVM kernel detected: ", k)
       switch(k,
-             linear = { message("→ export_ksvm_linear_onnx()"); 
+             linear = { message("export_ksvm_linear_onnx()"); 
                export_ksvm_linear_onnx(train_obj, out_base, use_rule, primary_output, dtype, do_checks) },
-             poly = { message("→ export_ksvm_poly_onnx()");   
+             poly = { message("export_ksvm_poly_onnx()");   
                export_ksvm_poly_onnx(  train_obj, out_base, use_rule, primary_output, dtype, do_checks) },
-             rbf = { message("→ export_ksvm_rbf_onnx()");    
+             rbf = { message("export_ksvm_rbf_onnx()");    
                export_ksvm_rbf_onnx(   train_obj, out_base, use_rule, primary_output, dtype, do_checks) },
              stop("Unsupported kernel: ", k)
       )
@@ -4829,9 +5180,6 @@ save_ml_model <- Process$new(
       if (grepl("^[0-9]", s2)) paste0("C_", s2) else s2
     }
     
-    
-  
-   
     canon <- function(x) make.names(as.character(x), unique = FALSE)
     
     coerce_to_rf_numeric <- function(X, rf, feature_names) {
@@ -5017,13 +5365,7 @@ save_ml_model <- Process$new(
     }
     
     ####
-    export_rf_onnx <- function(
-    train_obj, out_base,
-    dtype = "float32",
-    primary_output = "idx1",
-    do_checks = TRUE,
-    tie_eps = 1e-6
-    ) {
+    export_rf_onnx <- function(train_obj, out_base, dtype = "float32", primary_output = "idx1", do_checks = TRUE, tie_eps = 1e-6) {
       model_r <- train_obj
       rf_mod  <- if (inherits(model_r, "train")) model_r$finalModel else model_r
       if (!(inherits(rf_mod, "randomForest") || inherits(rf_mod, "ranger"))) {
@@ -5096,32 +5438,21 @@ save_ml_model <- Process$new(
       )
       
       add_metadata_to_onnx(onnx_path, meta_opts)
-      message("wir sind hier...")
       
       if (isTRUE(do_checks) && !is.null(train_X)) {
-        message("onnxruntime laden")
         ort <- reticulate::import("onnxruntime", delay_load = TRUE)
         np  <- reticulate::import("numpy", convert = FALSE)
-        message("geladen")
         sess <- ort$InferenceSession(onnx_path)
-        message("hier")
         ins_r  <- reticulate::py_to_r(sess$get_inputs())
         input_name <- as.character(ins_r[[1]]$name)
-        message("nun")
         is_f64  <- identical(dtype, "float64")
         np_dtype <- if (is_f64) "float64" else "float32"
         
-        message("sind")
         X_ref <- train_X
         if (!is.null(means) && !is.null(sds)) {
           X_ref <- sweep(X_ref, 2, sds, "*")
           X_ref <- sweep(X_ref, 2, means, "+")
         }
-        
-        message("done")
-        
-        
-        
         
         onnx_predict_idx1_batch <- function(sess, input_name, X_raw) {
           X <- if (is.vector(X_raw)) matrix(X_raw, nrow=1L) else as.matrix(X_raw)
@@ -5161,15 +5492,10 @@ save_ml_model <- Process$new(
     }
     
     
-    
-    
     build_onnx_for_rule <- function(use_rule, weights_aligned, feature_names, classes, means, sds, out_path) {
-      
       
       library(reticulate)
       py <- find_python_bin()
-      
-      
       
       onnx <- reticulate::import("onnx", convert = FALSE)
       helper <- reticulate::import("onnx.helper", convert = FALSE)
@@ -5285,16 +5611,7 @@ save_ml_model <- Process$new(
     
     
     
-    build_onnx_poly_ovo <- function(
-    use_rule = c("majority","margin"),
-    bin_models, feature_names, classes, means, sds, kpar, out_path,
-    dtype = c("float64","float32"),
-    reorder_idx  = NULL,            
-    clip_base = NA_real_,       
-    add_debug = TRUE,
-    primary_output= c("idx1","votes_vector","scores_vector"),
-    tie_rule = c(">0",">=0")
-    ){
+    build_onnx_poly_ovo <- function(use_rule = c("majority","margin"), bin_models, feature_names, classes, means, sds, kpar, out_path, dtype = c("float64","float32"), reorder_idx  = NULL, clip_base = NA_real_, add_debug = TRUE, primary_output= c("idx1","votes_vector","scores_vector"), tie_rule = c(">0",">=0")){
       
       
       use_rule <- match.arg(use_rule)
@@ -5319,7 +5636,6 @@ save_ml_model <- Process$new(
       n_feat <- length(feature_names)
       deg_i <- as.integer(round(kpar$degree %||% 3))
       
-      # I/O
       inp <- helper$make_tensor_value_info("input_raw", TensorProto$FLOAT, list(1L, n_feat))
       out_i <- helper$make_tensor_value_info("idx1", TensorProto$INT64, list(1L,1L))
       out_vv <- helper$make_tensor_value_info("votes_vector", TNUM, list(1L,K))
@@ -5396,7 +5712,6 @@ save_ml_model <- Process$new(
                    helper$make_node("Identity", list("std_safe"), list("std_safe_dbg"), name="DbgStdSafe"))
       }
       
-      # OvO-Modelle
       acc_votes_vecs <- character(0)
       acc_scores_vecs <- character(0)
       z_list <- character(0)
@@ -5540,15 +5855,7 @@ save_ml_model <- Process$new(
     
     
     
-    build_onnx_rbf_ovo <- function(
-    use_rule = c("majority","margin"),
-    bin_models, feature_names, classes, means, sds, sigma, out_path,
-    dtype = c("float64","float32"),
-    reorder_idx = NULL,
-    add_debug  = TRUE,
-    primary_output= c("idx1","votes_vector","scores_vector"),
-    tie_rule = c(">0",">=0")
-    ){
+    build_onnx_rbf_ovo <- function(use_rule = c("majority","margin"), bin_models, feature_names, classes, means, sds, sigma, out_path, dtype = c("float64","float32"), reorder_idx = NULL, add_debug  = TRUE, primary_output= c("idx1","votes_vector","scores_vector"), tie_rule = c(">0",">=0")){
       
       
       use_rule <- match.arg(use_rule)
@@ -5795,15 +6102,7 @@ save_ml_model <- Process$new(
     
     
     
-    
-    build_rf_teclassifier_onnx <- function(
-      arr,
-      feature_names, classes, out_path,
-      means = NULL, sds = NULL,
-      dtype = c("float32","float64"),
-      primary_output = c("idx1","scores"),
-      tie_eps = 1e-6
-    ) {
+    build_rf_teclassifier_onnx <- function(arr, feature_names, classes, out_path, means = NULL, sds = NULL, dtype = c("float32","float64"), primary_output = c("idx1","scores"), tie_eps = 1e-6) {
       
       dtype <- match.arg(dtype)
       primary_output <- match.arg(primary_output)
@@ -5825,7 +6124,6 @@ save_ml_model <- Process$new(
       K <- length(classes)
       n_feat <- length(feature_names)
       
-      # I/O
       inp <- helper$make_tensor_value_info("input_raw", TNUM, list(-1L, as.integer(n_feat)))
       out_i <- helper$make_tensor_value_info("idx1", TensorProto$INT64, list(-1L, 1L))
       out_s <- helper$make_tensor_value_info("scores", TNUM, list(-1L, as.integer(K)))
@@ -5925,153 +6223,293 @@ save_ml_model <- Process$new(
       onnx$save_model(model_onnx, out_path)
       cat("ONNX : ", out_path, "\n", sep = "")
     }
-    
-    
-    save_torch_model <- function(model, filepath,
-                                 input_channels = NULL,
-                                 time_steps     = NULL) {
-      `%||%` <- function(a,b) if (!is.null(a)) a else b
-      has_conv <- tryCatch(!is.null(model$conv_layers) && length(model$conv_layers) >= 1 &&
-                             length(model$conv_layers[[1]]) >= 1 &&
-                             !is.null(model$conv_layers[[1]][[1]]$in_channels),
-                           error = function(e) FALSE)
-      
+
+    infer_torch_meta <- function(model, input_channels = NULL, time_steps = NULL) {
+      `%||%` <- function(a,b) if (!is.null(a) && length(a) > 0) a else b
+
+      has_conv <- tryCatch(
+        !is.null(model$conv_layers) && length(model$conv_layers) >= 1 &&
+          length(model$conv_layers[[1]]) >= 1 &&
+          !is.null(model$conv_layers[[1]][[1]]$in_channels),
+        error = function(e) FALSE
+      )
+
       if (has_conv) {
         first_conv <- model$conv_layers[[1]][[1]]
-        input_channels <- as.integer(first_conv$in_channels)
-        time_steps <- as.integer(model$time_steps %||% stop("‘time_steps’ is missing from the TempCNN model"))
-        
-        B <- 1L
-        dummy <- torch::torch_randn(c(B, input_channels, time_steps))
-        model$eval()
-        script_model <- torch::jit_trace(model, dummy)
-        script_model$eval()
-        torch::jit_save(script_model, filepath)
-        return(list(pt_path = filepath,
-                    input_chan = input_channels,
-                    time_steps = time_steps,
-                    input_layout = "NCT"))
+        input_channels <- as.integer(first_conv$in_channels %||% input_channels)
+        time_steps <- as.integer(model$time_steps %||% time_steps)
+        return(list(input_chan = input_channels, time_steps = time_steps, input_layout = "NCT"))
       }
-      
+
       ic_from_model <- tryCatch(model$input_channels, error = function(e) NULL)
       ts_from_model <- tryCatch(model$time_steps, error = function(e) NULL)
       il_from_model <- tryCatch(model$input_layout, error = function(e) NULL)
       cols_from_mod <- tryCatch(model$input_data_columns, error = function(e) NULL)
-      
-      
+
       input_channels <- input_channels %||% ic_from_model %||%
         (if (!is.null(cols_from_mod)) length(cols_from_mod) else NULL)
-      time_steps <- time_steps   %||% ts_from_model    %||% 1L
-      
-      input_layout <- if (!is.null(il_from_model)) il_from_model else "NCT"
-      
-      if (is.null(input_channels) || input_channels < 1L)
-        stop("‘input_channels’ is missing for Torch export. Attach it to the model during training or pass it as an argument.")
-      if (is.null(time_steps) || time_steps < 1L)
-        stop("‘time_steps’ is missing for Torch export. Attach it to the model during training or pass it as an argument.")
 
-      if (inherits(model, "jit_script_module")) {
-        torch::jit_save(model, filepath)
-        return(list(pt_path = filepath,
-                    input_chan = as.integer(input_channels),
-                    time_steps = as.integer(time_steps),
-                    input_layout = toupper(input_layout)))
-      }
-      
-      B <- 1L
-      if (toupper(input_layout) == "NC") {
-        dummy <- torch::torch_randn(c(B, as.integer(input_channels)))
-      } else {
-        dummy <- torch::torch_randn(c(B, as.integer(input_channels), as.integer(time_steps)))
-      }
-      
-      model$eval()
-      script_model <- torch::jit_trace(model, dummy)
-      script_model$eval()
-      torch::jit_save(script_model, filepath)
-      
-      list(pt_path = filepath,
-           input_chan = as.integer(input_channels),
-           time_steps = as.integer(time_steps),
-           input_layout = toupper(input_layout))
+      time_steps <- time_steps %||% ts_from_model %||% 1L
+      input_layout <- toupper(il_from_model %||% "NCT")
+
+      if (is.null(input_channels) || input_channels < 1L)
+        stop("Could not infer input_channels for generic Torch model.")
+      if (is.null(time_steps) || time_steps < 1L)
+        stop("Could not infer time_steps for generic Torch model.")
+
+      list(input_chan = as.integer(input_channels),
+          time_steps = as.integer(time_steps),
+          input_layout = input_layout)
     }
+
+
+save_torch_model <- function(model, filepath, input_channels = NULL, time_steps = NULL) {
+
+  `%||%` <- function(a,b) if (!is.null(a) && length(a) > 0) a else b
+
+  has_conv <- tryCatch(
+    !is.null(model$conv_layers) && length(model$conv_layers) >= 1 &&
+      length(model$conv_layers[[1]]) >= 1 &&
+      !is.null(model$conv_layers[[1]][[1]]$in_channels),
+    error = function(e) FALSE
+  )
+
+  if (has_conv) {
+    first_conv <- model$conv_layers[[1]][[1]]
+    input_channels <- as.integer(first_conv$in_channels)
+    time_steps <- as.integer(model$time_steps %||% stop("time_steps missing in model"))
+
+    B <- 1L
+    dummy <- torch::torch_randn(c(B, input_channels, time_steps))
+    model$eval()
+
+    script_model <- torch::jit_trace(model, dummy)
+    #torch::jit_save(script_model, filepath)
+
+    script_model$eval()
+    torch::jit_save(script_model, filepath)
+
+    return(list(
+      pt_path = filepath,
+      input_chan = input_channels,
+      time_steps = time_steps,
+      input_layout = "NCT"
+    ))
+  }
+
+  ic_from_model <- tryCatch(model$input_channels, error = function(e) NULL)
+  ts_from_model <- tryCatch(model$time_steps, error = function(e) NULL)
+  il_from_model <- tryCatch(model$input_layout, error = function(e) NULL)
+  cols_from_mod <- tryCatch(model$input_data_columns, error = function(e) NULL)
+
+  input_channels <- input_channels %||% ic_from_model %||%
+    (if (!is.null(cols_from_mod)) length(cols_from_mod) else NULL)
+  time_steps <- time_steps %||% ts_from_model %||% 1L
+  input_layout <- toupper(il_from_model %||% "NCT")
+
+  if (is.null(input_channels) || input_channels < 1L)
+    stop("input_channels missing for Torch export.")
+  if (is.null(time_steps) || time_steps < 1L)
+    stop("time_steps missing for Torch export.")
+
+  if (inherits(model, "jit_script_module")) {
+    torch::jit_save(model, filepath)
+    return(list(
+      pt_path = filepath,
+      input_chan = as.integer(input_channels),
+      time_steps = as.integer(time_steps),
+      input_layout = input_layout
+    ))
+  }
+
+  B <- 1L
+  dummy <- if (input_layout == "NC") {
+    torch::torch_randn(c(B, as.integer(input_channels)))
+  } else {
+    torch::torch_randn(c(B, as.integer(input_channels), as.integer(time_steps)))
+  }
+
+  model$eval()
+
+  script_model <- torch::jit_trace(model, dummy)
+
+  script_model$eval()
+  torch::jit_save(script_model, filepath)
+
+  list(
+    pt_path = filepath,
+    input_chan = as.integer(input_channels),
+    time_steps = as.integer(time_steps),
+    input_layout = input_layout
+  )
+}
+
+
     
     
     
-    convert_torch_to_onnx_from_pt <- function(script_pt, input_chan, time_steps, base_name, output_dir) {
-      message("Start ONNX conversion...")
-      onnx_path <- ensure_extension(file.path(output_dir, base_name), "onnx")
-      py_file <- tempfile(fileext = ".py")
-      writeLines(sprintf("
-import torch, warnings
+convert_torch_to_onnx_from_pt <- function(script_pt, input_chan, time_steps, base_name, output_dir) {
+  message("Start ONNX conversion...")
+  onnx_path <- ensure_extension(file.path(output_dir, base_name), "onnx")
+  py_file <- tempfile(fileext = ".py")
+
+py_code <- sprintf(
+"import torch, warnings
 warnings.filterwarnings('ignore', category=UserWarning)
-mod = torch.jit.load(r'%s')
-mod.eval()
-dummy = torch.randn(1, %d, %d)
-torch.onnx.export(
-    mod, dummy, r'%s',
-    input_names=['input'], output_names=['output'],
-    dynamic_axes={'input': {0: 'batch_size', 2: 'time_steps'}, 'output': {0: 'batch_size'}},
-    opset_version=14
+
+pt_path = r'%s'
+onnx_path = r'%s'
+C = %d
+T = %d
+
+sm = torch.jit.load(pt_path)
+sm.eval()
+
+try:
+    print('method names:', sm._c._method_names())
+except Exception as e:
+    print('method names: <unavailable>', e)
+
+dummy = torch.randn(1, C, T)
+
+def export_with_evalforward():
+    class Wrap(torch.nn.Module):
+        def __init__(self, sm):
+            super().__init__()
+            self.sm = sm
+        def forward(self, x):
+            return self.sm.evalforward(x)
+
+    m = Wrap(sm).eval()
+    m_script = torch.jit.script(m)
+    m_script.eval()
+
+    torch.onnx.export(
+        m_script, dummy, onnx_path,
+        input_names=['input'], output_names=['output'],
+        dynamic_axes={'input': {0: 'batch_size', 2: 'time_steps'},
+                      'output': {0: 'batch_size'}},
+        opset_version=14
+    )
+
+def export_with_trainforward():
+    class Wrap(torch.nn.Module):
+        def __init__(self, sm):
+            super().__init__()
+            self.sm = sm
+        def forward(self, x):
+            return self.sm.trainforward(x)
+
+    m = Wrap(sm).eval()
+    m_script = torch.jit.script(m)
+    m_script.eval()
+
+    torch.onnx.export(
+        m_script, dummy, onnx_path,
+        input_names=['input'], output_names=['output'],
+        dynamic_axes={'input': {0: 'batch_size', 2: 'time_steps'},
+                      'output': {0: 'batch_size'}},
+        opset_version=14
+    )
+
+def export_with_forward():
+    class Wrap(torch.nn.Module):
+        def __init__(self, sm):
+            super().__init__()
+            self.sm = sm
+        def forward(self, x):
+            return self.sm(x)
+
+    m = Wrap(sm).eval()
+    m_script = torch.jit.script(m)
+    m_script.eval()
+
+    torch.onnx.export(
+        m_script, dummy, onnx_path,
+        input_names=['input'], output_names=['output'],
+        dynamic_axes={'input': {0: 'batch_size', 2: 'time_steps'},
+                      'output': {0: 'batch_size'}},
+        opset_version=14
+    )
+
+# --- Try order: evalforward -> trainforward -> forward ---
+try:
+    print('Trying evalforward wrapper...')
+    export_with_evalforward()
+    print('ONNX successfully saved (evalforward):', onnx_path)
+except Exception as e1:
+    print('evalforward failed:', repr(e1))
+    try:
+        print('Trying trainforward wrapper...')
+        export_with_trainforward()
+        print('ONNX successfully saved (trainforward):', onnx_path)
+    except Exception as e2:
+        print('trainforward failed:', repr(e2))
+        print('Trying forward wrapper...')
+        export_with_forward()
+        print('ONNX successfully saved (forward):', onnx_path)
+",
+  script_pt, onnx_path, as.integer(input_chan), as.integer(time_steps)
 )
-print('ONNX successfully saved: %s')
-", script_pt, input_chan, time_steps, onnx_path, onnx_path), con = py_file)
-python_bin <- find_python_bin()
-res <- system2(python_bin, py_file, stdout = TRUE, stderr = TRUE)
-cat(res, sep = "\n")
-unlink(py_file)
-if (!file.exists(onnx_path)) stop("ONNX export failed:\n", paste(res, collapse = "\n"))
-message("ONNX stored under: ", onnx_path)
-return(onnx_path)
-    }
+
+
+
+
+  writeLines(py_code, con = py_file)
+
+  python_bin <- find_python_bin()
+  res <- system2(python_bin, args = c(py_file), stdout = TRUE, stderr = TRUE)
+  cat(res, sep = "\n")
+
+  unlink(py_file)
+
+  if (!file.exists(onnx_path)) stop("ONNX export failed:\n", paste(res, collapse = "\n"))
+  message("ONNX stored under: ", onnx_path)
+  return(onnx_path)
+}
+
     
-    convert_model_to_pkl <- function(model, model_type, filepath) {
+  convert_model_to_pkl <- function(model, model_type, filepath) {
       library(reticulate)
-      joblib <- import("joblib")
-      np <- import("numpy")
-      
+      message("Saving model as pickle...")
       xgboost <- import("xgboost")
-      
-      if (!("train" %in% class(model))) {
-        stop("Please pass a caret train object")
-      }
-      
-      if (!("trainingData" %in% names(model))) {
-        stop("The caret model does not contain any trainingData. Please save the model with trainingData")
-      }
-      train_data <- model$trainingData
-      
-      if (!(".outcome" %in% colnames(train_data))) {
-        stop("The trainingData does not contain an '.outcome' column")
-      }
-      predictors <- setdiff(colnames(train_data), ".outcome")
-      target_column <- ".outcome"
-      model <- model$finalModel
-      train_data_clean <- train_data[, predictors, drop = FALSE]
-      if (is.factor(train_data[[target_column]]) || is.character(train_data[[target_column]])) {
-        train_data[[target_column]] <- as.integer(as.factor(train_data[[target_column]])) - 1
-      }
-      
-      tryCatch({
-        x_train <- np$array(as.matrix(train_data_clean))
-        y_train <- np$array(as.numeric(train_data[[target_column]]))
-      }, error = function(e) {
-        message("Error during numpy array conversion: ", e$message)
-        stop(e)
-      })
-      if (model_type == "xgbTree") {
+
+      if (model_type == "xgb.Booster") {
+        message("Saving xgboost Booster model...")
         xgboost::xgb.save(model, paste0(filepath, ".bin"))
       } else {
         stop("Model type is not supported!")
       }
-    }
+  }
     
-    add_metadata_to_onnx <- function(onnx_path, options) {
+  add_metadata_to_onnx <- function(onnx_path, options) {
       message("add metadata to onnx")
-      onnx <- reticulate::import("onnx")
-      model <- onnx$load_model(onnx_path)
+      
+      if (is.null(options) || length(options) == 0 || length(names(options)) == 0) {
+        message("No metadata to add (options empty).")
+        return(invisible(NULL))
+      }
+      message("Adding metadata to ONNX model...")
+      message("onnx_path: ", onnx_path)
+      message("options: ", paste(names(options), collapse = ", "))
+
+      tryCatch({
+        onnx <- reticulate::import("onnx")
+        model <- onnx$load_model(onnx_path)
+  
+        message("onnx imported")
+      }, error = function(e) {
+        stop("The 'onnx' Python package is required: ", e$message)
+      })
+
+  
       for (key in names(options)) {
-        value <- paste(as.character(options[[key]]), collapse = ", ")
+        val <- options[[key]]
+        if(is.list(val)){
+          value <- paste(unlist(val), collapse = ", ")
+        }else{
+          value <- paste(as.character(val), collapse = ", ")
+        }
         meta_prop <- onnx$StringStringEntryProto(key = key, value = value)
         model$metadata_props$append(meta_prop)
       }
@@ -6080,60 +6518,94 @@ return(onnx_path)
     }
     
     
-    
-    save_ml_model_as_onnx <- function(model_type, filepath) {
-      library(reticulate)
-      tryCatch({
-        onnxmltools <- import("onnxmltools")
-        skl2onnx <- import("skl2onnx")
-        onnx <- import("onnx")
-        joblib <- import("joblib")
-        
-        oc_types <- import("onnxconverter_common.data_types")
-        FloatTensorType <- oc_types$FloatTensorType
-        
-        n_features <- NULL; model_py <- NULL
-        
-        if (model_type == "xgbTree") {
-          xgb_mod <- import("xgboost")
-          booster_py <- xgb_mod$Booster()
-          booster_py$load_model(paste0(filepath, ".bin"))
-          model_py <- booster_py
-          n_features <- booster_py$num_features()
-        } else if (model_type == "random_forest") {
-          rf_model_py <- joblib$load(paste0(filepath, ".pkl"))
-          n_features <- rf_model_py$n_features_in_
-          model_py <- rf_model_py
-        } else {
-          stop("Model type is not supported!")
-        }
-        
-        if (is.null(n_features)) stop("n_features_in_ could not be determined.")
-        
-        initial_type <- list(list("float_input", FloatTensorType(list(NULL, as.integer(n_features)))))
-        
-        if (model_type == "xgbTree") {
-          onnx_model <- onnxmltools$convert_xgboost(model_py, initial_types = initial_type)
-        } else {
-          onnx_model <- skl2onnx$convert_sklearn(model_py, initial_types = initial_type)
-        }
-        
-        onnx_file <- ensure_extension(filepath, "onnx")
-        onnx$save_model(onnx_model, onnx_file)
-        message("Model successfully saved as ONNX under: ", onnx_file)
-        return(onnx_file)
-      }, error = function(e) {
-        message("Error in save_ml_model_as_onnx:", e$message); stop(e)
-      })
-    }
-    
-    
-    save_model_as_mlm_stac_json <- function(model, filepath, tasks = list("classification"), options = list()) {
-      mlm_stac_item <- list(
-        type = "Feature",
-        stac_version = "1.0.0",
-        id = basename(sub("\\.json$", "", filepath)),
-        properties = list(datetime = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ")),
+ save_ml_model_as_onnx <- function(model_type, filepath) {
+  if (model_type != "xgb.Booster") stop("Model type is not supported!")
+
+  onnx_file <- paste0(filepath, ".onnx")
+  bin_file  <- paste0(filepath, ".bin")
+  if (!file.exists(bin_file)) stop("XGBoost model file not found: ", bin_file)
+
+  message("Converting XGBoost model to ONNX...")
+
+  py <- sprintf("
+import json
+import xgboost as xgb
+from onnxmltools import convert_xgboost
+from onnxconverter_common.data_types import FloatTensorType
+import onnx
+
+bin_path  = r'''%s'''
+onnx_path = r'''%s'''
+
+bst = xgb.Booster()
+bst.load_model(bin_path)
+
+n_features = int(bst.num_features())
+print('num_features =', n_features)
+
+orig_names = bst.feature_names
+
+if orig_names is None:
+    try:
+        dump = bst.get_dump(dump_format='json')
+        seen = []
+        for tree_s in dump:
+            tree = json.loads(tree_s)
+            stack = [tree]
+            while stack:
+                node = stack.pop()
+                if isinstance(node, dict):
+                    if 'split' in node:
+                        s = node['split']
+                        if s not in seen:
+                            seen.append(s)
+                    for k in ('children',):
+                        if k in node and isinstance(node[k], list):
+                            stack.extend(node[k])
+        if len(seen) == n_features:
+            orig_names = seen
+        else:
+            orig_names = None
+    except Exception:
+        orig_names = None
+
+print('orig feature_names =', orig_names)
+
+conv_names = [f'f{i}' for i in range(n_features)]
+bst.feature_names = conv_names
+
+onnx_model = convert_xgboost(
+    bst,
+    initial_types=[('float_input', FloatTensorType([None, n_features]))]
+)
+
+if orig_names is not None and len(orig_names) == n_features:
+    mapping = {conv_names[i]: orig_names[i] for i in range(n_features)}
+    meta = onnx_model.metadata_props.add()
+    meta.key = 'feature_name_mapping'
+    meta.value = json.dumps(mapping)
+else:
+    meta = onnx_model.metadata_props.add()
+    meta.key = 'feature_name_mapping'
+    meta.value = ''  # leer = nicht rekonstruierbar
+
+onnx.checker.check_model(onnx_model)
+onnx.save_model(onnx_model, onnx_path)
+print('OK: saved', onnx_path)
+", bin_file, onnx_file)
+
+  reticulate::py_run_string(py)
+  return(onnx_file)
+}
+
+
+
+save_model_as_mlm_stac_json <- function(model, filepath, tasks = list("classification"), options = list()) {
+  mlm_stac_item <- list(
+    type = "Feature",
+    stac_version = "1.0.0",
+    id = basename(sub("\\.json$", "", filepath)),
+    properties = list(datetime = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ")),
         geometry = NULL, bbox = NULL,
         stac_extensions = list("https://stac-extensions.github.io/mlm/v1.0.0/schema.json"),
         assets = list()
@@ -6276,11 +6748,9 @@ return(onnx_path)
         model_info$"mlm:accelerator_constrained" <- FALSE
         model_info$"mlm:accelerator_count" <- 1
         
-        #input_channels <- model$conv_layers[[1]][[1]]$in_channels
         params <- model$parameters
         input_channels <- params[[1]]$size()[2]
         
-        #input_channels <- model$conv_layers[[1]][[1]]$in_channels
         params <- model$parameters
         input_channels <- params[[1]]$size()[2]
         
@@ -6304,39 +6774,30 @@ return(onnx_path)
             pre_processing_function = NULL
           )
         )
-        message("output_size")
         
-        
+      
         output_size <- tryCatch({
-          message("Hier", input_channels)
           B <- 1L
           library(torch)
-          message("dummy start")
           dummy <- torch::torch_zeros(
             c(B, input_channels, time_steps),
             dtype = torch::torch_float()
           )
-          message("dummy done")
-          
           model$eval()
-          message("eval")
           out <- torch::with_no_grad({
             model(dummy)
           })
-          message("extraction")
           out <- out$size()[2]
-          
-          message("Nun hier", out)
-          
+        
           out
         }, error = function (e){
           message("Error Output_size", conditionMessage(e))
         })
-        
-        
-        message("out", output_size)
-        
-        
+
+
+        message("output_size", output_size)
+
+
         model_info$"mlm:output" <- list(
           list(
             name = "CNN Output",
@@ -6353,11 +6814,9 @@ return(onnx_path)
             post_processing_function = NULL
           )
         )
-        message("done")
         
       } else if ("nn_module" %in% class(model)) {
         
-        message("Lightae")
         
         arch_name <- tryCatch({
           cls <- class(model)
@@ -6420,41 +6879,30 @@ return(onnx_path)
             pre_processing_function = NULL
           )
         )
-        message("mlm input done")
         
         
         output_size <- tryCatch({
           
-          message("Hier", input_channels)
           B <- 1L
           library(torch)
-          message("dummy start")
           dummy <- torch::torch_zeros(
             c(B, input_channels, time_steps),
             dtype = torch::torch_float()
           )
-          message("dummy done")
           
           model$eval()
-          message("eval")
           out <- torch::with_no_grad({
             model(dummy)
           })
-          message("extraction")
           out <- out$size()[2]
-          
-          message("Nun hier", out)
           
           out
         }, error = function (e){
           message("Error Output_size", conditionMessage(e))
         })
-        
-        
-        message("out", output_size)
-        
-        
-        
+
+        message("output_size", output_size)
+
         if (!isTRUE(is.finite(output_size) && output_size >= 1L))
           stop("Could not infer output_size for generic DL model.")
         
@@ -6485,7 +6933,6 @@ return(onnx_path)
       } else {
         stop("Unknown model type: Please check the model!")
       }
-      message("Here")
       
       mlm_stac_item$properties <- c(mlm_stac_item$properties, model_info)
       
@@ -6509,6 +6956,89 @@ return(onnx_path)
       message("Model was saved as MLM-STAC-JSON under: ", filepath)
       return(filepath)
     }
+
+    save_model_as_mlm_stac_json_xgboost <- function(model, filepath, tasks = list("classification"), options = list()) {
+  
+      is_class <- attr(model, "classification")
+      labels <- attr(model, "class_levels")
+      predictor_names <- attr(model, "predictor_names")
+      params <- attr(model, "params")
+      nrounds <- attr(model, "nrounds")
+      
+      mlm_stac_item <- list(
+        type = "Feature",
+        stac_version = "1.0.0",
+        id = basename(sub("\\.json$", "", filepath)),
+        properties = list(datetime = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ")),
+        geometry = NULL, bbox = NULL,
+        stac_extensions = list("https://stac-extensions.github.io/mlm/v1.0.0/schema.json"),
+        assets = list()
+      )
+      
+      model_info <- list()
+      model_info$"mlm:name" <- basename(sub("\\.json$", "", filepath))
+      model_info$"mlm:architecture" <- "XGBoost"
+      model_info$"mlm:tasks" <- tasks
+      model_info$"mlm:framework" <- "R (xgboost)"
+      model_info$"mlm:framework_version" <- paste0("R ", R.version$major, ".", R.version$minor)
+      model_info$"mlm:total_parameters" <- nrounds
+      
+      model_info$"mlm:hyperparameters" <- list(
+        max_depth = params$max_depth,
+        eta = params$eta,
+        nrounds = nrounds,
+        objective = params$objective
+      )
+      
+      n_features <- length(predictor_names)
+      model_info$"mlm:input" <- list(
+        list(
+          name = "XGBoost Input",
+          bands = as.list(predictor_names),
+          input = list(
+            shape = list(NULL, as.integer(n_features)),
+            dim_order = list("batch", "features"),
+            data_type = "float32"
+          )
+        )
+      )
+      
+      if (isTRUE(is_class)) {
+        n_classes <- length(labels)
+        model_info$"mlm:output" <- list(
+          list(
+            name = "XGBoost Output",
+            tasks = tasks,
+            result = list(
+              shape = list(NULL, as.integer(n_classes)),
+              dim_order = list("batch", "classes"),
+              data_type = "float32"
+            ),
+            "classification:classes" = lapply(seq_along(labels), function(i) {
+              list(value = i - 1, name = labels[i])
+            })
+          )
+        )
+      } else {
+        model_info$"mlm:output" <- list(
+          list(
+            name = "XGBoost Output",
+            tasks = list("regression"),
+            result = list(
+              shape = list(NULL, 1L),
+              dim_order = list("batch", "value"),
+              data_type = "float32"
+            )
+          )
+        )
+      }
+      
+      mlm_stac_item$properties <- c(mlm_stac_item$properties, model_info)
+      
+      jsonlite::write_json(mlm_stac_item, path = filepath, auto_unbox = TRUE, pretty = TRUE)
+      message("MLM STAC JSON saved to: ", filepath)
+      return(filepath)
+    }
     
     
     
@@ -6523,12 +7053,20 @@ return(onnx_path)
     message("data class: ", paste(class(data), collapse = ", "))
     
     if (is.character(data) && length(data) == 1 && file.exists(data) && grepl("\\.pt$", data, ignore.case = TRUE)) {
+      message("Torch model file detected...")
       `%||%` <- function(a,b) if (!is.null(a) && length(a) > 0) a else b
       nz1 <- function(x) if (is.null(x) || length(x) == 0) NULL else x
       is_bad_dim <- function(x) { is.null(x) || length(x) != 1L || !is.finite(x) || x < 1 }
       
-      model <- torch::torch_load(data)
-      
+      tryCatch({
+        model <- torch::torch_load(data)
+      }, error = function(e) {
+        message("Error loading TorchScript model: ", e$message)
+        stop(e)
+      })
+      message("Model loaded.")
+
+
       has_conv <- tryCatch(
         !is.null(model$conv_layers) && length(model$conv_layers) >= 1 &&
           length(model$conv_layers[[1]]) >= 1 &&
@@ -6536,11 +7074,10 @@ return(onnx_path)
         error = function(e) FALSE
       )
       if (has_conv) {
+        message("TempCNN model detected...")
         first_conv <- model$conv_layers[[1]][[1]]
         input_channels <- first_conv$in_channels
         time_steps <- model$time_steps
-        message(" → input_channels = ", input_channels, ", time_steps = ", time_steps)
-        
         
         pt_meta <- save_torch_model(
           model,
@@ -6550,12 +7087,13 @@ return(onnx_path)
         )
       }
       else {
+        message("Generic Torch model detected...")
         pt_meta <- save_torch_model(
           model,
           file.path(shared_dir, paste0(base_name, ".pt"))
         )
       }
-      
+      message("Convertert")
       result$onnx <- convert_torch_to_onnx_from_pt(
         script_pt = pt_meta$pt_path,
         input_chan = pt_meta$input_chan,
@@ -6571,20 +7109,16 @@ return(onnx_path)
         message("ERROR in save_model_as_mlm_stac_json_dl: ", conditionMessage(e))
       })
       
-      message("STAC JSON erwartet bei: ", json_file, 
-              "  exists: ", file.exists(json_file))
-      
+      message("STAC JSON erwartet bei: ", json_file, "exists: ", file.exists(json_file))
       result$json <- json_file
-      
-      
-      
+         
     } 
     
     else if (inherits(data, "train")) {
       message("Machine model detected...")
       
       if (inherits(data$finalModel, "ksvm")) {
-        message("Detected SVM (kernlab::ksvm) → custom ONNX path.")
+        message("Detected SVM (kernlab::ksvm) -> custom ONNX path.")
         res <- export_caret_ksvm_to_onnx(
           train_obj = data,
           out_base = file.path(tmp, base_name),
@@ -6607,13 +7141,14 @@ return(onnx_path)
           options,
           list(
             feature_names = paste(res$features, collapse = ","),
-            class_labels  = paste(res$classes,  collapse = ","),
-            zero_based    = "true"
+            class_labels = paste(res$classes,  collapse = ","),
+            zero_based = "true"
           )
         )
         add_metadata_to_onnx(result$onnx, extra_opts)
         
       } else {
+        message("Detected other ML model...")
         model_type <- detect_model_type(data)
         message("Detected model type: ", model_type)
         convert_model_to_pkl(data, model_type, file.path(tmp, base_name))
@@ -6622,31 +7157,40 @@ return(onnx_path)
         result$onnx <- onnx_path
       }
       
-      # JSON (MLM-STAC) immer für caret-Modelle schreiben
       json_file <- file.path(tmp, ensure_extension(base_name, "json"))
       save_model_as_mlm_stac_json(data, json_file, tasks, options)
       result$json <- json_file
     }
     
-    
-    else {
-      stop("Unknown model type: must be 'nn_module' (Torch) or 'train' (Caret).")
+    else if(inherits(data, "xgb.Booster")) {
+      message("XGBoost Booster model detected...")
+      convert_model_to_pkl(data, "xgb.Booster", file.path(tmp, base_name))
+      onnx_path <- save_ml_model_as_onnx("xgb.Booster", file.path(tmp, base_name))
+      result$onnx <- onnx_path
+      json_file <- file.path(tmp, ensure_extension(base_name, "json"))
+      save_model_as_mlm_stac_json_xgboost(data, json_file, tasks, options)
+      result$json <- json_file
+      rds_path <- file.path(tmp, ensure_extension(base_name, "rds"))
+      saveRDS(data, rds_path)
+      result$rds <- rds_path
+      message("RDS saved: ", rds_path)
     }
-    
-    message("rds path")
+    else {
+      stop("Unknown model type: must be 'nn_module' (Torch), XGBoost or 'train' (Caret).")
+    }
+  
     rds_path <- file.path(tmp, ensure_extension(base_name, "rds"))
-    message("rds_path: ", rds_path)
     result$rds <- rds_path
     
-    if (length(options) > 0 && !is.null(result$onnx) && file.exists(result$onnx)) {
+    if (length(options) > 0 && length(names(options)) > 0 && !is.null(result$onnx) && file.exists(result$onnx)) {
       add_metadata_to_onnx(result$onnx, options)
     }
     
     download_base <- Sys.getenv("DOWNLOAD_BASE_URL", "http://localhost:8000/download/")
     download_links <- list(
-      onnx  = sprintf("%s%s", download_base, basename(result$onnx)),
-      json  = sprintf("%s%s", download_base, basename(result$json)),
-      rds   = sprintf("%s%s", download_base, basename(result$rds))
+      onnx = sprintf("%s%s", download_base, basename(result$onnx)),
+      json = sprintf("%s%s", download_base, basename(result$json)),
+      rds = sprintf("%s%s", download_base, basename(result$rds))
     )
     if (!is.null(result$torch)) {
       download_links$torch <- sprintf("%s%s", download_base, basename(result$torch))
@@ -6700,10 +7244,10 @@ download <- function(filename, res) {
     "json" = "application/json",
     "rds" = "application/octet-stream",
     "onnx" = "application/octet-stream",
-    "pt"   = "application/octet-stream",
-    "pkl"  = "application/octet-stream",
-    "bin"  = "application/octet-stream",
-    "txt"  = "text/plain",
+    "pt" = "application/octet-stream",
+    "pkl" = "application/octet-stream",
+    "bin" = "application/octet-stream",
+    "txt" = "text/plain",
     "application/octet-stream"
   )
   
@@ -6714,8 +7258,5 @@ download <- function(filename, res) {
   res$body <- file_content
   
   return(res)
-  
-  
-  
   
 }
