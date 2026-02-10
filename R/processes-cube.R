@@ -49,7 +49,6 @@ datacube_schema <- function() {
 eo_datacube <- datacube_schema()
 
 
-
 #' Vector datacube_schema
 #' @description Return a list with datacube description and schema
 #'
@@ -64,7 +63,6 @@ datacube_schema <- function() {
 
 #' return object for the processes
 vec_datacube <- datacube_schema()
-
 
 
 #' load collection
@@ -219,14 +217,6 @@ load_collection <- Process$new(
     return(cube)
   }
 )
-
-
-
-
-
-
-
-
 
 
 #' aggregate temporal period
@@ -403,19 +393,24 @@ aggregate_spatial <- Process$new(
 
     message("Training data is loaded")
     if (is.character(geometries)) {
-      tryCatch({
-        message("load")
-        geometries <- geojsonsf::geojson_sf(geometries)
-      }, error = function(e) {
-        tryCatch({
-          geometries <- sf::read_sf(geometries)
-        }, error = function(e2) {
-          stop("Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ", e2$message)
-        })
-      })
-
+      tryCatch(
+        {
+          message("load")
+          geometries <- geojsonsf::geojson_sf(geometries)
+        },
+        error = function(e) {
+          tryCatch(
+            {
+              geometries <- sf::read_sf(geometries)
+            },
+            error = function(e2) {
+              stop("Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ", e2$message)
+            }
+          )
+        }
+      )
     }
-    
+
     if (is.list(geometries) && !inherits(geometries, "sf")) {
       geometries <- jsonlite::toJSON(geometries, auto_unbox = TRUE)
       geometries <- geojsonsf::geojson_sf(geometries)
@@ -673,7 +668,6 @@ filter_bbox <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, extent, job) {
-
     crs <- gdalcubes::srs(data)
     nw <- c(extent$west, extent$north)
     sw <- c(extent$west, extent$south)
@@ -717,7 +711,6 @@ filter_spatial <- Process$new(
     return(cube)
   }
 )
-
 
 
 #' filter temporal
@@ -809,7 +802,11 @@ ndvi <- Process$new(
     )
 
     # Apply the NDVI calculation
-    cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = "NDVI", keep_bands = FALSE)
+    if (is.null(target_band)) {
+      cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = "NDVI", keep_bands = FALSE)
+    } else {
+      cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = target_band, keep_bands = TRUE)
+    }
 
     # Log and return the result
     message("NDVI calculated ....")
