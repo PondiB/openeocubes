@@ -10,6 +10,7 @@
 #' @importFrom tibble add_row
 #' @import plumber
 #' @import gdalcubes
+#' @import callr
 #' @export
 SessionInstance <- R6Class(
   "SessionInstance",
@@ -19,9 +20,11 @@ SessionInstance <- R6Class(
     processes = NULL,
     data = NULL,
     jobs =NULL,
+    job_executor = NULL,
 
     #' @description Create a new session
     #' @param configuration Session configuration
+    #' 
     initialize = function(configuration = NULL) {
 
       self$graphs = list()
@@ -63,6 +66,7 @@ SessionInstance <- R6Class(
       private$token = new
     },
 
+
     #' @description Start the session
     startSession = function(){
 
@@ -70,7 +74,8 @@ SessionInstance <- R6Class(
       host = private$config$host
 
       private$initRouter()
-      self$initDirectory()
+      self$initDirectory(cleanup = TRUE)
+      
 
       addEndpoint()
 
@@ -92,13 +97,38 @@ SessionInstance <- R6Class(
     },
 
     #' @description initializes workspace and data paths
-    #'
-    initDirectory = function() {
-
-      if (is.null(private$config$workspace.path)) {
-        private$config$workspace.path <- getwd()
+  
+    initDirectory = function(cleanup = TRUE) {
+      
+      shared_dir <- Sys.getenv("SHARED_TEMP_DIR", unset = "")
+      
+      if (shared_dir == "") {
+        if (.Platform$OS.type == "unix") {
+          base_tmp <- if (Sys.info()[["sysname"]] == "Darwin") "/private/var/tmp" else "/tmp"
+          shared_dir <- file.path(base_tmp, "openeocubes_shared_temp")
+        } else {
+          shared_dir <- file.path(tempdir(), "openeocubes_shared_temp")
+        }
+        Sys.setenv(SHARED_TEMP_DIR = shared_dir)
       }
+      
+      # Verzeichnis sicher anlegen
+      dir.create(shared_dir, recursive = TRUE, showWarnings = FALSE)
+      
+      # >>> Cleanup wirklich ausführen <<<
+      if (isTRUE(cleanup) && dir.exists(shared_dir)) {
+        # löscht nur Inhalt, nicht den Ordner selbst
+        old <- list.files(shared_dir, full.names = TRUE, all.files = TRUE, no.. = TRUE)
+        if (length(old) > 0) unlink(old, recursive = TRUE, force = TRUE)
+        message("Shared directory cleaned: ", normalizePath(shared_dir))
+      }
+      
+      message("Using internal shared dir: ", normalizePath(shared_dir))
     },
+    
+    
+    
+    
 
     #' @description build a df to add the endpoints later on
     #'
@@ -189,45 +219,109 @@ SessionInstance <- R6Class(
       names(newJob) = job$id
       self$jobs = append(self$jobs, newJob)
     },
+    
+    #' @description Enqueue a job for asynchronous execution
+    enqueueJob = function(job) {
+      shared_dir <- Sys.getenv("SHARED_TEMP_DIR", unset = "")
+      callr::r_bg(
+      func = function(job_obj, config, shared_dir) {
+        Sys.setenv(SHARED_TEMP_DIR = shared_dir)
+        library(openeocubes)
+        gdalcubes::gdalcubes_options(parallel = 8)
+        gdalcubes::gdalcubes_set_gdal_config("VSI_CACHE", "TRUE")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_CACHEMAX", "20%")
+        gdalcubes::gdalcubes_set_gdal_config("VSI_CACHE_SIZE", "5000000")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MULTIPLEX", "YES")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_INGESTED_BYTES_AT_OPEN", "32000")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_VERSION", "2")
+        gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES", "YES")
 
-    #' @description Execute the job
+        createSessionInstance(config)
+        Session$initDirectory(cleanup = TRUE)
+        Session$assignJob(job_obj)
+        Session$runJob(job_obj)
+      },
+        args = list(job, Session$getConfig(), shared_dir),
+        stdout = "",
+        stderr = ""
+      )
+    },
+    
+    
+
+    #' @description Execute the job (asynchronous path)
     #'
     #' @param job Job to be executed
     #'
     runJob = function(job) {
-
-     tryCatch({
-        dir = paste(Session$getConfig()$workspace.path, job$output.folder, sep = "/")
-
-        job = job$run()
-        format = job$output
-
+      tryCatch({
+        # Job-spezifisches Ausgabe-Verzeichnis unterhalb des workspace
+        dir <- file.path(Session$getConfig()$workspace.path, job$output.folder)
+        if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)
+        
+        job$status <- "running"
+        writeJobInfo(job)
+        message("run")
+        job <- job$run()
+        format <- job$output
+        
+        out_files <- character(0)
+        
         if (class(format) == "list") {
+          message("Here in the session list")
           if (format$title == "Network Common Data Form") {
-            write_ncdf(job$results, file.path(dir, basename(tempfile(fileext = ".nc"))))
-          }
-          else if (format$title == "GeoTiff") {
-            write_tif(job$results, dir = dir)
-          }
-          else {
+            out_files <- gdalcubes::write_ncdf(
+              job$results,
+              file.path(dir, basename(tempfile(fileext = ".nc")))
+            )
+          } else if (format$title == "GeoTiff") {
+            message("Geotiff run ")
+            out_files <- gdalcubes::write_tif(job$results, dir = dir)
+          } else {
             throwError("FormatUnsupported")
           }
-        }
-        else {
+        } else {
           if (format == "NetCDF") {
-            write_ncdf(job$results, file.path(dir, basename(tempfile(fileext = ".nc"))))
-          }
-          else if (format == "GTiff") {
-            write_tif(job$results, dir = dir)
-          }
-          else {
+            out_files <- gdalcubes::write_ncdf(
+              job$results,
+              file.path(dir, basename(tempfile(fileext = ".nc")))
+            )
+          } else if (format == "GTiff") {
+            message("GeoTiff_output erkannt in der session ")
+            out_files <- gdalcubes::write_tif(job$results, dir = dir)
+          } else {
             throwError("FormatUnsupported")
           }
         }
+        message("finished eingeleitet")
+       
+        shared_dir <- Sys.getenv("SHARED_TEMP_DIR", unset = NA)
+        
+        if (!is.na(shared_dir) && dir.exists(shared_dir)) {
+          existing <- out_files[file.exists(out_files)]
+          
+          if (length(existing) > 0) {
+            target <- file.path(shared_dir, basename(existing))
+            file.copy(existing, target, overwrite = TRUE)
+            message("Copied job results to shared download dir: ", shared_dir)
+          } else {
+            message("runJob: no existing output files to copy.")
+          }
+        } else {
+          message("runJob: SHARED_TEMP_DIR not set or missing - skipping copy to /download")
+        }
+        
+        job$status <- "finished"
+        writeJobInfo(job)
+        
       }, error = function(e) {
-          throwError("Internal",message=e$message)
-        })
+        job$status <- "error"
+        writeJobInfo(job)
+        throwError("Internal", message = e$message)
+      })
     }
+    
   ),
   private = list(
     endpoints = NULL,
@@ -235,13 +329,30 @@ SessionInstance <- R6Class(
     config = NULL,
     token = NULL,
     base_url = NULL,
-
+    
     initRouter = function() {
       private$router = Router$new()
-      private$router$registerHook("postroute",.cors_filter)
+      private$router$registerHook("postroute", .cors_filter)
       private$router$filter("authorization", .authorized, serializer = serializer_unboxed_json())
+      
+  
+      private$router$handle(
+        path   = "/<path:.*>",
+        method = "GET",
+        handler = function(req, res, path) {
+          res$status <- 404
+          res$setHeader("Content-Type", "application/json; charset=utf-8")
+          list(
+            code    = "NotFound",
+            message = paste0("The requested resource '", req$PATH_INFO, "' does not exist.")
+          )
+        },
+        serializer = serializer_unboxed_json()
+      )
     }
   )
+  
+  
 )
 
 
@@ -253,3 +364,5 @@ createSessionInstance = function(configuration = NULL) {
   assign("Session", SessionInstance$new(configuration),envir=.GlobalEnv)
   invisible(Session)
 }
+
+

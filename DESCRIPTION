@@ -29,8 +29,8 @@ Imports:
     useful,
     gdalcubes,
     rstac,
-    geojsonsf, 
-    torch, 
+    geojsonsf,
+    torch,
     caret,
     kernlab,
     readr,
@@ -41,7 +41,8 @@ Imports:
     stats,
     abind,
     tidyr,
-    httr
+    httr,
+    clue
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
 Collate: 

@@ -9,45 +9,55 @@
 #' @include api_process_graphs.R
 NULL
 
-# Capabilities handler
-.capabilities <- function() {
-  config <- Session$getConfig()
-  endpoints <- Session$getEndpoints()
 
-  endpoints <- endpoints %>%
-    group_by(path) %>%
+
+
+.capabilities = function(req, res) {
+  
+  res$setHeader("Content-Type", "application/json; charset=utf-8")
+  
+  config    = Session$getConfig()
+  endpoints = Session$getEndpoints()
+  
+  endpoints = endpoints %>% 
+    group_by(path) %>% 
     summarise(
-      paths = list(tibble(path, method) %>% (function(x, ...) {
-        return(list(path = unique(x$path), methods = as.list(x$method)))
-      }))
+      paths = list(
+        tibble(path, method) %>% (function(x, ...) {
+          list(
+            path    = unique(x$path),
+            methods = as.list(x$method)
+          )
+        })
+      )
     )
-
-  list <- list()
-  list$api_version <- config$api_version
-  list$backend_version <- config$backend_version
-  list$stac_version <- config$stac_version
-  list$id <- config$id
-  list$title <- config$title
-  list$description <- config$description
-  list$endpoints <- endpoints$paths
-  list$links <- list(list(
+  
+  out = list()
+  out$api_version = config$api_version
+  out$backend_version = config$backend_version
+  out$stac_version = config$stac_version
+  out$id = config$id
+  out$title = config$title
+  out$description = config$description
+  out$endpoints = endpoints$paths
+  out$links = list(list(
     rel = "self",
     href = paste(config$base_url, "", sep = "/")
   ))
-
-  return(list)
+  
+  return(out)
 }
 
-.well_known <- function() {
-  version <- list(versions = list())
 
-  obj <- tibble(
-    url = Session$getConfig()$base_url,
-    api_version = Session$getConfig()$api_version,
-    production = FALSE
-  )
-  version$versions <- obj
-
+.well_known = function() {
+  
+  version = list(versions = list())
+  
+  obj = tibble(url = Session$getConfig()$base_url,
+               api_version = Session$getConfig()$api_version,
+               production = FALSE)
+  version$versions = obj
+  
   return(version)
 }
 
@@ -147,26 +157,34 @@ NULL
   )
 }
 
-.authorized <- function(req, res) {
-  tryCatch(
-    {
-      auth <- req$HTTP_AUTHORIZATION
-      sub <- substr(auth, 15, nchar(auth))
-      token <- Session$getToken()
+.authorized = function(req, res) {
+  tryCatch({
+    path   <- if (!is.null(req$PATH_INFO)) req$PATH_INFO else "/"
+    method <- if (!is.null(req$REQUEST_METHOD)) req$REQUEST_METHOD else "GET"
 
-      if (is.null(auth)) {
-        throwError("AuthenticationRequired")
-      } else if (sub != token) {
-        res$status <- 403
-        list(error = "AuthenticationFailed")
-      } else {
-        forward()
-      }
-    },
-    error = handleError
-  )
+    is_jobs_root <- identical(path, "/jobs") && method %in% c("GET", "POST")
+    is_jobs_id <- grepl("^/jobs/[^/]+$", path) && identical(method, "GET")
+
+    if (!(is_jobs_root || is_jobs_id)) {
+      return(forward())
+    }
+
+    auth <- req$HTTP_AUTHORIZATION
+    if (is.null(auth) || !nzchar(auth)) {
+      throwError("AuthenticationRequired")
+    }
+
+    sub <- substr(auth, 15, nchar(auth))
+    token <- Session$getToken()
+
+    if (sub != token) {
+      res$status <- 403
+      return(list(error = "AuthenticationFailed"))
+    }
+
+    forward()
+  }, error = handleError)
 }
-
 
 .executeSynchronous <- function(req, res) {
   tryCatch(
@@ -210,139 +228,166 @@ NULL
 
 .cors_filter <- function(req, res) {
   res$setHeader("Access-Control-Allow-Origin", req$HTTP_ORIGIN)
-  res$setHeader("Access-Control-Expose-Headers", "Location, OpenEO-Identifier, OpenEO-Costs")
+  res$setHeader("Access-Control-Expose-Headers", "Link, Location, OpenEO-Costs, OpenEO-Identifier")
   forward()
 }
 
-.cors_option <- function(req, res, ...) {
-  res$setHeader("Access-Control-Allow-Headers", "Content-Type")
-  res$setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS,PATCH")
+.cors_option = function(req, res, ...) {
+  res$setHeader("Access-Control-Allow-Origin", "*")
+  res$setHeader(
+    "Access-Control-Expose-Headers",
+    "Link, Location, OpenEO-Costs, OpenEO-Identifier"
+  )
+  
+  res$setHeader(
+    "Access-Control-Allow-Headers",
+    "Authorization, Content-Type"
+  )
+  
+  res$setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+  )
+  
   res$status <- 204
 }
 
+
 #' dedicate the handler functions to the corresponding paths
-addEndpoint <- function() {
-  Session$createEndpoint(
-    path = "/",
-    method = "GET",
-    handler = .capabilities
-  )
+addEndpoint = function() {
+  
+  Session$createEndpoint(path = "/",
+                         method = "GET",
+                         handler = .capabilities)
+  
+  Session$createEndpoint(path = "/.well-known/openeo",
+                         method = "GET",
+                         handler = .well_known)
+  
+  Session$createEndpoint(path = "/file_formats",
+                         method = "GET",
+                         handler = .file_formats)
+  
+  Session$createEndpoint(path = "/conformance",
+                         method = "GET",
+                         handler = .conformance)
+  
+  Session$createEndpoint(path = "/collections",
+                         method = "GET",
+                         handler = .collections)
 
-  Session$createEndpoint(
-    path = "/.well-known/openeo",
-    method = "GET",
-    handler = .well_known
-  )
+  Session$createEndpoint(path = "/collections",
+                         method = "OPTIONS",
+                         handler = .cors_option,
+                         filter = FALSE)
+  
+  Session$createEndpoint(path = "/collections",
+                         method = "OPTIONS",
+                         handler = .cors_option,
+                         filter = FALSE)
+  
+  
+  Session$createEndpoint(path = "/collections/{collection_id}",
+                         method = "GET",
+                         handler = .collectionId)
+  
+  Session$createEndpoint(path = "/processes",
+                         method = "GET",
+                         handler = .processes)
+  
+  Session$createEndpoint(path = "/process_graphs",
+                         method = "POST",
+                         handler = .createProcessGraph)
+  
+  Session$createEndpoint(path = "/jobs",
+                         method = "GET",
+                         handler = .listAllJobs,
+                         filter = TRUE)
+  
+  Session$createEndpoint(path = "/jobs",
+                         method = "POST",
+                         handler = .createNewJob,
+                         filter = TRUE)
+  
+  Session$createEndpoint(path = "/jobs/{job_id}",
+                         method = "GET",
+                         handler = .getJobById,
+                         filter = TRUE)
+  
+  Session$createEndpoint(path = "/jobs/{job_id}/results",
+                         method = "POST",
+                         handler = .startJob,
+                         filter = TRUE)
+  
+  Session$createEndpoint(path = "/jobs/{job_id}/results",
+                         method = "GET",
+                         handler = .getJobResults,
+                         filter = TRUE)
+  
+  Session$createEndpoint(path = "/jobs/{job_id}/{file}",
+                         method = "GET",
+                         handler = .getJobFiles,
+                         filter = TRUE)
+  
+  Session$createEndpoint(path = "/credentials/basic",
+                         method = "GET",
+                         handler = .login_basic)
+  
+  Session$createEndpoint(path = "/result",
+                         method = "POST",
+                         handler = .executeSynchronous,
+                         filter = TRUE)
+  
+Session$createEndpoint(
+  path = "/download/list",
+  method = "GET",
+  handler = function(req, res) {
+    shared_dir <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
+    files <- list.files(shared_dir)
 
-  Session$createEndpoint(
-    path = "/file_formats",
-    method = "GET",
-    handler = .file_formats
-  )
-
-  Session$createEndpoint(
-    path = "/conformance",
-    method = "GET",
-    handler = .conformance
-  )
-
-  Session$createEndpoint(
-    path = "/collections",
-    method = "GET",
-    handler = .collections
-  )
-
-  Session$createEndpoint(
-    path = "/collections/{collection_id}",
-    method = "GET",
-    handler = .collectionId
-  )
-
-  Session$createEndpoint(
-    path = "/processes",
-    method = "GET",
-    handler = .processes
-  )
-
-  Session$createEndpoint(
-    path = "/process_graphs",
-    method = "POST",
-    handler = .createProcessGraph
-  )
-
-  Session$createEndpoint(
-    path = "/jobs",
-    method = "GET",
-    handler = .listAllJobs,
-    filter = TRUE
-  )
-
-  Session$createEndpoint(
-    path = "/jobs",
-    method = "POST",
-    handler = .createNewJob,
-    filter = TRUE
-  )
-
-  Session$createEndpoint(
-    path = "/jobs/{job_id}",
-    method = "GET",
-    handler = .getJobById,
-    filter = TRUE
-  )
-
-  Session$createEndpoint(
-    path = "/jobs/{job_id}/results",
-    method = "POST",
-    handler = .startJob,
-    filter = TRUE
-  )
-
-  Session$createEndpoint(
-    path = "/jobs/{job_id}/results",
-    method = "GET",
-    handler = .getJobResults,
-    filter = TRUE
-  )
-
-  Session$createEndpoint(
-    path = "/jobs/{job_id}/{file}",
-    method = "GET",
-    handler = .getJobFiles,
-    filter = TRUE
-  )
-
-  Session$createEndpoint(
-    path = "/credentials/basic",
-    method = "GET",
-    handler = .login_basic
-  )
-
-  Session$createEndpoint(
-    path = "/result",
-    method = "POST",
-    handler = .executeSynchronous,
-    filter = TRUE
-  )
-
-  Session$createEndpoint(
-    path = "/download/list",
-    method = "GET",
-    handler = function(req, res) {
-      shared_dir <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
-      files <- list.files(shared_dir)
-      return(list(files = files))
+    tifs <- files[grepl("\\.tif(f)?$", files, ignore.case = TRUE)]
+    pred <- "prediction.tif"
+    if (!pred %in% files && length(tifs) >= 1) {
+      file.copy(
+        from = file.path(shared_dir, tifs[1]),
+        to = file.path(shared_dir, pred),
+        overwrite = TRUE
+      )
     }
-  )
+    files <- list.files(shared_dir)
+    files <- files[!grepl("^cube_.*\\.tif(f)?$", files, ignore.case = TRUE)]
+    return(list(files = files))
+  }
+)
+
 
   Session$createEndpoint(
     path = "/download/{filename}",
     method = "GET",
-    handler = function(filename, req, res) {
+    handler = function(req, res, filename) {
       message("Download requested for filename: ", filename)
-      return(download(filename, res))
+      tryCatch({
+        return(download(filename, res))
+      }, error = function(e) {
+        err <- handleError(e)
+        res$status <- 500
+        res$setHeader("Content-Type", "application/json; charset=utf-8")
+        res$body <- charToRaw(jsonlite::toJSON(err, auto_unbox = TRUE))
+        return(res)
+      })
     }
   )
+
+  Session$createEndpoint(
+  path = "/favicon.ico",
+  method = "GET",
+  handler = function(req, res) {
+    res$status <- 204
+    return(res)
+  },
+  filter = FALSE
+  )
+
 
   # assign data collection
   Session$assignData(sentinel_s2_l2a_cogs)
@@ -392,4 +437,5 @@ addEndpoint <- function() {
   Session$assignProcess(mlm_class_mlp)
   Session$assignProcess(mlm_class_lighttae)
   Session$assignProcess(mlm_class_stgf)
+  Session$assignProcess(load_stac_ml)
 }
