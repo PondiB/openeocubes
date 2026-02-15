@@ -288,13 +288,13 @@ SessionInstance <- R6Class(
               file.path(dir, basename(tempfile(fileext = ".nc")))
             )
           } else if (format == "GTiff") {
-            message("GeoTiff_output erkannt in der session ")
+            message("GeoTiff_output detected in the session ")
             out_files <- gdalcubes::write_tif(job$results, dir = dir)
           } else {
             throwError("FormatUnsupported")
           }
         }
-        message("finished eingeleitet")
+        message("Done. The result can be downloaded.")
        
         shared_dir <- Sys.getenv("SHARED_TEMP_DIR", unset = NA)
         
@@ -304,7 +304,7 @@ SessionInstance <- R6Class(
           if (length(existing) > 0) {
             target <- file.path(shared_dir, basename(existing))
             file.copy(existing, target, overwrite = TRUE)
-            message("Copied job results to shared download dir: ", shared_dir)
+            message("Copied job results to download dir")
           } else {
             message("runJob: no existing output files to copy.")
           }
