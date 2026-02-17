@@ -163,7 +163,7 @@ rf_ll <- terra::project(rf, tmpl_ll, method = "near")
 rf_st <- st_as_stars(rf_ll)
 id_vec <- levels(rf_ll)[[1]]$ID
 label_vec <- levels(rf_ll)[[1]]$label
-rf_st[[1]] <- factor(as.integer(rf_st[[1]]), levels = id_vec,labels = label_vec)
+rf_st[[1]] <- factor(as.integer(rf_st[[1]]), levels = id_vec, labels = label_vec)
 
 pal <- c(
   "barley" = "#d73027", 
