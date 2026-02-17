@@ -28,10 +28,10 @@ aoi_bbox
 datacube_crop <- p$load_collection(
   id = "sentinel-s2-l2a-cogs",
   spatial_extent = list(
-    west  = as.numeric(aot_bb_llox["xmin"]),
-    south = as.numeric(aot_bb_llox["ymin"]),
-    east  = as.numeric(aot_bb_llox["xmax"]),
-    north = as.numeric(aot_bb_llox["ymax"]),
+    west  = as.numeric(aot_bbox["xmin"]),
+    south = as.numeric(aot_bbox["ymin"]),
+    east  = as.numeric(aot_bbox["xmax"]),
+    north = as.numeric(aot_bbox["ymax"]),
     crs   = 4326
   ),
   temporal_extent = c("2017-03-01", "2017-05-30"),
