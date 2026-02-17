@@ -27,11 +27,11 @@ aoi_bbox
 # Load a Sentinel-2 data cube covering the training area
 datacube_crop <- p$load_collection(
   id = "sentinel-s2-l2a-cogs",
-  spatial_extent <- list(
-    west  = as.numeric(aot_bbox["xmin"]),
-    south = as.numeric(aot_bbox["ymin"]),
-    east  = as.numeric(aot_bbox["xmax"]),
-    north = as.numeric(aot_bbox["ymax"]),
+  spatial_extent = list(
+    west  = as.numeric(aot_bb_llox["xmin"]),
+    south = as.numeric(aot_bb_llox["ymin"]),
+    east  = as.numeric(aot_bb_llox["xmax"]),
+    north = as.numeric(aot_bb_llox["ymax"]),
     crs   = 4326
   ),
   temporal_extent = c("2017-03-01", "2017-05-30"),
