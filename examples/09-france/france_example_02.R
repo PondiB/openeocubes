@@ -18,12 +18,12 @@ aoi <- ("../train_data/aoi_full.geojson")
 
 trainings_data <- sf::st_read(training_data)
 transfor_aot <- sf::st_transform(trainings_data, 4326)
-aot_bb_llox <- sf::st_bbox(transfor_aot)
+aot_bbox <- sf::st_bbox(transfor_aot)
 
 aoi_data <- sf::st_read(aoi, quiet = TRUE)
 aoi_transform <- sf::st_transform(aoi_data, 4326)
-aoi_bb_llox <- sf::st_bbox(aoi_transform)
-aoi_bb_llox
+aoi_bbox <- sf::st_bbox(aoi_transform)
+aoi_bbox
 # Load a Sentinel-2 data cube covering the training area
 datacube_crop <- p$load_collection(
   id = "sentinel-s2-l2a-cogs",
@@ -41,10 +41,10 @@ datacube_crop <- p$load_collection(
 datacube_aoi <- p$load_collection(
   id = "sentinel-s2-l2a-cogs",
   spatial_extent = list(
-    west  = as.numeric(aoi_bb_llox["xmin"]),
-    south = as.numeric(aoi_bb_llox["ymin"]),
-    east  = as.numeric(aoi_bb_llox["xmax"]),
-    north = as.numeric(aoi_bb_llox["ymax"]),
+    west  = as.numeric(aoi_bbox["xmin"]),
+    south = as.numeric(aoi_bbox["ymin"]),
+    east  = as.numeric(aoi_bbox["xmax"]),
+    north = as.numeric(aoi_bbox["ymax"]),
     crs   = 4326
   ),
   temporal_extent = c("2017-03-01", "2017-05-30"),
