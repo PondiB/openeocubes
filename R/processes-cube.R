@@ -49,7 +49,6 @@ datacube_schema <- function() {
 eo_datacube <- datacube_schema()
 
 
-
 #' Vector datacube_schema
 #' @description Return a list with datacube description and schema
 #'
@@ -64,7 +63,6 @@ datacube_schema <- function() {
 
 #' return object for the processes
 vec_datacube <- datacube_schema()
-
 
 
 #' load collection
@@ -232,9 +230,7 @@ load_collection <- Process$new(
 )
 
 
-
-
-#' aggregate temporal period
+#' aggregate spatial
 aggregate_spatial <- Process$new(
   id = "aggregate_spatial",
   description = "Aggregates statistics for one or more geometries (e.g. zonal statistics for polygons) over the spatial dimensions. The given data cube can have multiple additional dimensions and for all these dimensions results will be computed individually.",
@@ -514,20 +510,24 @@ aggregate_spatial <- Process$new(
 
     message("Training data is loaded")
     if (is.character(geometries)) {
-      tryCatch({
-        geometries <- geojsonsf::geojson_sf(geometries)
-        message("Geometries successfully read as GeoJSON string")
-      }, error = function(e) {
-        tryCatch({
-          geometries <- sf::read_sf(geometries)
-        }, error = function(e2) {
-          stop("Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ", e2$message)
-        })
-      })
-
+      tryCatch(
+        {
+          message("load")
+          geometries <- geojsonsf::geojson_sf(geometries)
+        },
+        error = function(e) {
+          tryCatch(
+            {
+              geometries <- sf::read_sf(geometries)
+            },
+            error = function(e2) {
+              stop("Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ", e2$message)
+            }
+          )
+        }
+      )
     }
-    
-    message("Initial geometries type: ", paste(class(geometries), collapse = ", "))
+
     if (is.list(geometries) && !inherits(geometries, "sf")) {
       geometries <- jsonlite::toJSON(geometries, auto_unbox = TRUE)
       geometries <- geojsonsf::geojson_sf(geometries)
@@ -782,7 +782,6 @@ filter_bbox <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, extent, job) {
-
     crs <- gdalcubes::srs(data)
     nw <- c(extent$west, extent$north)
     sw <- c(extent$west, extent$south)
@@ -826,7 +825,6 @@ filter_spatial <- Process$new(
     return(cube)
   }
 )
-
 
 
 #' filter temporal
@@ -921,7 +919,7 @@ ndvi <- Process$new(
     if(!is.null(target_band)) {
       cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = target_band, keep_bands = TRUE)
     } else {
-    cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = "NDVI", keep_bands = FALSE)
+      cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = "NDVI", keep_bands = FALSE)
     }
     # Log and return the result
     message("NDVI calculated ....")
