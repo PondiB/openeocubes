@@ -145,15 +145,23 @@ load_collection <- Process$new(
     ymax <- as.numeric(spatial_extent$north)
     message("After Spatial extent ...")
 
+    # Use a configurable target ground resolution (in meters), defaulting to 30 m
+    # This can be overridden with: options(openeo.target_resolution = <value_in_meters>)
+    target_resolution_m <- getOption("openeo.target_resolution", 30)
+
     if(crs == 4326){
       lat_center <- (ymin + ymax) / 2
-      dx_value <- 30/(111320*cos(lat_center*pi/180))
-      dy_value <- 30/111320
-      message("Calculated dx and dy for lat/lon CRS: ", dx_value, " , ", dy_value)
+      # Approximate meters per degree at the latitude of the scene center
+      meters_per_deg_lon <- 111320 * cos(lat_center * pi / 180)
+      meters_per_deg_lat <- 111320
+      dx_value <- target_resolution_m / meters_per_deg_lon
+      dy_value <- target_resolution_m / meters_per_deg_lat
+      message("Calculated dx and dy for lat/lon CRS (target ", target_resolution_m,
+              " m): ", dx_value, " , ", dy_value)
     }else{
-      dx_value <- 30
-      dy_value <- 30
-      message("Using dx and dy of 30 for projected CRS")
+      dx_value <- target_resolution_m
+      dy_value <- target_resolution_m
+      message("Using dx and dy of ", target_resolution_m, " m for projected CRS")
     }
 
     # spatial extent for stac call
