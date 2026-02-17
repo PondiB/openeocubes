@@ -361,6 +361,15 @@ aggregate_spatial <- Process$new(
           } else {
             g <- sf::st_make_valid(g)
           }
+          
+          n_final_invalid <- sum(!sf::st_is_valid(g))
+          message("After make_valid: ", n_final_invalid, " invalid geometries remain")
+          
+          if (n_final_invalid > 0) {
+            message("Removing ", n_final_invalid, " geometries that could not be repaired")
+            g <- g[sf::st_is_valid(g), , drop = FALSE]
+            message("After removing invalid: ", nrow(g), " valid geometries remain")
+          }
         }
       }
       
