@@ -103,9 +103,9 @@ end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
 
-##The result is ready when, after: GeoTiff_output detected in the session, the following is displayed in the terminal: Done.
-#The result can be downloaded.
-# Copied job results to download dir
+## The result is ready once the processing job has finished and the output GeoTIFF is available.
+# After the job has completed successfully, the result data can be downloaded.
+# At that point, copy or download the job results to your local download directory.
 
 prediction <- ("..insert model..")
 r <- rast(prediction)
