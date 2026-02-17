@@ -243,7 +243,7 @@ aggregate_spatial <- Process$new(
   id = "aggregate_spatial",
   description = "Aggregates statistics for one or more geometries (e.g. zonal statistics for polygons) over the spatial dimensions. The given data cube can have multiple additional dimensions and for all these dimensions results will be computed individually.",
   categories = as.array("aggregate", "cubes"),
-  summary = "Temporal aggregations based on calendar hierarchies",
+  summary = "Spatial aggregations over geometries",
   parameters = list(
     Parameter$new(
       name = "data",
