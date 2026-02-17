@@ -143,7 +143,7 @@ sentinel_s2_l2a_cogs <- Collection$new(
   description = "Sentinel-2a and Sentinel-2b imagery, processed to Level 2A (Surface Reflectance) and converted to Cloud-Optimized GeoTIFFs.",
   spatialExtent = list(-180, -90, 180, 90),
   temporalExtent = list("2015-06-27T10:25:31.456000Z", "null"),
-  bands = c("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8", "B8A", "B9", "B10", "B11", "B12", "AOT", "WVP","SCL"),
+  bands = c("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12", "AOT", "WVP","SCL"),
   constellation = list("sentinel-2")
 )
 
@@ -154,7 +154,7 @@ sentinel_s2_l2a <- Collection$new(
   description = "Sentinel-2a and Sentinel-2b imagery, processed to Level 2A (Surface Reflectance).",
   spatialExtent = list(-180, -90, 180, 90),
   temporalExtent = list("2015-06-27T10:25:31.456000Z", "null"),
-  bands = c("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8", "B8A", "B9", "B10", "B11", "B12", "AOT", "WVP","SCL"),
+  bands = c("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12", "AOT", "WVP","SCL"),
   constellation = list("sentinel-2")
 )
 
@@ -166,7 +166,7 @@ sentinel_s2_l1c <- Collection$new(
   description = "Sentinel-2a and Sentinel-2b imagery, processed to Level 1C (Top-Of-Atmosphere Geometrically Corrected).",
   spatialExtent = list(-180, -90, 180, 90),
   temporalExtent = list("2015-06-27T10:25:31.456000Z","null"),
-  bands = c("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B8", "B8A", "B9", "B10", "B11", "B12"),
+  bands = c("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12"),
   constellation = list("sentinel-2")
 )
 
