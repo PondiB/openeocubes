@@ -147,8 +147,8 @@ load_collection <- Process$new(
 
     if(crs == 4326){
       lat_center <- (ymin + ymax) / 2
-      dx_value <- 30/(111132*cos(lat_center*pi/180))
-      dy_value <- 30/111132
+      dx_value <- 30/(111320*cos(lat_center*pi/180))
+      dy_value <- 30/111320
       message("Calculated dx and dy for lat/lon CRS: ", dx_value, " , ", dy_value)
     }else{
       dx_value <- 30
