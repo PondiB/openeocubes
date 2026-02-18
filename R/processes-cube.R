@@ -145,6 +145,25 @@ load_collection <- Process$new(
     ymax <- as.numeric(spatial_extent$north)
     message("After Spatial extent ...")
 
+    # Use a configurable target ground resolution (in meters), defaulting to 30 m
+    # This can be overridden with: options(openeo.target_resolution = <value_in_meters>)
+    target_resolution_m <- getOption("openeo.target_resolution", 30)
+
+    if(crs == 4326){
+      lat_center <- (ymin + ymax) / 2
+      # Approximate meters per degree at the latitude of the scene center
+      meters_per_deg_lon <- 111320 * cos(lat_center * pi / 180)
+      meters_per_deg_lat <- 111320
+      dx_value <- target_resolution_m / meters_per_deg_lon
+      dy_value <- target_resolution_m / meters_per_deg_lat
+      message("Calculated dx and dy for lat/lon CRS (target ", target_resolution_m,
+              " m): ", dx_value, " , ", dy_value)
+    }else{
+      dx_value <- target_resolution_m
+      dy_value <- target_resolution_m
+      message("Using dx and dy of ", target_resolution_m, " m for projected CRS")
+    }
+
     # spatial extent for stac call
     xmin_stac <- xmin
     ymin_stac <- ymin
@@ -192,8 +211,8 @@ load_collection <- Process$new(
     crs <- paste(crs, collapse = ":")
     v.overview <- gdalcubes::cube_view(
       srs = crs,
-      dx = 30,
-      dy = 30,
+      dx = dx_value,
+      dy = dy_value,
       dt = "P1M",
       aggregation = "median",
       resampling = "average",
@@ -219,7 +238,7 @@ load_collection <- Process$new(
 )
 
 
-#' aggregate temporal period
+#' aggregate spatial
 aggregate_spatial <- Process$new(
   id = "aggregate_spatial",
   description = "Aggregates statistics for one or more geometries (e.g. zonal statistics for polygons) over the spatial dimensions. The given data cube can have multiple additional dimensions and for all these dimensions results will be computed individually.",
@@ -307,34 +326,148 @@ aggregate_spatial <- Process$new(
     }
 
     repair_geoms <- function(g) {
+      message("repair_geoms: Starting with ", nrow(g), " features")
+      
       g <- sf::st_zm(g, drop = TRUE, what = "ZM")
-
-      if (requireNamespace("lwgeom", quietly = TRUE)) {
-        g <- lwgeom::st_make_valid(g)
-      } else {
-        g <- sf::st_make_valid(g)
+      
+      n_invalid <- sum(!sf::st_is_valid(g))
+      if (n_invalid > 0) {
+        message("Found ", n_invalid, " invalid geometries, attempting repair...")
+        
+        crs_code <- tryCatch(sf::st_crs(g)$epsg, error = function(e) NA_integer_)
+        is_latlon <- !is.na(crs_code) && crs_code == 4326
+        
+        if (is_latlon) {
+          message("Round-trip transformation...")
+          original_crs <- sf::st_crs(g)
+          g <- sf::st_transform(g, 3857)
+          g <- sf::st_transform(g, original_crs)
+          
+          n_still_invalid <- sum(!sf::st_is_valid(g))
+          message("After round-trip: ", n_still_invalid, " invalid geometries remain")
+          
+          if (n_still_invalid > 0) {
+            message("Applying make_valid to remaining invalid geometries...")
+            if (requireNamespace("lwgeom", quietly = TRUE)) {
+              g <- lwgeom::st_make_valid(g)
+            } else {
+              g <- sf::st_make_valid(g)
+            }
+            
+            n_final_invalid <- sum(!sf::st_is_valid(g))
+            message("After make_valid: ", n_final_invalid, " invalid geometries remain")
+            
+            if (n_final_invalid > 0) {
+              message("Removing ", n_final_invalid, " geometries that could not be repaired")
+              g <- g[sf::st_is_valid(g), , drop = FALSE]
+              message("After removing invalid: ", nrow(g), " valid geometries remain")
+            }
+          }
+        } else {
+          if (requireNamespace("lwgeom", quietly = TRUE)) {
+            g <- lwgeom::st_make_valid(g)
+          } else {
+            g <- sf::st_make_valid(g)
+          }
+          
+          n_final_invalid <- sum(!sf::st_is_valid(g))
+          message("After make_valid: ", n_final_invalid, " invalid geometries remain")
+          
+          if (n_final_invalid > 0) {
+            message("Removing ", n_final_invalid, " geometries that could not be repaired")
+            g <- g[sf::st_is_valid(g), , drop = FALSE]
+            message("After removing invalid: ", nrow(g), " valid geometries remain")
+          }
+        }
       }
-
+      
       gt <- sf::st_geometry_type(g)
-
-      if (all(gt %in% c("POINT", "MULTIPOINT"))) {
-        g <- suppressWarnings(sf::st_collection_extract(g, "POINT", warn = FALSE))
-        if (any(sf::st_is_empty(g))) {
-          n_empty <- sum(sf::st_is_empty(g))
-          message("drop empty point geometries after make_valid/extract: ", n_empty)
-          g <- g[!sf::st_is_empty(g), , drop = FALSE]
+      message("Geometry types after repair: ", paste(unique(gt), collapse = ", "))
+      
+      if (any(gt == "GEOMETRYCOLLECTION")) {
+        message("Found ", sum(gt == "GEOMETRYCOLLECTION"), " GEOMETRYCOLLECTION features")
+        
+        non_coll_types <- gt[gt != "GEOMETRYCOLLECTION"]
+        
+        if (length(non_coll_types) > 0) {
+          is_point_data <- all(non_coll_types %in% c("POINT", "MULTIPOINT"))
+          is_polygon_data <- all(non_coll_types %in% c("POLYGON", "MULTIPOLYGON"))
+          
+          if (is_point_data) {
+            extract_type <- "POINT"
+            message("Detected point data")
+          } else if (is_polygon_data) {
+            extract_type <- "POLYGON"
+            message("Detected polygon data")
+          } else {
+            type_counts <- table(non_coll_types)
+            most_common <- names(type_counts)[which.max(type_counts)]
+            
+            if (most_common %in% c("POINT", "MULTIPOINT")) {
+              extract_type <- "POINT"
+              message("Mixed types detected, defaulting to POINT")
+            } else {
+              extract_type <- "POLYGON"
+              message("Mixed types detected, defaulting to POLYGON")
+            }
+          }
+        } else {
+          extract_type <- "POLYGON"
+          message("Only GEOMETRYCOLLECTION present, defaulting to POLYGON")
         }
-      } else {
-        g <- suppressWarnings(sf::st_collection_extract(g, "POLYGON", warn = FALSE))
-        if (any(sf::st_is_empty(g))) {
-          n_empty <- sum(sf::st_is_empty(g))
-          message("drop empty polygon geometries after make_valid/extract: ", n_empty)
-          g <- g[!sf::st_is_empty(g), , drop = FALSE]
+        
+        is_collection <- gt == "GEOMETRYCOLLECTION"
+        
+        if (sum(is_collection) > 0 && sum(!is_collection) > 0) {
+          message("Separating GEOMETRYCOLLECTION from other geometries...")
+          
+          collections <- g[is_collection, , drop = FALSE]
+          normal <- g[!is_collection, , drop = FALSE]
+          
+          message("Attempting to extract ", extract_type, " from ", nrow(collections), " collections...")
+          collections <- suppressWarnings(sf::st_collection_extract(collections, extract_type, warn = FALSE))
+          
+          if (any(sf::st_is_empty(collections))) {
+            n_empty_coll <- sum(sf::st_is_empty(collections))
+            message("Dropping ", n_empty_coll, " empty geometries from collections")
+            collections <- collections[!sf::st_is_empty(collections), , drop = FALSE]
+          }
+          
+          if (nrow(collections) > 0) {
+            g <- rbind(normal, collections)
+            message("Kept ", nrow(normal), " normal + ", nrow(collections), " extracted = ", nrow(g), " total")
+          } else {
+            g <- normal
+            message("All collections were empty, kept only ", nrow(g), " normal geometries")
+          }
+          
+        } else if (all(is_collection)) {
+          message("All geometries are GEOMETRYCOLLECTION, extracting ", extract_type, "...")
+          g <- suppressWarnings(sf::st_collection_extract(g, extract_type, warn = FALSE))
+          
+          if (any(sf::st_is_empty(g))) {
+            n_empty <- sum(sf::st_is_empty(g))
+            message("Dropping ", n_empty, " empty geometries after extraction")
+            g <- g[!sf::st_is_empty(g), , drop = FALSE]
+          }
         }
       }
-
-      g <- sf::st_set_precision(g, 1e-2)
-      g
+      # ====================================================================
+      
+      message("repair_geoms: Ending with ", nrow(g), " features")
+      
+      crs_code <- tryCatch(sf::st_crs(g)$epsg, error = function(e) NA_integer_)
+      if (!is.na(crs_code) && crs_code == 4326) {
+        message("Skipping precision for lat/lon CRS (EPSG:4326)")
+      } else {
+        precision <- 1e-2
+        if (nrow(g) > 0) {
+          g <- sf::st_set_precision(g, precision)
+          message("Setting precision for projected CRS to ", precision)
+        }
+      }
+      
+      return(g)
     }
 
 
@@ -360,17 +493,18 @@ aggregate_spatial <- Process$new(
       log_crs("cube", sf::st_crs(cube_crs))
       log_bbox("train", geoms)
       log_bbox("cube ", bbox_sfc)
-
+      message("Filtering geometries to cube extent with mode '", mode, "' and buffer ", buffer, "...")
       if (nrow(geoms) == 0) {
         return(list(filtered = geoms, n_in = 0, n_kept = 0))
       }
-
+      message("n geometries before filtering: ", nrow(geoms))
       sel <- switch(mode,
         "intersects" = sf::st_intersects(geoms, bbox_sfc, sparse = FALSE)[, 1],
         "within"     = sf::st_within(geoms, bbox_sfc, sparse = FALSE)[, 1]
       )
+      message("n geometries intersecting cube bbox: ", sum(sel))
       kept <- geoms[sel, , drop = FALSE]
-
+      message("n geometries kept after initial filter: ", nrow(kept))
       if (nrow(kept) == 0 && nrow(geoms) > 0) {
         bbox_buf <- sf::st_buffer(bbox_sfc, 0.1)
         sel2 <- sf::st_intersects(geoms, bbox_buf, sparse = FALSE)[, 1]
@@ -380,13 +514,13 @@ aggregate_spatial <- Process$new(
           kept <- kept2
         }
       }
-
+      message("n geometries kept after buffer check: ", nrow(kept))
       if (trim && nrow(kept) > 0) {
         kept$..orig_row <- seq_len(nrow(kept))
         kept <- suppressWarnings(sf::st_intersection(kept, bbox_sfc))
         kept$..orig_row <- NULL
       }
-
+      message("n geometries after trimming: ", nrow(kept))
       list(filtered = kept, n_in = nrow(geoms), n_kept = nrow(kept))
     }
 
@@ -418,10 +552,7 @@ aggregate_spatial <- Process$new(
     if (!inherits(geometries, "sf")) stop("Geometries must be either a GeoJSON string or an sf object")
 
     message("n features: ", nrow(geometries))
-    message(
-      "empty: ", sum(sf::st_is_empty(geometries)),
-      " | invalid: ", sum(!sf::st_is_valid(geometries))
-    )
+    message("empty: ", sum(sf::st_is_empty(geometries))," | invalid: ", sum(!sf::st_is_valid(geometries)))
 
     geometries <- ensure_crs(geometries, "geometries (input)")
 
@@ -430,14 +561,14 @@ aggregate_spatial <- Process$new(
 
     reducer_type <- if (!is.null(reducer)) {
       switch(reducer,
-        "mean"   = base::mean,
+        "mean" = base::mean,
         "median" = stats::median,
-        "min"    = base::min,
-        "max"    = base::max,
-        "sum"    = base::sum,
+        "min" = base::min,
+        "max" = base::max,
+        "sum" = base::sum,
         "count"  = function(x) sum(!is.na(x)),
-        "sd"     = stats::sd,
-        "var"    = stats::var,
+        "sd" = stats::sd,
+        "var" = stats::var,
         stop("The specified reducer is not supported")
       )
     } else {
@@ -451,8 +582,8 @@ aggregate_spatial <- Process$new(
     cube_crs <- gdalcubes::srs(data)
     dims <- gdalcubes::dimensions(data)
     cube_extent <- list(
-      left   = dims$x$low,  right = dims$x$high,
-      bottom = dims$y$low,  top   = dims$y$high
+      left = dims$x$low, right = dims$x$high,
+      bottom = dims$y$low, top = dims$y$high
     )
     log_crs("cube", sf::st_crs(cube_crs))
 
@@ -504,26 +635,26 @@ aggregate_spatial <- Process$new(
     vec_cube <- tryCatch(
       {
         gdalcubes::extract_geom(
-          cube        = data,
-          sf          = geometries_in_bbox,
-          FUN         = reducer_type,
+          cube = data,
+          sf = geometries_in_bbox,
+          FUN = reducer_type,
           reduce_time = FALSE,
-          merge       = TRUE,
-          drop_geom   = FALSE
+          merge = TRUE,
+          drop_geom = FALSE
         )
       },
       error = function(e) {
         diag <- list(
-          error_message            = conditionMessage(e),
-          cube_srs                 = tryCatch(gdalcubes::srs(data), error = function(.) NA),
-          cube_extent              = cube_extent,
-          n_geoms_input            = nrow(geometries),
-          n_geoms_in_bbox          = nrow(geometries_in_bbox),
-          geoms_crs                = tryCatch(sf::st_crs(geometries)$input, error = function(.) NA),
-          geoms_bbox_is_na         = tryCatch(any(is.na(sf::st_bbox(geometries))), error = function(.) NA),
-          geoms_in_bbox_crs        = tryCatch(sf::st_crs(geometries_in_bbox)$input, error = function(.) NA),
+          error_message = conditionMessage(e),
+          cube_srs = tryCatch(gdalcubes::srs(data), error = function(.) NA),
+          cube_extent = cube_extent,
+          n_geoms_input = nrow(geometries),
+          n_geoms_in_bbox = nrow(geometries_in_bbox),
+          geoms_crs = tryCatch(sf::st_crs(geometries)$input, error = function(.) NA),
+          geoms_bbox_is_na = tryCatch(any(is.na(sf::st_bbox(geometries))), error = function(.) NA),
+          geoms_in_bbox_crs = tryCatch(sf::st_crs(geometries_in_bbox)$input, error = function(.) NA),
           geoms_in_bbox_bbox_is_na = tryCatch(any(is.na(sf::st_bbox(geometries_in_bbox))), error = function(.) NA),
-          reducer_is_func          = is.function(reducer_type)
+          reducer_is_func = is.function(reducer_type)
         )
         message("extract_geom() FAILED. Diagnostics:\n", paste(utils::capture.output(str(diag)), collapse = "\n"))
         stop("extract_geom() failed: ", conditionMessage(e))
@@ -802,12 +933,11 @@ ndvi <- Process$new(
     )
 
     # Apply the NDVI calculation
-    if (is.null(target_band)) {
-      cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = "NDVI", keep_bands = FALSE)
-    } else {
+    if(!is.null(target_band)) {
       cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = target_band, keep_bands = TRUE)
+    } else {
+      cube <- gdalcubes::apply_pixel(data, ndvi_formula, names = "NDVI", keep_bands = FALSE)
     }
-
     # Log and return the result
     message("NDVI calculated ....")
     message(gdalcubes::as_json(cube))
