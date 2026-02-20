@@ -10,11 +10,11 @@ login(user = "user", password = "password")
 # Get a list of supported file formats (for input/output)
 formats <- list_file_formats()
 # Path to the GeoJSON training data (containing points and labels)
-training_data <-(".../path_to_the_trainings_data")
+training_data <-("../train_data/land_train_data.geojson")
 
 # Load a Sentinel-2 data cube covering the training area
 datacube_crop <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
     west = 385305,
     south = 5702894,
@@ -22,12 +22,12 @@ datacube_crop <- p$load_collection(
     north = 5720076,
     crs = 25832
   ),
-  temporal_extent = c("2021-06-01", "2021-07-30"),
-  bands = c("B02", "B03", "B04", "B08")
+  temporal_extent = c("2021-06-01T00:00:00Z", "2021-07-30T23:59:59Z"),
+  bands = c("blue", "green", "red", "nir")
 )
 # Load a Sentinel-2 data cube covering the area of interest (AOI) for prediction
 datacube_aoi <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
     west = 402920.7,
     south = 5755389.9,
@@ -35,8 +35,8 @@ datacube_aoi <- p$load_collection(
     north = 5759460.3,
     crs = 25832
   ),
-  temporal_extent = c("2021-06-01", "2021-07-30"),
-  bands = c("B02", "B03", "B04", "B08")
+  temporal_extent = c("2021-06-01T00:00:00Z", "2021-07-30T23:59:59Z"),
+  bands = c("blue", "green", "red", "nir")
 )
 
 

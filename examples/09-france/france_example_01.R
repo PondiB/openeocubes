@@ -1,7 +1,7 @@
 #'@description
 #' Runs an example workflow for crop type classification using a classical
 #' machine learning algorithm (e.g. Random Forest).
-library(openeo) 
+library(openeo)
 library(terra)
 library(sf)
 library(grid)
@@ -17,57 +17,56 @@ login(user = "user", password = "password")
 formats <- list_file_formats()
 # Path to the GeoJSON training data (containing points and labels)
 aoi <- sf::st_read("../train_data/aot_.geojson", quiet = TRUE)
-training_data <- sf::st_read("../train_data/train_data.geojson", quiet = TRUE)
-
-trainings_data <- sf::st_read(training_data)
-transfor_aot <- sf::st_transform(trainings_data, 25832)
+train_data <- "../train_data/train_data.geojson"
+train_data_r <- sf::st_read(train_data)
+transfor_aot <- sf::st_transform(train_data_r, 25832)
 aot_bbox <- sf::st_bbox(transfor_aot)
 
-aoi_data <- sf::st_read(aoi, quiet = TRUE)
-aoi_transform <- sf::st_transform(aoi_data, 25832)
-aoi_bbox <- sf::st_bbox(aoi_transform)  
+aoi_transform <- sf::st_transform(aoi, 25832)
+aoi_bbox <- sf::st_bbox(aoi_transform)
+
 
 #'At this point, we only have data for 2 out of 4 months, and this data is taken automatically.
 #Therefore, the time coverage between AOT and AOI coincides.
 datacube_crop <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
-    west  = as.numeric(aot_bbox["xmin"]),  
-    south = as.numeric(aot_bbox["ymin"]),  
-    east  = as.numeric(aot_bbox["xmax"]),  
-    north = as.numeric(aot_bbox["ymax"]), 
-    crs   = 25832                    
+    west  = as.numeric(aot_bbox["xmin"]),
+    south = as.numeric(aot_bbox["ymin"]),
+    east  = as.numeric(aot_bbox["xmax"]),
+    north = as.numeric(aot_bbox["ymax"]),
+    crs   = 25832
   )
   ,
-  temporal_extent = c("2017-03-01", "2017-06-30"),
-  bands = c("B02", "B03", "B04", "B08")
+  temporal_extent = c("2017-06-01T00:00:00Z", "2017-07-31T23:59:59Z"),
+  bands = c("blue", "green", "red", "nir")
 )
 #Area of Interst Data Cube
 datacube_aoi <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
-    west  = as.numeric(aoi_bbox["xmin"]),  
-    south = as.numeric(aoi_bbox["ymin"]),  
-    east  = as.numeric(aoi_bbox["xmax"]),  
-    north = as.numeric(aoi_bbox["ymax"]), 
-    crs   = 25832                    
+    west  = as.numeric(aoi_bbox["xmin"]),
+    south = as.numeric(aoi_bbox["ymin"]),
+    east  = as.numeric(aoi_bbox["xmax"]),
+    north = as.numeric(aoi_bbox["ymax"]),
+    crs   = 25832
   ),
-  temporal_extent = c("2017-06-01", "2017-07-30"),
-  bands = c("B02", "B03", "B04","B08")
+  temporal_extent = c("2017-06-01T00:00:00Z", "2017-07-31T23:59:59Z"),
+  bands = c("blue", "green", "red","nir")
 )
 
 
 ndvi_aoi <- p$ndvi(
   data = datacube_aoi,
-  nir = "B08",
-  red = "B04",
+  nir = "nir",
+  red = "red",
   target_band = "NDVI"
 )
 
 ndvi_crop <- p$ndvi(
   data = datacube_crop,
-  nir = "B08",
-  red = "B04",
+  nir = "nir",
+  red = "red",
   target_band = "NDVI"
 )
 
@@ -76,8 +75,8 @@ datacube_aoi <- p$array_interpolate_linear(ndvi_aoi)
 
 training_dat <- p$aggregate_spatial(
   data = datacube_crop,
-  geometries = training_data,
-  reducer = "mean"   
+  geometries = train_data,
+  reducer = "mean"
 )
 
 tempcnn <- p$mlm_class_tempcnn(
@@ -116,8 +115,8 @@ end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
 
-r <- rast(pre)                    
-plot(r)                            
+r <- rast(pre)
+plot(r)
 table(values(r))
 typeof(r)
 
@@ -147,9 +146,9 @@ train_ll <- sf::st_transform(transfor_aot, 4326)
 #30m spatial resolution
 bb_ll <- sf::st_bbox(aoi_ll)
 lat <- as.numeric(mean(c(bb_ll["ymin"], bb_ll["ymax"])))
-m_per_deg_lat <- 111320                   
-m_per_deg_lon <- 111320 * cos(pi*lat/180) 
-res_m <- terra::res(rf)                   
+m_per_deg_lat <- 111320
+m_per_deg_lon <- 111320 * cos(pi*lat/180)
+res_m <- terra::res(rf)
 res_deg_x <- res_m[1] / m_per_deg_lon
 res_deg_y <- res_m[2] / m_per_deg_lat
 
@@ -166,12 +165,12 @@ label_vec <- levels(rf_ll)[[1]]$label
 rf_st[[1]] <- factor(as.integer(rf_st[[1]]), levels = id_vec,labels = label_vec)
 
 pal <- c(
-  "barley" = "#d73027", 
-  "corn" = "#8c510a", 
-  "orchards" = "#006400", 
-  "permanent meadows" = "#7fc97f", 
-  "rapeseed" = "#1f78b4", 
-  "temporary meadows" = "#ffd92f"  
+  "barley" = "#d73027",
+  "corn" = "#8c510a",
+  "orchards" = "#006400",
+  "permanent meadows" = "#7fc97f",
+  "rapeseed" = "#1f78b4",
+  "temporary meadows" = "#ffd92f"
 )
 
 ##ggplot
@@ -179,7 +178,7 @@ plot <- ggplot() +
   geom_stars(data = rf_st) +
   scale_fill_manual(
     values = pal,
-    breaks = names(pal),    
+    breaks = names(pal),
     labels = names(pal),
     name = "cover",
     drop = FALSE,
@@ -202,8 +201,8 @@ plot <- ggplot() +
     plot.background = element_rect(fill = "white", colour = NA),
     panel.grid.major = element_line(color = "grey92", linewidth = 0.2),
     panel.grid.minor = element_blank(),
-    
-    legend.position = c(0.05, 0.05),     
+
+    legend.position = c(0.05, 0.05),
     legend.justification = c(0, 0),
     legend.direction = "vertical",
     legend.background = element_rect(fill = scales::alpha("white", 0.96), colour = "grey25", linewidth = 0.6),

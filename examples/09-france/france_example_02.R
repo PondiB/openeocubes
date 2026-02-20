@@ -26,7 +26,7 @@ aoi_bb_llox <- sf::st_bbox(aoi_transform)
 aoi_bb_llox
 # Load a Sentinel-2 data cube covering the training area
 datacube_crop <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent <- list(
     west  = as.numeric(aot_bb_llox["xmin"]),
     south = as.numeric(aot_bb_llox["ymin"]),
@@ -34,12 +34,12 @@ datacube_crop <- p$load_collection(
     north = as.numeric(aot_bb_llox["ymax"]),
     crs   = 4326
   ),
-  temporal_extent = c("2017-03-01", "2017-05-30"),
-  bands = c("B02", "B03", "B04", "B08")
+  temporal_extent = c("2017-03-01T00:00:00Z", "2017-07-31T23:59:59Z"),
+  bands = c("blue", "green", "red", "nir")
 )
 # Load a Sentinel-2 data cube covering the area of interest (AOI) for prediction
 datacube_aoi <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
     west  = as.numeric(aoi_bb_llox["xmin"]),
     south = as.numeric(aoi_bb_llox["ymin"]),
@@ -47,8 +47,8 @@ datacube_aoi <- p$load_collection(
     north = as.numeric(aoi_bb_llox["ymax"]),
     crs   = 4326
   ),
-  temporal_extent = c("2017-03-01", "2017-05-30"),
-  bands = c("B02", "B03", "B04","B08")
+  temporal_extent = c("2017-03-01T00:00:00Z", "2017-07-31T23:59:59Z"),
+  bands = c("blue", "green", "red", "nir")
 )
 
 
@@ -57,15 +57,15 @@ datacube_aoi <- p$aggregate_temporal_period(datacube_aoi, period = "month", redu
 
 datacube_aoi <- p$ndvi(
   data = datacube_aoi,
-  nir = "B08",
-  red = "B04",
+  nir = "nir",
+  red = "red",
   target_band = "NDVI"
 )
 
 datacube_crop <- p$ndvi(
   data = datacube_crop,
-  nir = "B08",
-  red = "B04",
+  nir = "nir",
+  red = "red",
   target_band = "NDVI"
 )
 

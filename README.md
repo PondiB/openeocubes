@@ -153,7 +153,7 @@ describe_process(processes$ndvi)
 p = processes()
 
 # load the initial data collection and limit the amount of data loaded
-datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
+datacube_init = p$load_collection(id = "sentinel-2-l2a",
                                 spatial_extent = list(west = -7338335,
                                                       south = -1027138,
                                                       east = -7329987,
@@ -162,13 +162,13 @@ datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
                                 temporal_extent = c("2022-01-01", "2022-12-31"))
 
 # filter the data cube for the desired bands
-datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
+datacube_filtered = p$filter_bands(data = datacube_init, bands = c("red", "nir"))
 
 # aggregate data cube to a year
 datacube_agg = p$aggregate_temporal_period(data = datacube_filtered, period = "year", reducer = "median")
 
 # ndvi calculation
-datacube_ndvi = p$ndvi(data = datacube_agg, red = "B04", nir = "B08")
+datacube_ndvi = p$ndvi(data = datacube_agg, red = "red", nir = "nir")
 
 # supported formats
 formats = list_file_formats()
