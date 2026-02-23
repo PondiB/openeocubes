@@ -147,34 +147,46 @@ ml_fit <- Process$new(
     
     convert_to_wide_format <- function(train_data, target) {
       library(tidyr); library(dplyr); library(sf)
-      band_names <- grep("^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22)$", names(train_data), value = TRUE, perl = TRUE)     
+      
+      band_names <- grep(
+        "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22)$",
+        names(train_data), value = TRUE, perl = TRUE
+      )
       has_ndvi <- "NDVI" %in% colnames(train_data)
       bands_to_use <- c(band_names, if (has_ndvi) "NDVI")
       message("Found bands: ", paste(bands_to_use, collapse = ", "))
       
-      train_data <- train_data %>% sf::st_drop_geometry() %>% dplyr::as_tibble()
+      train_data <- train_data %>%
+        sf::st_drop_geometry() %>%
+        dplyr::as_tibble()
+      
+      time_levels <- sort(unique(train_data$time))
+      train_data  <- train_data %>%
+        dplyr::mutate(time_idx = match(time, time_levels))
       
       train_data_wide <- train_data %>%
-        dplyr::select(fid, time, dplyr::all_of(bands_to_use)) %>%
+        dplyr::select(fid, time_idx, dplyr::all_of(bands_to_use)) %>%
         tidyr::pivot_wider(
-          names_from  = time,
+          names_from  = time_idx,
           values_from = dplyr::all_of(bands_to_use),
-          names_glue  = "{.value}_T{match(time, sort(unique(time)))}"
+          names_glue  = "{.value}_T{time_idx}"   
         )
       
-      time_order <- sort(unique(train_data$time))
-      cols_sorted <- unlist(lapply(seq_along(time_order), function(i) paste0(bands_to_use, "_T", i)))
-      cols_sorted <- c("fid", cols_sorted)
+      cols_sorted <- c("fid", unlist(lapply(
+        seq_along(time_levels),
+        function(i) paste0(bands_to_use, "_T", i)
+      )))
+      cols_sorted <- intersect(cols_sorted, names(train_data_wide))
       train_data_wide <- train_data_wide[, cols_sorted]
       
-      train_data_clean <- train_data_wide %>% dplyr::filter(complete.cases(.))
+      train_data_clean <- train_data_wide %>%
+        dplyr::filter(complete.cases(.))
       
       target_data <- train_data %>%
         dplyr::select(fid, !!rlang::sym(target)) %>%
         dplyr::distinct(fid, .keep_all = TRUE)
       
-      train_data_clean <- dplyr::left_join(train_data_clean, target_data, by = "fid")
-      train_data_clean
+      dplyr::left_join(train_data_clean, target_data, by = "fid")
     }
     
     `%||%` <- function(a, b) if (!is.null(a)) a else b
@@ -203,10 +215,10 @@ ml_fit <- Process$new(
       if ("NDVI" %in% names(training_set)) features_data <- c(features_data, "NDVI")
       
       training_data <- convert_to_wide_format(train_data = training_set, target = target)
+      message("Training data prepared.")
       features <- extract_time_series_features(training_set = training_data,
                                                features_data = features_data,
                                                time_steps = time_steps)
-      
       labels <- as.numeric(as.factor(training_data[[target]]))
       library(torch)
   
