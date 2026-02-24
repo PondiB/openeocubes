@@ -1,5 +1,5 @@
 #load required librarys
-library(openeo) 
+library(openeo)
 library(terra)
 
 # Connect to the openEO backend (in this case, a local backend)
@@ -15,7 +15,7 @@ training_data <-("../train_data/land_train_data.geojson")
 
 # Load a Sentinel-2 data cube covering the training area
 datacube_crop <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-c1-l2a",
   spatial_extent = list(
     west = 385305,
     south = 5702894,
@@ -23,13 +23,13 @@ datacube_crop <- p$load_collection(
     north = 5720076,
     crs = 25832
   ),
-  temporal_extent = c("2021-06-01", "2021-08-30"),
-  bands = c("B02", "B03", "B04", "B08")
+  temporal_extent = c("2021-06-01T00:00:00Z", "2021-08-30T23:59:59Z"),
+  bands = c("blue", "green", "red", "nir")
 )
 datacube_crop <- p$array_interpolate_linear(datacube_crop)
 # Load a Sentinel-2 data cube covering the area of interest (AOI) for prediction
 datacube_aoi <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-c1-l2a",
   spatial_extent = list(
     west = 402920.7,
     south = 5755389.9,
@@ -37,23 +37,23 @@ datacube_aoi <- p$load_collection(
     north = 5759460.3,
     crs = 25832
   ),
-  temporal_extent = c("2021-06-01", "2021-08-30"),
-  bands = c("B02", "B03", "B04", "B08")
+  temporal_extent = c("2021-06-01T00:00:00Z", "2021-08-30T23:59:59Z"),
+  bands = c("blue", "green", "red", "nir")
 )
 datacube_aoi <- p$array_interpolate_linear(datacube_aoi)
 
 # model shell for the tempcnn
 tempcnn <- p$mlm_class_tempcnn(
-  cnn_layers              = list(256L, 256L, 256L),
-  cnn_kernels             = list(7L, 7L, 7L),
-  cnn_dropout_rates       = list(0.2, 0.2, 0.2),
-  dense_layer_nodes       = 256L,
+  cnn_layers = list(256L, 256L, 256L),
+  cnn_kernels = list(7L, 7L, 7L),
+  cnn_dropout_rates = list(0.2, 0.2, 0.2),
+  dense_layer_nodes = 256L,
   dense_layer_dropout_rate= 0.5,
-  epochs                  = 100L,
-  batch_size              = 64L,      
-  optimizer               = "adam",
-  learning_rate           = 1e-3,
-  seed                    = 42L
+  epochs = 100L,
+  batch_size = 64L,
+  optimizer = "adam",
+  learning_rate = 1e-3,
+  seed = 42L
 )
 
 #'
@@ -62,7 +62,7 @@ tempcnn <- p$mlm_class_tempcnn(
 training_dat <- p$aggregate_spatial(data = datacube_crop, geometries = training_data, reducer = "mean")
 
 
-#'@description This is where model training for classification with tempcnn takes place. 
+#'@description This is where model training for classification with tempcnn takes place.
 model <- p$ml_fit(
   model = tempcnn,
   training_set = training_dat,
@@ -85,14 +85,11 @@ result_predict <- p$save_result(
 )
 # Execute the full process chain and measure the execution time
 start.time <- Sys.time()
-pre <- compute_result(result_predict)
+job_id <- openeo::create_job(result_predict, format = "GTiff")
+openeo::start_job(job_id)
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
-# Visualize the prediction result as a raster
-plot(rast(pre))
-r <- rast(pre)
-table(values(r))
 
 
 

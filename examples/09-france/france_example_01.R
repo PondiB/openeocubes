@@ -1,7 +1,7 @@
 #'@description
 #' Runs an example workflow for crop type classification using a classical
 #' machine learning algorithm (e.g. Random Forest).
-library(openeo) 
+library(openeo)
 library(terra)
 library(sf)
 library(grid)
@@ -114,8 +114,8 @@ end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
 
-r <- rast(pre)                    
-plot(r)                            
+r <- rast(pre)
+plot(r)
 table(values(r))
 typeof(r)
 
@@ -145,9 +145,9 @@ train_ll <- sf::st_transform(transfor_aot, 4326)
 #30m spatial resolution
 bb_ll <- sf::st_bbox(aoi_ll)
 lat <- as.numeric(mean(c(bb_ll["ymin"], bb_ll["ymax"])))
-m_per_deg_lat <- 111320                   
-m_per_deg_lon <- 111320 * cos(pi*lat/180) 
-res_m <- terra::res(rf)                   
+m_per_deg_lat <- 111320
+m_per_deg_lon <- 111320 * cos(pi*lat/180)
+res_m <- terra::res(rf)
 res_deg_x <- res_m[1] / m_per_deg_lon
 res_deg_y <- res_m[2] / m_per_deg_lat
 
@@ -164,12 +164,12 @@ label_vec <- levels(rf_ll)[[1]]$label
 rf_st[[1]] <- factor(as.integer(rf_st[[1]]), levels = id_vec, labels = label_vec)
 
 pal <- c(
-  "barley" = "#d73027", 
-  "corn" = "#8c510a", 
-  "orchards" = "#006400", 
-  "permanent meadows" = "#7fc97f", 
-  "rapeseed" = "#1f78b4", 
-  "temporary meadows" = "#ffd92f"  
+  "barley" = "#d73027",
+  "corn" = "#8c510a",
+  "orchards" = "#006400",
+  "permanent meadows" = "#7fc97f",
+  "rapeseed" = "#1f78b4",
+  "temporary meadows" = "#ffd92f"
 )
 
 ##ggplot
@@ -177,7 +177,7 @@ plot <- ggplot() +
   geom_stars(data = rf_st) +
   scale_fill_manual(
     values = pal,
-    breaks = names(pal),    
+    breaks = names(pal),
     labels = names(pal),
     name = "cover",
     drop = FALSE,
@@ -200,8 +200,8 @@ plot <- ggplot() +
     plot.background = element_rect(fill = "white", colour = NA),
     panel.grid.major = element_line(color = "grey92", linewidth = 0.2),
     panel.grid.minor = element_blank(),
-    
-    legend.position = c(0.05, 0.05),     
+
+    legend.position = c(0.05, 0.05),
     legend.justification = c(0, 0),
     legend.direction = "vertical",
     legend.background = element_rect(fill = scales::alpha("white", 0.96), colour = "grey25", linewidth = 0.6),
