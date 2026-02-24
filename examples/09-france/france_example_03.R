@@ -54,7 +54,7 @@ datacube_aoi <- p$load_collection(
     crs   = 25832
   ),
   temporal_extent = c("2017-09-01T00:00:00Z", "2017-12-31T23:59:59Z"),
-  bands = c("blue", "green", "red","nir")
+  bands = c("blue", "green", "red", "nir")
 )
 
 ndvi_aoi <- p$ndvi(
