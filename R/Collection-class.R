@@ -136,47 +136,57 @@ is.Collection = function(obj) {
 # Example collections
 # Instantiate collections
 
-#'sentinel-s2-l2a-cogs
-sentinel_s2_l2a_cogs <- Collection$new(
-  id = "sentinel-s2-l2a-cogs",
-  title = "Sentinel 2 L2A COGs",
-  description = "Sentinel-2a and Sentinel-2b imagery, processed to Level 2A (Surface Reflectance) and converted to Cloud-Optimized GeoTIFFs.",
-  spatialExtent = list(-180, -90, 180, 90),
-  temporalExtent = list("2015-06-27T10:25:31.456000Z", "null"),
-  bands = c("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12", "AOT", "WVP","SCL"),
-  constellation = list("sentinel-2")
-)
-
-# sentinel-s2-l2a
-sentinel_s2_l2a <- Collection$new(
-  id = "sentinel-s2-l2a",
+#'sentinel-2-l2a
+sentinel_2_l2a <- Collection$new(
+  id = "sentinel-2-l2a",
   title = "Sentinel 2 L2A",
-  description = "Sentinel-2a and Sentinel-2b imagery, processed to Level 2A (Surface Reflectance).",
+  description = "Global Sentinel-2 data from the Multispectral Instrument (MSI) onboard Sentinel-2",
   spatialExtent = list(-180, -90, 180, 90),
   temporalExtent = list("2015-06-27T10:25:31.456000Z", "null"),
-  bands = c("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12", "AOT", "WVP","SCL"),
+  bands = c("coastal", "blue", "green", "red", "rededge1", "rededge2", "rededge3", "nir", "nir08", "nir09", "cirrus", "swir16", "swir22"),
   constellation = list("sentinel-2")
 )
 
+# sentinel-2-pre-c1-l2a
+sentinel_2_pre_c1_l2a <- Collection$new(
+  id = "sentinel-2-pre-c1-l2a",
+  title = "Sentinel-2 Pre-Collection 1 Level-2A",
+  description = "Sentinel-2 Pre-Collection 1 Level-2A (baseline < 05.00), with data and metadata matching collection sentinel-2-c1-l2a",
+  spatialExtent = list(-180, -90, 180, 90),
+  temporalExtent = list("2015-06-27T10:25:31.456000Z", "null"),
+  bands = c("coastal", "blue", "green", "red", "rededge1", "rededge2", "rededge3", "nir", "nir08", "nir09", "cirrus", "swir16", "swir22"),
+  constellation = list("sentinel-2")
+)
 
-# sentinel-s2-l1c
-sentinel_s2_l1c <- Collection$new(
-  id = "sentinel-s2-l1c",
-  title = "Sentinel 2 L1C",
-  description = "Sentinel-2a and Sentinel-2b imagery, processed to Level 1C (Top-Of-Atmosphere Geometrically Corrected).",
+# sentinel-2-l1c
+sentinel_2_l1c <- Collection$new(
+  id = "sentinel-2-l1c",
+  title = "Sentinel-2 Level-1C",
+  description = "Global Sentinel-2 data from the Multispectral Instrument (MSI) onboard Sentinel-2",
   spatialExtent = list(-180, -90, 180, 90),
   temporalExtent = list("2015-06-27T10:25:31.456000Z","null"),
-  bands = c("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12"),
+  bands = c("coastal", "blue", "green", "red", "rededge1", "rededge2", "rededge3", "nir", "nir08", "nir09", "cirrus", "swir16", "swir22"),
   constellation = list("sentinel-2")
 )
 
-# landsat-8-l1-c1
-landsat_8_l1_c1 <- Collection$new(
-  id = "landsat-8-l1-c1",
-  title = "Landsat-8 L1 Collection-1",
-  description = "Landat-8 L1 Collection-1 imagery radiometrically calibrated and orthorectified using ground points and Digital Elevation Model (DEM) data to correct relief displacement.",
+# sentinel-2-c1-l2a
+sentinel_2_c1_l2a <- Collection$new(
+  id = "sentinel-2-c1-l2a",
+  title = "Sentinel-2 Collection 1 Level-2A",
+  description = "Sentinel-2 Collection 1 Level-2A, data from the Multispectral Instrument (MSI) onboard Sentinel-2",
   spatialExtent = list(-180, -90, 180, 90),
-  temporalExtent = list("2013-06-01T00:00:00Z", "null"),
-  bands = c("B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B10", "B11"),
-  constellation = list("Landsat 8")
+  temporalExtent = list("2015-06-27T10:25:31.456000Z","null"),
+  bands = c("coastal", "blue", "green", "red", "rededge1", "rededge2", "rededge3", "nir", "nir08", "nir09", "cirrus", "swir16", "swir22"),
+  constellation = list("sentinel-2")
+)
+
+# landsat-c2-l2a
+landsat_c2_l2 <- Collection$new(
+  id = "landsat-c2-l2",
+  title = "Landsat Collection 2 Level-2",
+  description = "Landsat Collection 2 Level-2 data from Landsat 4, 5, 7, 8 and 9.",
+  spatialExtent = list(-180, -90, 180, 90),
+  temporalExtent = list("1982-08-22T00:00:00Z", "null"),
+  bands = c("TM_B1", "TM_B2", "TM_B3", "TM_B4", "TM_B5", "TM_B6", "TM_B7","ETM_B1", "ETM_B2", "ETM_B3", "ETM_B4", "ETM_B5", "ETM_B6", "ETM_B7","OLI_B1", "OLI_B2", "OLI_B3", "OLI_B4", "OLI_B5", "OLI_B6", "OLI_B7","TIRS_B10"),
+  constellation = list("landsat-4", "landsat-5", "landsat-7", "landsat-8", "landsat-9")
 )

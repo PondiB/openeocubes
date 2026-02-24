@@ -390,10 +390,11 @@ Session$createEndpoint(
 
 
   # assign data collection
-  Session$assignData(sentinel_s2_l2a_cogs)
-  Session$assignData(sentinel_s2_l2a)
-  Session$assignData(sentinel_s2_l1c)
-  Session$assignData(landsat_8_l1_c1)
+  Session$assignData(sentinel_2_l2a)
+  Session$assignData(sentinel_2_pre_c1_l2a)
+  Session$assignData(sentinel_2_l1c)
+  Session$assignData(sentinel_2_c1_l2a)
+  Session$assignData(landsat_c2_l2)
   # assign processes
   Session$assignProcess(load_collection)
   Session$assignProcess(load_stac)

@@ -135,10 +135,10 @@ ml_fit <- Process$new(
       features
     }
     
-    identify_predictors <- function(training_set, pattern = "^(B\\d+|(?i)NDVI(_T\\d+)?)$") {
+    identify_predictors <- function(training_set, pattern = "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22|(?i)NDVI(_T\\d+)?)$") {
       predictor_names <- colnames(training_set)
       predictor_names <- predictor_names[
-        grepl(pattern, predictor_names) &
+        grepl(pattern, predictor_names, perl = TRUE) &
           sapply(training_set[, predictor_names, drop = FALSE], is.numeric)
       ]
       if (length(predictor_names) == 0) stop("No valid predictors detected. Please check.")
@@ -147,34 +147,46 @@ ml_fit <- Process$new(
     
     convert_to_wide_format <- function(train_data, target) {
       library(tidyr); library(dplyr); library(sf)
-      band_names <- grep("^B0?\\d{1,2}$", names(train_data), value = TRUE)
+      
+      band_names <- grep(
+        "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22)$",
+        names(train_data), value = TRUE, perl = TRUE
+      )
       has_ndvi <- "NDVI" %in% colnames(train_data)
       bands_to_use <- c(band_names, if (has_ndvi) "NDVI")
       message("Found bands: ", paste(bands_to_use, collapse = ", "))
       
-      train_data <- train_data %>% sf::st_drop_geometry() %>% dplyr::as_tibble()
+      train_data <- train_data %>%
+        sf::st_drop_geometry() %>%
+        dplyr::as_tibble()
+      
+      time_levels <- sort(unique(train_data$time))
+      train_data  <- train_data %>%
+        dplyr::mutate(time_idx = match(time, time_levels))
       
       train_data_wide <- train_data %>%
-        dplyr::select(fid, time, dplyr::all_of(bands_to_use)) %>%
+        dplyr::select(fid, time_idx, dplyr::all_of(bands_to_use)) %>%
         tidyr::pivot_wider(
-          names_from  = time,
+          names_from  = time_idx,
           values_from = dplyr::all_of(bands_to_use),
-          names_glue  = "{.value}_T{match(time, sort(unique(time)))}"
+          names_glue  = "{.value}_T{time_idx}"   
         )
       
-      time_order <- sort(unique(train_data$time))
-      cols_sorted <- unlist(lapply(seq_along(time_order), function(i) paste0(bands_to_use, "_T", i)))
-      cols_sorted <- c("fid", cols_sorted)
+      cols_sorted <- c("fid", unlist(lapply(
+        seq_along(time_levels),
+        function(i) paste0(bands_to_use, "_T", i)
+      )))
+      cols_sorted <- intersect(cols_sorted, names(train_data_wide))
       train_data_wide <- train_data_wide[, cols_sorted]
       
-      train_data_clean <- train_data_wide %>% dplyr::filter(complete.cases(.))
+      train_data_clean <- train_data_wide %>%
+        dplyr::filter(complete.cases(.))
       
       target_data <- train_data %>%
         dplyr::select(fid, !!rlang::sym(target)) %>%
         dplyr::distinct(fid, .keep_all = TRUE)
       
-      train_data_clean <- dplyr::left_join(train_data_clean, target_data, by = "fid")
-      train_data_clean
+      dplyr::left_join(train_data_clean, target_data, by = "fid")
     }
     
     `%||%` <- function(a, b) if (!is.null(a)) a else b
@@ -199,15 +211,14 @@ ml_fit <- Process$new(
       valid_fids <- as.integer(names(fid_counts[fid_counts == time_steps]))
       training_set <- training_set[training_set$fid %in% valid_fids, ]
       training_set <- training_set[order(training_set$fid, training_set$time), ]
-      
-      features_data <- grep("^B0?\\d{1,2}$", names(training_set), value = TRUE)
+      features_data <- grep("^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22)$", names(training_set), value = TRUE)
       if ("NDVI" %in% names(training_set)) features_data <- c(features_data, "NDVI")
       
       training_data <- convert_to_wide_format(train_data = training_set, target = target)
+      message("Training data prepared.")
       features <- extract_time_series_features(training_set = training_data,
                                                features_data = features_data,
                                                time_steps = time_steps)
-      
       labels <- as.numeric(as.factor(training_data[[target]]))
       library(torch)
   
@@ -316,7 +327,7 @@ ml_fit <- Process$new(
       training_set <- convert_to_wide_format(train_data = training_set, target = target)
     } else {
       message("Recognizing a time step")
-      band_names <- grep("^B0?\\d{1,2}$", names(training_set), value = TRUE)
+      band_names <- grep("^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22)$", names(training_set), value = TRUE)
       has_ndvi   <- "NDVI" %in% colnames(training_set)
       predictors_name <- c(band_names, if (has_ndvi) "NDVI")
       
@@ -1236,7 +1247,7 @@ ml_predict <- Process$new(
       saveRDS(cube_band_names, file.path(tmp, "band_names.rds"))
       
       tt_desc <- list(
-        expected_bands = if (!is.null(desc$bands)) desc$bands else c("B02","B03","B04","B8A","B11","B12"),
+        expected_bands = if (!is.null(desc$bands)) desc$bands else c("blue","green","red","nir08","swir16","swir22"),
         num_frames = if (!is.null(desc$num_frames)) as.integer(desc$num_frames) else 3L,
         backbone = if (!is.null(desc$backbone)) desc$backbone else "terratorch_prithvi_eo_v2_100_tl",
         ckpt = if (!is.null(desc$ckpt)) desc$ckpt else NULL,
@@ -1271,19 +1282,19 @@ ml_predict <- Process$new(
           cube_bands <- as.character(cube_bands)
           
           s2_to_hls_all <- c(
-            B01 = "COASTAL",
-            B02 = "BLUE",
-            B03 = "GREEN",
-            B04 = "RED",
-            B05 = "RED_EDGE_1",
-            B06 = "RED_EDGE_2",
-            B07 = "RED_EDGE_3",
-            B08 = "NIR",
-            B8A = "NIR_NARROW",
-            B09 = "WATER_VAPOR",
-            B10 = "CIRRUS",
-            B11 = "SWIR_1",
-            B12 = "SWIR_2"
+            "coastal" = "COASTAL",
+            "blue" = "BLUE",
+            "green" = "GREEN",
+            "red" = "RED",
+            "rededge1" = "RED_EDGE_1",
+            "rededge2" = "RED_EDGE_2",
+            "rededge3" = "RED_EDGE_3",
+            "nir" = "NIR",
+            "nir08" = "NIR_NARROW",
+            "nir09" = "WATER_VAPOR",
+            "cirrus" = "CIRRUS",
+            "swir16" = "SWIR_1",
+            "swir22" = "SWIR_2"
           )
           hls_to_s2_all <- setNames(names(s2_to_hls_all), s2_to_hls_all)
           
@@ -1560,7 +1571,7 @@ def infer_pixel(model, x_np, min_multiple=32):
       saveRDS(cube_band_names, file.path(tmp, "band_names.rds"))
       
       tt_desc <- list(
-        expected_bands = if (!is.null(desc$bands)) desc$bands else c("B02","B03","B04","B8A","B11","B12"),
+        expected_bands = if (!is.null(desc$bands)) desc$bands else c("blue","green","red","nir08","swir16","swir22"),
         num_frames = if (!is.null(desc$num_frames)) as.integer(desc$num_frames) else 3L,
         backbone = if (!is.null(desc$backbone)) desc$backbone else "terratorch_prithvi_eo_v2_100_tl",
         ckpt = if (!is.null(desc$ckpt)) desc$ckpt else NULL,
@@ -1599,19 +1610,19 @@ def infer_pixel(model, x_np, min_multiple=32):
           cube_bands <- as.character(cube_bands)
           
           s2_to_hls_all <- c(
-            B01 = "COASTAL",
-            B02 = "BLUE",
-            B03 = "GREEN",
-            B04 = "RED",
-            B05 = "RED_EDGE_1",
-            B06 = "RED_EDGE_2",
-            B07 = "RED_EDGE_3",
-            B08 = "NIR",
-            B8A = "NIR_NARROW",
-            B09 = "WATER_VAPOR",
-            B10 = "CIRRUS",
-            B11 = "SWIR_1",
-            B12 = "SWIR_2"
+            "coastal" = "COASTAL",
+            "blue" = "BLUE",
+            "green" = "GREEN",
+            "red" = "RED",
+            "rededge1" = "RED_EDGE_1",
+            "rededge2" = "RED_EDGE_2",
+            "rededge3" = "RED_EDGE_3",
+            "nir" = "NIR",
+            "nir08" = "NIR_NARROW",
+            "nir09" = "WATER_VAPOR",
+            "cirrus" = "CIRRUS",
+            "swir16" = "SWIR_1",
+            "swir22" = "SWIR_2"
           )
           hls_to_s2_all <- setNames(names(s2_to_hls_all), s2_to_hls_all)
           
@@ -3582,10 +3593,8 @@ load_stac_ml <- Process$new(
     }
     
     pick_mlm_model_asset <- function(item, model_asset = NULL) {
-      message("sind in der pick_mlm_assets")
       assets <- item$`assets`
       message("assets json: ", jsonlite::toJSON(assets, auto_unbox = TRUE))
-      message("assets sind hier: ", assets)
       if (!is.list(assets) || length(assets) == 0)
         {stop("STAC Item has no assets.")} 
       
@@ -4023,7 +4032,7 @@ load_ml_model <- Process$new(
       
       bands_yaml <- dcfg$bands
       if (is.null(bands_yaml) || length(bands_yaml) == 0L) {
-        stop("dataset$bands must be set in the configuration (e.g., [BLUE, GREEN, RED, ...] or [B02, B03, ...]).")
+        stop("dataset$bands must be set in the configuration (e.g., [BLUE, GREEN, RED, ...]).")
       }
       
       expected_bands <- as.character(bands_yaml)

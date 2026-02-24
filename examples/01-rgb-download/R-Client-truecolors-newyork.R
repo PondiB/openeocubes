@@ -14,23 +14,24 @@ login(user = "user",
 collections = list_collections()
 
 # to check description of a collection
-collections$`sentinel-s2-l2a-cogs`$description
+collections$`sentinel-2-l2a`$description
 
 
 # get the process collection to use the predefined processes of the back-end
 p = processes()
 
 # load the initial data collection and limit the amount of data loaded
-datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
+datacube_init = p$load_collection(id = "sentinel-2-l2a",
                                   spatial_extent = list(west = 563080.6,
                                                         south = 4483092.4,
                                                         east = 609472,
                                                         north = 4530135,
                                                         crs = 32618),
-                                  temporal_extent = c("2021-06-01", "2021-06-30")
+                                    temporal_extent = c("2021-06-01T00:00:00Z", "2021-06-30T23:59:59Z"),
+
                                   )
 # filter the data cube for the desired bands
-datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B02","B03","B04"))
+datacube_filtered = p$filter_bands(data = datacube_init, bands = c("blue","green","red"))
 
 
 # supported formats

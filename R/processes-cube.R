@@ -187,7 +187,7 @@ load_collection <- Process$new(
 
     # Connect to STAC API and get satellite data
     message("STAC API call....")
-    stac_object <- stac("https://earth-search.aws.element84.com/v0")
+    stac_object <- stac("https://earth-search.aws.element84.com/v1")
     items <- stac_object %>%
       stac_search(
         collections = id,
@@ -312,8 +312,7 @@ aggregate_spatial <- Process$new(
       if (is.na(sf::st_crs(g))) {
         bb <- suppressWarnings(sf::st_bbox(g))
         stop(
-          name, ": CRS is missing. BBox=", paste(bb, collapse = ","),
-          ".  Please set the source CRS, e.g.: st_crs(obj) <- 2154"
+          name, ": CRS is missing. BBox=", paste(bb, collapse = ","),".  Please set the source CRS, e.g.: st_crs(obj) <- 2154"
         )
       }
       g
@@ -533,12 +532,23 @@ aggregate_spatial <- Process$new(
           geometries <- geojsonsf::geojson_sf(geometries)
         },
         error = function(e) {
+          message("geojsonsf failed: ", e$message)
           tryCatch(
             {
-              geometries <- sf::read_sf(geometries)
+              if (inherits(geometries, "sf")) {
+                message("Sf object detected...")
+              } else {
+                geometries <- sf::read_sf(geometries)
+              }
             },
             error = function(e2) {
-              stop("Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ", e2$message)
+              stop(paste0(
+                "Failed to convert geometries to sf object.\n",
+                "  geojsonsf error: ", e$message, "\n",
+                "  sf::read_sf error: ", e2$message, "\n",
+                "  typeof(geometries): ", typeof(geometries), "\n",
+                "  nchar: ", nchar(geometries)
+              ))
             }
           )
         }
@@ -910,27 +920,11 @@ ndvi <- Process$new(
                        red = "red",
                        target_band = NULL,
                        job) {
-    # Function to ensure band names are properly formatted
-    format_band_name <- function(band) {
-      if (grepl("^B\\d{2}$", band, ignore.case = TRUE)) {
-        return(toupper(band))
-      } else {
-        return(band)
-      }
-    }
-
-    # Apply formatting to band names
-    nir_formatted <- format_band_name(nir)
-    red_formatted <- format_band_name(red)
-
+    message("Calculating NDVI")
     # Construct the NDVI calculation formula
     ndvi_formula <- sprintf(
       "(%s-%s)/(%s+%s)",
-      nir_formatted,
-      red_formatted,
-      nir_formatted,
-      red_formatted
-    )
+      nir,red,nir,red)
 
     # Apply the NDVI calculation
     if(!is.null(target_band)) {
