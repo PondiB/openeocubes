@@ -18,20 +18,20 @@ aoi <- ("../train_data/aoi_full.geojson")
 
 trainings_data <- sf::st_read(training_data)
 transfor_aot <- sf::st_transform(trainings_data, 4326)
-aot_bb_llox <- sf::st_bbox(transfor_aot)
+aot_bbox <- sf::st_bbox(transfor_aot)
 
 aoi_data <- sf::st_read(aoi, quiet = TRUE)
 aoi_transform <- sf::st_transform(aoi_data, 4326)
-aoi_bb_llox <- sf::st_bbox(aoi_transform)
-aoi_bb_llox
+aoi_bbox <- sf::st_bbox(aoi_transform)
+aoi_bbox
 # Load a Sentinel-2 data cube covering the training area
 datacube_crop <- p$load_collection(
-  id = "sentinel-2-l2a",
-  spatial_extent <- list(
-    west  = as.numeric(aot_bb_llox["xmin"]),
-    south = as.numeric(aot_bb_llox["ymin"]),
-    east  = as.numeric(aot_bb_llox["xmax"]),
-    north = as.numeric(aot_bb_llox["ymax"]),
+  id = "sentinel-s2-l2a",
+  spatial_extent = list(
+    west  = as.numeric(aot_bbox["xmin"]),
+    south = as.numeric(aot_bbox["ymin"]),
+    east  = as.numeric(aot_bbox["xmax"]),
+    north = as.numeric(aot_bbox["ymax"]),
     crs   = 4326
   ),
   temporal_extent = c("2017-03-01T00:00:00Z", "2017-07-31T23:59:59Z"),
@@ -41,10 +41,10 @@ datacube_crop <- p$load_collection(
 datacube_aoi <- p$load_collection(
   id = "sentinel-2-l2a",
   spatial_extent = list(
-    west  = as.numeric(aoi_bb_llox["xmin"]),
-    south = as.numeric(aoi_bb_llox["ymin"]),
-    east  = as.numeric(aoi_bb_llox["xmax"]),
-    north = as.numeric(aoi_bb_llox["ymax"]),
+    west  = as.numeric(aoi_bbox["xmin"]),
+    south = as.numeric(aoi_bbox["ymin"]),
+    east  = as.numeric(aoi_bbox["xmax"]),
+    north = as.numeric(aoi_bbox["ymax"]),
     crs   = 4326
   ),
   temporal_extent = c("2017-03-01T00:00:00Z", "2017-07-31T23:59:59Z"),
@@ -103,9 +103,9 @@ end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
 
-##The result is ready when, after: GeoTiff_output detected in the session, the following is displayed in the terminal: Done.
-#The result can be downloaded.
-# Copied job results to download dir
+## The result is ready once the processing job has finished and the output GeoTIFF is available.
+# After the job has completed successfully, the result data can be downloaded.
+# At that point, copy or download the job results to your local download directory.
 
 prediction <- ("..insert model..")
 r <- rast(prediction)

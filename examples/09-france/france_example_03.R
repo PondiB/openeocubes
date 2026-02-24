@@ -113,9 +113,9 @@ start.time <- Sys.time()
 job_id <- openeo::create_job(result_predict, format = "GTiff")
 openeo::list_results()
 openeo::start_job(job_id)
-##The result is ready when, after: GeoTiff_output detected in the session, the following is displayed in the terminal: Done. 
-#The result can be downloaded.
-# Copied job results to download dir
+## Wait until the job has finished and the backend reports that the result is ready
+## (for example, when the job status in the terminal indicates that it is "Done").
+# The result can then be downloaded (e.g. "Copied job results to download dir").
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
