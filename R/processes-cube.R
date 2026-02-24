@@ -920,7 +920,7 @@ ndvi <- Process$new(
                        red = "red",
                        target_band = NULL,
                        job) {
-    message("NDVI nun")
+    message("Calculating NDVI")
     # Construct the NDVI calculation formula
     ndvi_formula <- sprintf(
       "(%s-%s)/(%s+%s)",
