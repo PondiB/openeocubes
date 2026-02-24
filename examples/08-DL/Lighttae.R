@@ -27,7 +27,7 @@ datacube_crop <- p$load_collection(
     crs = 25832
   ),
   temporal_extent = c("2021-06-01T00:00:00Z", "2021-07-30T23:59:59Z"),
-  bands = c("blue", "green", "red", "nir","swir16","swir22" )
+  bands = c("blue", "green", "red", "nir", "swir16", "swir22")
 )
 # Load a Sentinel-2 data cube covering the area of interest (AOI) for prediction
 datacube_aoi <- p$load_collection(
