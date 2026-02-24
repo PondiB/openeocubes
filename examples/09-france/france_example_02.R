@@ -26,7 +26,7 @@ aoi_bbox <- sf::st_bbox(aoi_transform)
 aoi_bbox
 # Load a Sentinel-2 data cube covering the training area
 datacube_crop <- p$load_collection(
-  id = "sentinel-s2-l2a",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
     west  = as.numeric(aot_bbox["xmin"]),
     south = as.numeric(aot_bbox["ymin"]),
