@@ -13,7 +13,7 @@ formats <- list_file_formats()
 
 # Load a Sentinel-2 data cube covering the area of interest (AOI) for prediction
 datacube_aoi <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-c1-l2a",
   spatial_extent = list(
     west = 402920.7,
     south = 5755389.9,
@@ -21,8 +21,8 @@ datacube_aoi <- p$load_collection(
     north = 5759460.3,
     crs = 25832
   ),
-  temporal_extent = c("2021-06-01", "2021-07-30"),
-  bands = c("B02", "B03", "B04", "B08")
+  temporal_extent = c("2021-06-01T00:00:00Z", "2021-07-30T23:59:59Z"),
+  bands = c("blue", "green", "red")
 )
 
 #'@description External model;

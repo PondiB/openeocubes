@@ -17,57 +17,55 @@ login(user = "user", password = "password")
 formats <- list_file_formats()
 # Path to the GeoJSON training data (containing points and labels)
 aoi <- sf::st_read("../train_data/aot_.geojson", quiet = TRUE)
-training_data <- sf::st_read("../train_data/train_data.geojson", quiet = TRUE)
-
-trainings_data <- sf::st_read(training_data)
-transfor_aot <- sf::st_transform(trainings_data, 25832)
+train_data <- "../train_data/train_data.geojson"
+train_data_r <- sf::st_read(train_data)
+transfor_aot <- sf::st_transform(train_data_r, 25832)
 aot_bbox <- sf::st_bbox(transfor_aot)
 
-aoi_data <- sf::st_read(aoi, quiet = TRUE)
-aoi_transform <- sf::st_transform(aoi_data, 25832)
-aoi_bbox <- sf::st_bbox(aoi_transform)  
+aoi_transform <- sf::st_transform(aoi, 25832)
+aoi_bbox <- sf::st_bbox(aoi_transform)
 
 #'At this point, we only have data for 2 out of 4 months, and this data is taken automatically.
 #Therefore, the time coverage between AOT and AOI coincides.
 datacube_crop <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
-    west  = as.numeric(aot_bbox["xmin"]),  
-    south = as.numeric(aot_bbox["ymin"]),  
-    east  = as.numeric(aot_bbox["xmax"]),  
-    north = as.numeric(aot_bbox["ymax"]), 
-    crs   = 25832                    
+    west  = as.numeric(aot_bbox["xmin"]),
+    south = as.numeric(aot_bbox["ymin"]),
+    east  = as.numeric(aot_bbox["xmax"]),
+    north = as.numeric(aot_bbox["ymax"]),
+    crs   = 25832
   )
   ,
-  temporal_extent = c("2017-03-01", "2017-06-30"),
-  bands = c("B02", "B03", "B04", "B08")
+  temporal_extent = c("2017-06-01T00:00:00Z", "2017-07-31T23:59:59Z"),
+  bands = c("blue", "green", "red", "nir")
 )
 #Area of Interst Data Cube
 datacube_aoi <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
-    west  = as.numeric(aoi_bbox["xmin"]),  
-    south = as.numeric(aoi_bbox["ymin"]),  
-    east  = as.numeric(aoi_bbox["xmax"]),  
-    north = as.numeric(aoi_bbox["ymax"]), 
-    crs   = 25832                    
+    west  = as.numeric(aoi_bbox["xmin"]),
+    south = as.numeric(aoi_bbox["ymin"]),
+    east  = as.numeric(aoi_bbox["xmax"]),
+    north = as.numeric(aoi_bbox["ymax"]),
+    crs   = 25832
   ),
-  temporal_extent = c("2017-06-01", "2017-07-30"),
-  bands = c("B02", "B03", "B04","B08")
+  temporal_extent = c("2017-06-01T00:00:00Z", "2017-07-31T23:59:59Z"),
+  bands = c("blue", "green", "red", "nir")
 )
 
 
 ndvi_aoi <- p$ndvi(
   data = datacube_aoi,
-  nir = "B08",
-  red = "B04",
+  nir = "nir",
+  red = "red",
   target_band = "NDVI"
 )
 
 ndvi_crop <- p$ndvi(
   data = datacube_crop,
-  nir = "B08",
-  red = "B04",
+  nir = "nir",
+  red = "red",
   target_band = "NDVI"
 )
 
@@ -76,8 +74,8 @@ datacube_aoi <- p$array_interpolate_linear(ndvi_aoi)
 
 training_dat <- p$aggregate_spatial(
   data = datacube_crop,
-  geometries = training_data,
-  reducer = "mean"   
+  geometries = train_data,
+  reducer = "mean"
 )
 
 tempcnn <- p$mlm_class_tempcnn(

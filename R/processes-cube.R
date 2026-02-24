@@ -187,7 +187,7 @@ load_collection <- Process$new(
 
     # Connect to STAC API and get satellite data
     message("STAC API call....")
-    stac_object <- stac("https://earth-search.aws.element84.com/v0")
+    stac_object <- stac("https://earth-search.aws.element84.com/v1")
     items <- stac_object %>%
       stac_search(
         collections = id,
@@ -533,14 +533,7 @@ aggregate_spatial <- Process$new(
           geometries <- geojsonsf::geojson_sf(geometries)
         },
         error = function(e) {
-          tryCatch(
-            {
-              geometries <- sf::read_sf(geometries)
-            },
-            error = function(e2) {
-              stop("Failed to convert geometries to sf object. Tried both GeoJSON string and file path: ", e2$message)
-            }
-          )
+          stop("Failed to convert geometries to sf object from GeoJSON string: ", e$message)
         }
       )
     }
