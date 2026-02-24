@@ -87,3 +87,4 @@ result_predict <- p$save_result(
 
 result <- openeo::compute_result(result_predict)
 plot(rast(result))
+ 

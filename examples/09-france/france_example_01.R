@@ -25,7 +25,6 @@ aot_bbox <- sf::st_bbox(transfor_aot)
 aoi_transform <- sf::st_transform(aoi, 25832)
 aoi_bbox <- sf::st_bbox(aoi_transform)
 
-
 #'At this point, we only have data for 2 out of 4 months, and this data is taken automatically.
 #Therefore, the time coverage between AOT and AOI coincides.
 datacube_crop <- p$load_collection(

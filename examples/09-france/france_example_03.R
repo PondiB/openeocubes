@@ -30,7 +30,7 @@ aoi_bbox <- sf::st_bbox(aoi_transform)
 
 
 datacube_crop <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
     west  = as.numeric(aot_bbox["xmin"]),
     south = as.numeric(aot_bbox["ymin"]),
@@ -45,7 +45,7 @@ datacube_crop <- p$load_collection(
 
 #Area of Interst Data Cube
 datacube_aoi <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
     west  = as.numeric(aoi_bbox["xmin"]),
     south = as.numeric(aoi_bbox["ymin"]),

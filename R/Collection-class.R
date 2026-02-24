@@ -180,7 +180,7 @@ sentinel_2_c1_l2a <- Collection$new(
   constellation = list("sentinel-2")
 )
 
-# landsat-c2-l2a
+# landsat-c2-l2
 landsat_c2_l2 <- Collection$new(
   id = "landsat-c2-l2",
   title = "Landsat Collection 2 Level-2",

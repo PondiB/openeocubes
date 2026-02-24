@@ -532,25 +532,7 @@ aggregate_spatial <- Process$new(
           geometries <- geojsonsf::geojson_sf(geometries)
         },
         error = function(e) {
-          message("geojsonsf failed: ", e$message)
-          tryCatch(
-            {
-              if (inherits(geometries, "sf")) {
-                message("Sf object detected...")
-              } else {
-                geometries <- sf::read_sf(geometries)
-              }
-            },
-            error = function(e2) {
-              stop(paste0(
-                "Failed to convert geometries to sf object.\n",
-                "  geojsonsf error: ", e$message, "\n",
-                "  sf::read_sf error: ", e2$message, "\n",
-                "  typeof(geometries): ", typeof(geometries), "\n",
-                "  nchar: ", nchar(geometries)
-              ))
-            }
-          )
+          stop("Failed to convert geometries to sf object from GeoJSON string: ", e$message)
         }
       )
     }

@@ -21,7 +21,7 @@ datacube_aoi <- p$load_collection(
     north = 5759460.3,
     crs = 25832
   ),
-  temporal_extent = c("2021-06-01T00:00:00Z", "2021-07-30T23:59:59Z"), #
+  temporal_extent = c("2021-06-01T00:00:00Z", "2021-07-30T23:59:59Z"),
   bands = c("blue", "green", "red")
 )
 

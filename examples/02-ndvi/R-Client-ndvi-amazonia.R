@@ -31,9 +31,7 @@ datacube_init = p$load_collection(id = "sentinel-2-l2a",
                                                         east = -7329987,
                                                         north = -1018790,
                                                         crs = 3857),
-                                                        temporal_extent = c("2022-01-01T00:00:00Z", "2022-12-31T23:59:59Z"),
-
-
+                                  temporal_extent = c("2022-01-01T00:00:00Z", "2022-12-31T23:59:59Z"))
 
 # filter the data cube for the desired bands
 datacube_filtered = p$filter_bands(data = datacube_init, bands = c("red", "nir"))
