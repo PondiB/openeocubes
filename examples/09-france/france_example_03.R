@@ -30,7 +30,7 @@ aoi_bbox <- sf::st_bbox(aoi_transform)
 
 
 datacube_crop <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
     west  = as.numeric(aot_bbox["xmin"]),
     south = as.numeric(aot_bbox["ymin"]),
@@ -39,13 +39,13 @@ datacube_crop <- p$load_collection(
     crs   = 25832
   )
   ,
-  temporal_extent = c("2017-09-01", "2017-12-30"),
-  bands = c("B02", "B03", "B04", "B08")
+  temporal_extent = c("2017-09-01T00:00:00Z", "2017-12-31T23:59:59Z"),
+  bands = c("blue", "green", "red", "nir")
 )
 
 #Area of Interst Data Cube
 datacube_aoi <- p$load_collection(
-  id = "sentinel-s2-l2a-cogs",
+  id = "sentinel-2-l2a",
   spatial_extent = list(
     west  = as.numeric(aoi_bbox["xmin"]),
     south = as.numeric(aoi_bbox["ymin"]),
@@ -53,21 +53,21 @@ datacube_aoi <- p$load_collection(
     north = as.numeric(aoi_bbox["ymax"]),
     crs   = 25832
   ),
-  temporal_extent = c("2017-09-01", "2017-12-30"),
-  bands = c("B02", "B03", "B04","B08")
+  temporal_extent = c("2017-09-01T00:00:00Z", "2017-12-31T23:59:59Z"),
+  bands = c("blue", "green", "red", "nir")
 )
 
 ndvi_aoi <- p$ndvi(
   data = datacube_aoi,
-  nir = "B08",
-  red = "B04",
+  nir = "nir",
+  red = "red",
   target_band = "NDVI"
 )
 
 ndvi_crop <- p$ndvi(
   data = datacube_crop,
-  nir = "B08",
-  red = "B04",
+  nir = "nir",
+  red = "red",
   target_band = "NDVI"
 )
 

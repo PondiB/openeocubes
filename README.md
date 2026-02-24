@@ -141,7 +141,7 @@ login(user = "user",
 collections = list_collections()
 
 # to check description of a collection
-collections$`sentinel-s2-l2a-cogs`$description
+collections$`sentinel-2-l2a`$description
 
 # Check that required processes are available.
 processes = list_processes()
@@ -153,22 +153,22 @@ describe_process(processes$ndvi)
 p = processes()
 
 # load the initial data collection and limit the amount of data loaded
-datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
+datacube_init = p$load_collection(id = "sentinel-2-l2a",
                                 spatial_extent = list(west = -7338335,
                                                       south = -1027138,
                                                       east = -7329987,
                                                       north = -1018790,
                                                       crs = 3857),
-                                temporal_extent = c("2022-01-01", "2022-12-31"))
+                                temporal_extent = c("2022-01-01T00:00:00Z", "2022-12-31T23:59:59Z"))
 
 # filter the data cube for the desired bands
-datacube_filtered = p$filter_bands(data = datacube_init, bands = c("B04", "B08"))
+datacube_filtered = p$filter_bands(data = datacube_init, bands = c("red", "nir"))
 
 # aggregate data cube to a year
 datacube_agg = p$aggregate_temporal_period(data = datacube_filtered, period = "year", reducer = "median")
 
 # ndvi calculation
-datacube_ndvi = p$ndvi(data = datacube_agg, red = "B04", nir = "B08")
+datacube_ndvi = p$ndvi(data = datacube_agg, red = "red", nir = "nir")
 
 # supported formats
 formats = list_file_formats()
@@ -210,7 +210,7 @@ login(user = "user",
 collections = list_collections()
 
 # to check description of a collection
-collections$`sentinel-s2-l2a-cogs`$description
+collections$`sentinel-2-l2a`$description
 
 # check that required processes are available.
 processes = list_processes()
@@ -222,24 +222,24 @@ describe_process(processes$filter_bands)
 p = processes()
 
 # load the initial data collection and limit the amount of data loaded
-datacube_init = p$load_collection(id = "sentinel-s2-l2a-cogs",
+datacube_init = p$load_collection(id = "sentinel-2-l2a",
                                   spatial_extent = list(west = 416812.2,
                                                         south = 5803577.5,
                                                         east = 422094.8,
                                                         north = 5807036.1,
                                                         crs = 32633),
-                                  temporal_extent = c("2016-01-01", "2020-12-31"))
+                                  temporal_extent = c("2016-01-01T00:00:00Z", "2020-12-31T23:59:59Z"))
 
 # filter the data cube for the desired bands
 datacube_filtered = p$filter_bands(data = datacube_init, 
-                                          bands = c("B04", "B08"))
+                                          bands = c("red", "nir"))
 # aggregate data cube to monthly
 datacube_agg = p$aggregate_temporal_period(data = datacube_filtered, 
                             period = "month", reducer = "median")
 
 # user defined R function - bfast change detection method
 change_detection = 'function(x) {
-  knr <- exp(-((x["B08",]/10000)-(x["B04",]/10000))^2/(2))
+  knr <- exp(-((x["nir",]/10000)-(x["red",]/10000))^2/(2))
   kndvi <- (1-knr) / (1+knr)
   if (all(is.na(kndvi))) {
     return(c(NA,NA))
