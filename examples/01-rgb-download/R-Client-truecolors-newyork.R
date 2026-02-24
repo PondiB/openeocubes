@@ -27,7 +27,7 @@ datacube_init = p$load_collection(id = "sentinel-2-l2a",
                                                         east = 609472,
                                                         north = 4530135,
                                                         crs = 32618),
-                                    temporal_extent = c("2021-06-01T00:00:00Z", "2021-06-31T23:59:59Z"),
+                                    temporal_extent = c("2021-06-01T00:00:00Z", "2021-06-30T23:59:59Z"),
 
                                   )
 # filter the data cube for the desired bands
