@@ -116,6 +116,12 @@ load_collection <- Process$new(
       description = "Only adds the specified bands into the data cube so that bands that don't match the list of band names are not available.",
       schema = list(type = "array"),
       optional = TRUE
+    ), 
+    Parameter$new(
+      name = "cloud_cover", 
+      description = "Filter for maximum permissible cloud cover. If the filter is set, images exceeding the value x are removed. If this parameter is not set, the Claude Cover used is 30 percent.", 
+      schema = list(type = "number"),
+      optional = TRUE
     )
   ),
   returns = eo_datacube,
@@ -123,6 +129,7 @@ load_collection <- Process$new(
                        spatial_extent,
                        temporal_extent,
                        bands = NULL,
+                       cloud_cover = NULL,
                        job) {
     # Check if 'crs' is present in spatial_extent and convert it to numeric; if missing, default to 4326
     crs <- ifelse("crs" %in% names(spatial_extent),
@@ -164,7 +171,6 @@ load_collection <- Process$new(
       message("Using dx and dy of ", target_resolution_m, " m for projected CRS")
     }
 
-    # spatial extent for stac call
     xmin_stac <- xmin
     ymin_stac <- ymin
     xmax_stac <- xmax
@@ -184,26 +190,69 @@ load_collection <- Process$new(
       ymax_stac <- max_bbx$ymax
       message("Transformed to 4326...")
     }
-
-    # Connect to STAC API and get satellite data
     message("STAC API call....")
-    stac_object <- stac("https://earth-search.aws.element84.com/v1")
+    stac_object <- stac("https://planetarycomputer.microsoft.com/api/stac/v1/")
     items <- stac_object %>%
       stac_search(
         collections = id,
         bbox = c(xmin_stac, ymin_stac, xmax_stac, ymax_stac),
         datetime = time_range,
-        limit = 10000
+        limit = 500
       ) %>%
-      post_request() %>%
+      get_request() %>%
       items_fetch()
-    # create image collection from stac items features
+
+    
+    message("Number of STAC items: ", length(items$features))
+    tile_ids <- sapply(items$features, function(x) x$properties$`s2:mgrs_tile` %||% "unknown")
+    message("Tiles: ", paste(sort(unique(tile_ids)), collapse = ", "))
+    
+    stac_bands <- bands
+    needs_rename <- FALSE
+
+    if (!is.null(bands) && grepl("^sentinel-2", id)) {
+      band_map <- c(
+        coastal = "B01", blue = "B02", green = "B03", red = "B04",
+        rededge1 = "B05", rededge2 = "B06", rededge3 = "B07",
+        nir = "B08", nir08 = "B8A", nir09 = "B09",
+        cirrus = "B10", swir16 = "B11", swir22 = "B12", scl = "SCL"
+      )
+      stac_bands <- unname(band_map[bands])
+      needs_rename <- TRUE
+    }
+
+    
+    if (!is.null(cloud_cover)) {
+      cloud_cover_valuable <- cloud_cover
+    } else {
+      cloud_cover_valuable <- 30L
+    }
+    cloud_covers <- sapply(items$features, function(x) {
+      tile  <- x$properties$`s2:mgrs_tile` %||% "unknown"
+      cloud <- x$properties$`eo:cloud_cover` %||% NA
+      c(tile = tile, cloud = cloud)
+    })
+    message("Cloud cover per tile:")
+    print(t(cloud_covers))
+
+    kept <- sum(sapply(items$features, function(x) {
+      x[["properties"]][["eo:cloud_cover"]] < cloud_cover_valuable
+    }))
+    message("Items by cloud filter: ", kept, " by ", length(items$features))
+ 
+    filtered_features <- Filter(function(x) {
+      cc <- x$properties$`eo:cloud_cover` %||% 100
+      cc < cloud_cover_valuable
+    }, items$features)
+
+    message("Items by manual filter: ", length(filtered_features), " by ", length(items$features))
+
+    items$features <- filtered_features
+    items <- items_sign(items, sign_fn = sign_planetary_computer())
+
     img.col <- stac_image_collection(
       items$features,
-      property_filter =
-        function(x) {
-          x[["eo:cloud_cover"]] < 30
-        }
+      asset_names = stac_bands
     )
     message("Image collection created...")
     # Define cube view with monthly aggregation
@@ -227,10 +276,21 @@ load_collection <- Process$new(
     )
     # gdalcubes creation
     cube <- gdalcubes::raster_cube(img.col, v.overview)
-
-    if (!is.null(bands)) {
-      cube <- gdalcubes::select_bands(cube, bands)
+    
+  if (needs_rename) {
+      rename_expr <- setNames(tolower(stac_bands), bands)
+      cube <- gdalcubes::apply_pixel(cube, rename_expr, names = bands, keep_bands = FALSE)
     }
+
+    message("bands: ", bands)
+
+    cube <- tryCatch({
+      if (!is.null(bands)) {
+        gdalcubes::select_bands(cube, bands)
+      }
+    }, error = function(e){
+      message("Error selecting SCL: ", e$message)
+    })
     message("data cube is created: ")
     message(as_json(cube))
     return(cube)
@@ -1622,6 +1682,7 @@ array_interpolate_linear <- Process$new(
     return(cube)
   }
 )
+
 
 #' save result
 save_result <- Process$new(
