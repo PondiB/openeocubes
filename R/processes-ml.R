@@ -8732,6 +8732,85 @@ returns = list(
   )
   ),
   operation = function(data, window_size = 7, neighborhood_fraction = 0.5, smoothness = 10, job = NULL){
+    if (!inherits(data, "SpatRaster")) {
+      stop("ml_smooth_class currently supports terra::SpatRaster inputs only.")
+    }
 
+    window_size <- as.integer(window_size)
+    smoothness <- as.integer(smoothness)
+    neighborhood_fraction <- as.numeric(neighborhood_fraction)
+
+    if (is.na(window_size) || window_size < 3 || (window_size %% 2) != 1) {
+      stop("`window_size` must be an odd integer greater than or equal to 3.")
+    }
+    if (is.na(neighborhood_fraction) || neighborhood_fraction < 0 || neighborhood_fraction > 1) {
+      stop("`neighborhood_fraction` must be between 0 and 1.")
+    }
+    if (is.na(smoothness) || smoothness < 1) {
+      stop("`smoothness` must be an integer greater than or equal to 1.")
+    }
+
+    w <- matrix(1, nrow = window_size, ncol = window_size)
+
+    if (terra::nlyr(data) == 1) {
+      modal_threshold_fun <- function(x) {
+        center_index <- ceiling(length(x) / 2)
+        center_value <- x[center_index]
+        valid_values <- x[!is.na(x)]
+
+        if (length(valid_values) == 0) {
+          return(NA_real_)
+        }
+
+        counts <- table(valid_values)
+        modal_value <- names(counts)[which.max(counts)]
+        modal_fraction <- max(counts) / length(valid_values)
+
+        if (modal_fraction >= neighborhood_fraction) {
+          return(as.numeric(modal_value))
+        }
+
+        return(center_value)
+      }
+
+      result <- data
+      for (i in seq_len(smoothness)) {
+        result <- terra::focal(
+          result,
+          w = w,
+          fun = modal_threshold_fun,
+          na.policy = "omit",
+          fillvalue = NA_real_
+        )
+      }
+
+      return(result)
+    }
+
+    alpha <- min(1, max(0, neighborhood_fraction))
+    result <- data
+
+    for (i in seq_len(smoothness)) {
+      smoothed <- terra::focal(
+        result,
+        w = w,
+        fun = mean,
+        na.policy = "omit",
+        fillvalue = NA_real_
+      )
+
+      result <- ((1 - alpha) * result) + (alpha * smoothed)
+
+      layer_sum <- terra::app(result, fun = function(v) {
+        if (all(is.na(v))) {
+          return(NA_real_)
+        }
+        sum(v, na.rm = TRUE)
+      })
+
+      result <- result / layer_sum
+    }
+
+    return(result)
   } 
 )
