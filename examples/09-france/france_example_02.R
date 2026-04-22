@@ -4,6 +4,8 @@ library(terra)
 library(sf)
 library(grid)
 library(cowplot)
+library(stars)
+library(ggplot2)
 # Connect to the openEO backend (in this case, a local backend)
 con <- connect("http://localhost:8000")
 # Retrieve available processes from the backend (e.g., for ML, preprocessing)
@@ -14,11 +16,15 @@ login(user = "user", password = "password")
 formats <- list_file_formats()
 # Path to the GeoJSON training data (containing points and labels)
 training_data <- ("../train_data/train_data.geojson")
-aoi <- ("../train_data/aoi_full.geojson")
+aoi <- ("../train_data/aoi_area.geojson")
 
+table(trainings_data$class_name)
+table(aoi_data$class_name)
 trainings_data <- sf::st_read(training_data)
+table(trainings_data$class_name)
 transfor_aot <- sf::st_transform(trainings_data, 4326)
 aot_bbox <- sf::st_bbox(transfor_aot)
+aot_bbox
 
 aoi_data <- sf::st_read(aoi, quiet = TRUE)
 aoi_transform <- sf::st_transform(aoi_data, 4326)
@@ -34,8 +40,9 @@ datacube_crop <- p$load_collection(
     north = as.numeric(aot_bbox["ymax"]),
     crs   = 4326
   ),
-  temporal_extent = c("2017-03-01T00:00:00Z", "2017-07-31T23:59:59Z"),
-  bands = c("blue", "green", "red", "nir")
+  temporal_extent = c("2017-05-01T00:00:00Z", "2017-09-30T23:59:59Z"),
+  bands = c("coastal", "blue", "green", "red", "rededge1", "rededge2", "rededge3", "nir", "nir08", "nir09", "swir16", "swir22"),
+  cloud_cover = 50
 )
 # Load a Sentinel-2 data cube covering the area of interest (AOI) for prediction
 datacube_aoi <- p$load_collection(
@@ -47,13 +54,16 @@ datacube_aoi <- p$load_collection(
     north = as.numeric(aoi_bbox["ymax"]),
     crs   = 4326
   ),
-  temporal_extent = c("2017-03-01T00:00:00Z", "2017-07-31T23:59:59Z"),
-  bands = c("blue", "green", "red", "nir")
+  temporal_extent = c("2017-05-01T00:00:00Z", "2017-09-30T23:59:59Z"),
+  bands = c("coastal", "blue", "green", "red", "rededge1", "rededge2", "rededge3", "nir", "nir08", "nir09", "swir16", "swir22"),
+  cloud_cover = 50
 )
-
 
 datacube_crop <- p$aggregate_temporal_period(datacube_crop, period = "month", reducer = "median")
 datacube_aoi <- p$aggregate_temporal_period(datacube_aoi, period = "month", reducer = "median")
+
+datacube_crop <- p$array_interpolate_linear(datacube_crop)
+datacube_aoi  <- p$array_interpolate_linear(datacube_aoi)
 
 datacube_aoi <- p$ndvi(
   data = datacube_aoi,
@@ -68,9 +78,6 @@ datacube_crop <- p$ndvi(
   red = "red",
   target_band = "NDVI"
 )
-
-datacube_crop <- p$array_interpolate_linear(datacube_crop)
-datacube_aoi <- p$array_interpolate_linear(datacube_aoi)
 
 training_dat <- p$aggregate_spatial(
   data = datacube_crop,
@@ -103,78 +110,73 @@ end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
 
+
+
 ## The result is ready once the processing job has finished and the output GeoTIFF is available.
 # After the job has completed successfully, the result data can be downloaded.
 # At that point, copy or download the job results to your local download directory.
 
-prediction <- ("..insert model..")
+prediction <- ("..predict.tif..")
 r <- rast(prediction)
 plot(r)
 table(values(r))
 
-# This part is only necessary for crop type classification.
 aoi_v  <- terra::vect(aoi_transform)
 
 r_crop <- terra::crop(r, aoi_v)
 r_mask <- terra::mask(r_crop, aoi_v)
 
 
-levs <- c("barley","corn","orchards","permanent meadows","rapeseed","temporary meadows")
-vals <- sort(unique(stats::na.omit(values(r_mask))))
-
-rf <- as.factor(r_mask)
-levels(rf)[[1]] <- data.frame(ID = vals, label = levs[seq_along(vals)], stringsAsFactors = FALSE)
-names(rf) <- "cover"
-
 aoi_ll <- st_transform(aoi_transform, 4326)
 train_ll <- st_transform(transfor_aot, 4326)
 bb_ll <- sf::st_bbox(aoi_ll)
 
-#30m spatial resolution
 lat   <- as.numeric(mean(c(bb_ll["ymin"], bb_ll["ymax"])))
 m_per_deg_lat <- 111320
 m_per_deg_lon <- 111320 * cos(pi*lat/180)
-res_m <- terra::res(rf)
-res_deg_x <- res_m[1] / m_per_deg_lon
-res_deg_y <- res_m[2] / m_per_deg_lat
 
-ext_ll  <- terra::ext(bb_ll["xmin"], bb_ll["xmax"], bb_ll["ymin"], bb_ll["ymax"])
-tmpl_ll <- terra::rast(ext = ext_ll, crs = "EPSG:4326",
-                       resolution = c(res_deg_x, res_deg_y))
-
-
-rf_ll <- terra::project(rf, tmpl_ll, method = "near")
-
+rf_ll <- r_mask
 rf_st <- st_as_stars(rf_ll)
-id_vec <- levels(rf_ll)[[1]]$ID
-label_vec <- levels(rf_ll)[[1]]$label
-rf_st[[1]] <- factor(as.integer(rf_st[[1]]),
-                     levels = id_vec,
-                     labels = label_vec)
 
-pal <- c(
-  "barley"= "#d73027",
-  "corn" = "#8c510a",
-  "orchards" = "#006400",
-  "permanent meadows"  = "#7fc97f",
-  "rapeseed" = "#1f78b4",
-  "temporary meadows"  = "#ffd92f"
+
+names(rf_st) <- "cover"
+
+rf_st[["cover"]] <- factor(
+  rf_st[["cover"]],
+  levels = c(1, 2, 3, 4, 5, 6),
+  labels = c("barley", "corn", "permanent meadows", "rapeseed", "temporary meadows", "wheat")
 )
 
-##ggplot
+pal <- c(
+  "barley" = "#d73027",
+  "corn" = "#8c510a",
+  "permanent meadows"  = "#7fc97f",
+  "rapeseed" = "#1f78b4",
+  "temporary meadows"  = "#ffd92f",
+  "wheat"  = "#f5a623"
+)
+dummy <- data.frame(
+  x = rep(-999, 6),
+  y = rep(-999, 6),
+  cover = factor(names(pal), levels = names(pal))
+)
+
 plot <- ggplot() +
   geom_stars(data = rf_st) +
+  geom_tile(data = dummy, aes(x = x, y = y, fill = cover),
+            width = 0, height = 0) +
   scale_fill_manual(
     values = pal,
+    limits = names(pal),
     breaks = names(pal),
     labels = names(pal),
-    name   = "cover",
-    drop   = FALSE,
+    name = "cover",
+    drop = FALSE,
     na.value = "white",
     na.translate = FALSE
   ) +
   geom_sf(data = aoi_ll,   fill = NA, colour = "black", linewidth = 0.25) +
-  geom_sf(data = train_ll, fill = NA, colour = "grey20", linewidth = 0.10) +
+  #geom_sf(data = train_ll, fill = NA, colour = "grey20", linewidth = 0.10) +
   coord_sf(
     crs = st_crs(4326),
     default_crs = st_crs(4326),
@@ -189,40 +191,36 @@ plot <- ggplot() +
     plot.background  = element_rect(fill = "white", colour = NA),
     panel.grid.major = element_line(color = "grey92", linewidth = 0.2),
     panel.grid.minor = element_blank(),
-
-    legend.position = c(0.05, 0.05),
-    legend.justification  = c(0, 0),
+    legend.position = c(0.02, 0.08),
+    legend.justification = c(0, 0),
     legend.direction = "vertical",
-    legend.background = element_rect(fill = scales::alpha("white", 0.96),
-                                         colour = "grey25", linewidth = 0.6),
-    legend.key = element_rect(fill = "white"),
-    legend.box.margin = margin(3, 6, 3, 6),
-    legend.margin = margin(6, 8, 6, 8),
-    legend.title = element_text(face = "bold", size = 12),
-    legend.text = element_text(size = 11),
-    legend.key.size = unit(8, "mm")
+    legend.background = element_rect(fill = scales::alpha("white", 0.6),
+                                        colour = "grey30", linewidth = 0.3),
+    legend.key.size = unit(6, "mm"),
+    legend.spacing.y = unit(1, "mm"),
+    legend.margin = margin(8, 10, 8, 10),
+    legend.title = element_text(face = "bold", size = 10),
+    legend.text  = element_text(size = 9),
   ) +
   guides(
     fill = guide_legend(
-      ncol = 1, byrow = TRUE,
-      keywidth  = unit(12, "mm"),
-      keyheight = unit(7,  "mm"),
+      ncol = 1,
+      keywidth  = unit(6, "mm"),
+      keyheight = unit(5, "mm"),
       title.position = "top",
       label.hjust = 0
     )
   )
-
 print(plot)
 
 g <- ggplotGrob(plot)
 p_rot <- ggdraw() + draw_grob(editGrob(g, vp = viewport(angle = -4)))
 
-ggsave("map_rotated.png", p_rot, width = 12, height = 9, dpi = 300, bg = "white")
 
 g <- ggplotGrob(plot)
 
 panel_id <- which(g$layout$name == "panel")
-angle_deg <- -3.5
+angle_deg <- -4
 
 g$grobs[[panel_id]] <- editGrob(
   g$grobs[[panel_id]],
@@ -231,6 +229,9 @@ g$grobs[[panel_id]] <- editGrob(
 
 grid.newpage()
 grid.draw(g)
+
+
+
 
 
 

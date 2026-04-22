@@ -391,9 +391,6 @@ Session$createEndpoint(
 
   # assign data collection
   Session$assignData(sentinel_2_l2a)
-  Session$assignData(sentinel_2_pre_c1_l2a)
-  Session$assignData(sentinel_2_l1c)
-  Session$assignData(sentinel_2_c1_l2a)
   Session$assignData(landsat_c2_l2)
   # assign processes
   Session$assignProcess(load_collection)
@@ -439,4 +436,9 @@ Session$createEndpoint(
   Session$assignProcess(mlm_class_lighttae)
   Session$assignProcess(mlm_class_stgf)
   Session$assignProcess(load_stac_ml)
+  Session$assignProcess(ml_validate)
+  Session$assignProcess(ml_tune_grid)
+  Session$assignProcess(ml_tune_random)
+  Session$assignProcess(ml_smooth_class)
+
 }
