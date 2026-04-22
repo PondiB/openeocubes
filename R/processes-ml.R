@@ -8704,7 +8704,7 @@ ml_smooth_class <- Process$new(
       description = "The size of the moving window used for spatial smoothing. Must be an odd number to ensure a central pixel.", 
       optional = TRUE,
       schema = list(
-        type = "integer", minimum = 3, multipleOf = 2, default = 7
+        type = "integer", minimum = 3, default = 7
       )
     ), 
     Parameter$new(
