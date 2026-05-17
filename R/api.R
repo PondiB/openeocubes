@@ -420,6 +420,8 @@ Session$createEndpoint(
   Session$assignProcess(multiply)
   Session$assignProcess(divide)
   Session$assignProcess(evi)
+  Session$assignProcess(mask)
+
   # assign ml processes
   Session$assignProcess(ml_fit)
   Session$assignProcess(ml_predict)
