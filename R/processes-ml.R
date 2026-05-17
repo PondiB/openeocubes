@@ -583,11 +583,53 @@ ml_fit <- Process$new(
     })
     
     if (is_classification) {
-      if ("Accuracy" %in% colnames(model$results)) {
+
+      if (!is.null(model$method) && model$method == "rf" && !is.null(model$pred) && nrow(model$pred) > 0) {
+      
+      preds <- model$pred
+      cm <- caret::confusionMatrix(preds$pred, preds$obs)
+      
+      message("\n=== Cross-Validated Confusion Matrix (7-Fold CV ~85/15) ===")
+      print(cm$table)
+      
+      per_class <- cm$byClass
+      
+      if (is.matrix(per_class)) {
+        metrics_df <- data.frame(
+          Class = gsub("Class: ", "", rownames(per_class)),
+          Precision = round(per_class[, "Pos Pred Value"], 4),
+          Recall = round(per_class[, "Sensitivity"], 4),
+          F1 = round(per_class[, "F1"], 4),
+          Specificity = round(per_class[, "Specificity"], 4),
+          Balanced_Accuracy = round(per_class[, "Balanced Accuracy"], 4),
+          stringsAsFactors = FALSE
+        )
+      } else {
+        metrics_df <- data.frame(
+          Class = "Positive",
+          Precision = round(per_class["Pos Pred Value"], 4),
+          Recall = round(per_class["Sensitivity"], 4),
+          F1 = round(per_class["F1"], 4),
+          Specificity = round(per_class["Specificity"], 4),
+          Balanced_Accuracy = round(per_class["Balanced Accuracy"], 4),
+          stringsAsFactors = FALSE
+        )
+      }
+      message("\n=== Per-Class Metrics (7-Fold CV ~85/15) ===")   
+      print(metrics_df, row.names = FALSE)
+      
+      message(sprintf("\nMacro-Avg Precision : %.4f", mean(metrics_df$Precision, na.rm = TRUE)))
+      message(sprintf("Macro-Avg Recall : %.4f", mean(metrics_df$Recall, na.rm = TRUE)))
+      message(sprintf("Macro-Avg F1 : %.4f", mean(metrics_df$F1, na.rm = TRUE)))
+      message(sprintf("Overall Accuracy : %.2f%%", cm$overall["Accuracy"] * 100))
+      message(sprintf("Kappa : %.4f", cm$overall["Kappa"]))
+    } else {
+       if ("Accuracy" %in% colnames(model$results)) {
         accuracy <- max(model$results$Accuracy, na.rm = TRUE)
         message("Accuracy: ", round(accuracy * 100, 2), "%")
+        }
       }
-    } else {
+    }else {
       if ("RMSE" %in% colnames(model$results)) {
         rmse <- min(model$results$RMSE, na.rm = TRUE)
         message("RMSE: ", round(rmse, 2))
@@ -1059,7 +1101,8 @@ ml_predict <- Process$new(
           input_name <- inp$name
           candidates <- list(
             NCT = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands, nsteps)),
-            NTC = array(rnorm(1 * nsteps * n_bands), dim = c(1, nsteps, n_bands))
+            NTC = array(rnorm(1 * nsteps * n_bands), dim = c(1, nsteps, n_bands)), 
+            FLAT = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands * nsteps))
           )
           for (k in names(candidates)) {
             ok <- tryCatch({
@@ -1082,6 +1125,9 @@ ml_predict <- Process$new(
             } else if (layout_info$layout == "NTC") {
               message("Using ONNX NTC layout for prediction")
               x <- array(t(x), dim = c(1, nsteps_local, n_bands))  
+            } else if (layout_info$layout == "FLAT") {
+              message("Using ONNX FLAT layout (MLP)")
+              x <- matrix(x, nrow = 1)
             } else {
               stop("Unknown ONNX layout: ", layout_info$layout)
             }
@@ -1182,8 +1228,9 @@ ml_predict <- Process$new(
           inp <- sess$get_inputs()[[1]]
           input_name <- inp$name
           candidates <- list(
-            NCT = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands, nsteps)),
-            NTC = array(rnorm(1 * nsteps * n_bands), dim = c(1, nsteps, n_bands))
+            NCT  = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands, nsteps)),
+            NTC  = array(rnorm(1 * nsteps * n_bands), dim = c(1, nsteps, n_bands)),
+            FLAT = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands * nsteps))  
           )
           for (k in names(candidates)) {
             ok <- tryCatch({
@@ -1191,10 +1238,9 @@ ml_predict <- Process$new(
               sess$run(NULL, setNames(list(x_np), input_name))
               TRUE
             }, error = function(e) FALSE)
-
             if (ok) return(list(kind = "onnx", layout = k, input_name = input_name))
           }
-          stop("ONNX model accepts neither NCT nor NTC with given dims.")
+          stop("ONNX model accepts neither NCT, NTC nor FLAT with given dims.")
         }
 
         
@@ -1207,6 +1253,9 @@ ml_predict <- Process$new(
             } else if (layout_info$layout == "NTC") {
               message("Using ONNX NTC layout for prediction")
               x <- array(t(x), dim = c(1, nsteps_local, n_bands))  
+            } else if (layout_info$layout == "FLAT") {
+              message("Using ONNX FLAT layout for prediction")
+              x <- matrix(as.vector(x), nrow = 1)
             } else {
               stop("Unknown ONNX layout: ", layout_info$layout)
             }
@@ -2387,9 +2436,9 @@ mlm_random_forest_envelope <- function(max_variables,
   model_params <- list(
     method = "rf",
     tuneGrid = mtry_grid,
-    trControl = caret::trainControl(method = "cv", number = 5),
+    trControl = caret::trainControl(method = "cv", number = 7, sampling = "up", savePredictions = "final"),
     ntree = num_trees,
-    mtry_mode = max_variables, 
+    mtry_mode = max_variables,
     seed = seed,
     classification = classification
   )
