@@ -629,7 +629,7 @@ ml_fit <- Process$new(
         message("Accuracy: ", round(accuracy * 100, 2), "%")
         }
       }
-    }else {
+    } else {
       if ("RMSE" %in% colnames(model$results)) {
         rmse <- min(model$results$RMSE, na.rm = TRUE)
         message("RMSE: ", round(rmse, 2))
