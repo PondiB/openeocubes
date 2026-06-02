@@ -342,6 +342,28 @@ aggregate_spatial <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, geometries, reducer = NULL, target_dimension = NULL, context = NULL, job) {
+
+
+      message("=== CUBE DIAGNOSTICS ===")
+      message("class(data): ", paste(class(data), collapse = ", "))
+      message("bands: ", paste(gdalcubes::bands(data)$name, collapse = ", "))
+      
+      dims <- tryCatch(gdalcubes::dimensions(data), error = function(e) {
+        message("dimensions() ERROR: ", e$message)
+        NULL
+      })
+      message("dims class: ", paste(class(dims), collapse = ", "))
+      message("dims names: ", paste(names(dims), collapse = ", "))
+      message("dims$x: ", paste(names(dims$x), collapse = ", "))
+      message("dims$x$low: ", deparse(dims$x$low))
+      message("dims$y$low: ", deparse(dims$y$low))
+      
+      srs <- tryCatch(gdalcubes::srs(data), error = function(e) {
+        message("srs() ERROR: ", e$message)
+        NULL
+      })
+      message("srs: ", deparse(srs))
+      message("========================")
     library(sf)
     library(gdalcubes)
 
@@ -611,23 +633,25 @@ aggregate_spatial <- Process$new(
     log_crs("input", sf::st_crs(geometries))
     log_bbox("input", geometries)
 
-    reducer_type <- if (!is.null(reducer)) {
-      switch(reducer,
-        "mean" = base::mean,
-        "median" = stats::median,
-        "min" = base::min,
-        "max" = base::max,
-        "sum" = base::sum,
-        "count"  = function(x) sum(!is.na(x)),
-        "sd" = stats::sd,
-        "var" = stats::var,
-        stop("The specified reducer is not supported")
-      )
-    } else {
-      NULL
-    }
+    message("reducer raw value: ", deparse(reducer), " | class: ", class(reducer), " | length: ", length(reducer))
 
-    message("geomeotreies adding fid to it")
+  reducer_type <- if (!is.null(reducer) && length(reducer) > 0 && nzchar(reducer)) {
+    switch(reducer,
+      "mean"   = function(x) base::mean(x, na.rm = TRUE),
+      "median" = function(x) stats::median(x, na.rm = TRUE),
+      "min"    = function(x) base::min(x, na.rm = TRUE),
+      "max"    = function(x) base::max(x, na.rm = TRUE),
+      "sum"    = function(x) base::sum(x, na.rm = TRUE),
+      "count"  = function(x) sum(!is.na(x)),
+      "sd"     = function(x) stats::sd(x, na.rm = TRUE),
+      "var"    = function(x) stats::var(x, na.rm = TRUE),
+      stop("The specified reducer is not supported: ", reducer)
+    )
+  } else {
+    NULL
+  }
+
+    message("geometries adding fid to it")
     geometries <- add_fid_if_missing(geometries)
     geometries$fid <- as.integer(geometries$fid)
 
@@ -1719,3 +1743,63 @@ save_result <- Process$new(
     return(data)
   }
 )
+mask <- Process$new(
+  id = "mask",
+  summary = "Mask a data cube using the SCL band",
+  description = "Masks the data cube using the SCL (Scene Classification Layer) band. Pixels with SCL values in invalid_values are set to null. The SCL band is dropped from the result.",
+  categories = as.array(c("cubes", "filter")),
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A data cube containing a 'scl' band alongside spectral bands.",
+      schema = list(type = "object", subtype = "datacube")
+    ),
+    Parameter$new(
+      name = "invalid_values",
+      description = "List of SCL values considered invalid (to be masked). Defaults to c(0,1,3,8,9,10).",
+      schema = list(type = "array"),
+      optional = TRUE
+    )
+  ),
+  returns = eo_datacube,
+  operation = function(data, invalid_values = c(0, 1, 3, 8, 9, 10), job) {
+    message("Applying SCL mask...")
+
+    all_bands <- gdalcubes::bands(data)$name
+
+    if (!"scl" %in% tolower(all_bands)) {
+      stop("No 'scl' band found in data cube. Load it via load_collection(..., bands = c(..., 'scl'))")
+    }
+
+    spectral_bands <- all_bands[tolower(all_bands) != "scl"]
+
+    filter_expr <- paste(
+      sprintf("scl != %d", as.integer(invalid_values)),
+      collapse = " && "
+    )
+
+    message(sprintf(
+      "Invalid SCL values (masked out): [%s]",
+      paste(invalid_values, collapse = ", ")
+    ))
+    message("filter_pixel expression: ", filter_expr)
+
+    filtered <- tryCatch(
+      gdalcubes::filter_pixel(data, filter_expr),
+      error = function(e) stop("filter_pixel failed: ", e$message)
+    )
+
+    result <- tryCatch(
+      gdalcubes::select_bands(filtered, spectral_bands),
+      error = function(e) stop("select_bands failed: ", e$message)
+    )
+
+    message("Mask applied successfully! Bands in result: ", paste(gdalcubes::bands(result)$name, collapse = ", "))
+    return(result)
+  }
+)
+
+
+
+
+
