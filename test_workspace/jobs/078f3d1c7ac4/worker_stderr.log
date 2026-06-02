@@ -774,3 +774,6 @@ GTiff
 The above format is being saved
 Result invoked in Executable Process
 GeoTiff_output detected in the session 
+Error in gdalcubes:::gc_exec_worker(j$cube, j$worker_id, j$worker_count,  : 
+  c++ exception (unknown reason)
+Execution halted

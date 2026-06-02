@@ -284,13 +284,14 @@ load_collection <- Process$new(
 
     message("bands: ", bands)
 
-    cube <- tryCatch({
-      if (!is.null(bands)) {
-        gdalcubes::select_bands(cube, bands)
-      }
-    }, error = function(e){
-      message("Error selecting SCL: ", e$message)
-    })
+    if (!is.null(bands)) {
+      cube <- tryCatch(
+        gdalcubes::select_bands(cube, bands),
+        error = function(e) {
+          stop("Error selecting bands: ", e$message)
+        }
+      )
+    }
     message("data cube is created: ")
     message(as_json(cube))
     return(cube)
@@ -884,8 +885,26 @@ filter_bands <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, bands, job) {
+    cube <- data
     if (!is.null(bands)) {
-      cube <- gdalcubes::select_bands(data, bands)
+      band_map <- c(
+        coastal = "B01", blue = "B02", green = "B03", red = "B04",
+        rededge1 = "B05", rededge2 = "B06", rededge3 = "B07",
+        nir = "B08", nir08 = "B8A", nir09 = "B09",
+        cirrus = "B10", swir16 = "B11", swir22 = "B12", scl = "SCL"
+      )
+      cube_band_names <- gdalcubes::bands(data)$name
+      select_names <- bands
+      if (any(bands %in% names(band_map)) && any(cube_band_names %in% unname(band_map))) {
+        select_names <- vapply(bands, function(b) {
+          if (b %in% names(band_map)) band_map[[b]] else b
+        }, character(1))
+      }
+      cube <- gdalcubes::select_bands(data, select_names)
+      if (!identical(select_names, bands)) {
+        rename_expr <- setNames(select_names, bands)
+        cube <- gdalcubes::apply_pixel(cube, rename_expr, names = bands, keep_bands = FALSE)
+      }
     }
     message("Filtered data cube ....")
     message(gdalcubes::as_json(cube))

@@ -50,7 +50,7 @@ result = p$save_result(data = datacube_ndvi, format = formats$output$GTiff)
 
 # Process and download data synchronously
 start.time <- Sys.time()
-compute_result(graph = result, output_file = "amazonia_2022_ndvi.tif")
+compute_result(graph = result, output_file = "./amazonia_2022_ndvi.tif")
 end.time <- Sys.time()
 time.taken <- end.time - start.time
 time.taken
