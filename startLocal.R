@@ -4,6 +4,17 @@ remotes::install_local("./", dependencies = TRUE, force = TRUE)
 # Start service
 library(openeocubes)
 
+if (Sys.getenv("OPENEO_ASYNC_JOB_TIMEOUT_SEC", unset = "") == "") {
+  Sys.setenv(OPENEO_ASYNC_JOB_TIMEOUT_SEC = "300")
+}
+if (Sys.getenv("OPENEO_STALE_OUTPUT_FINALIZE_SEC", unset = "") == "") {
+  Sys.setenv(OPENEO_STALE_OUTPUT_FINALIZE_SEC = "30")
+}
+message(
+  "Async safeguards: timeout=", Sys.getenv("OPENEO_ASYNC_JOB_TIMEOUT_SEC"),
+  "s, stale-finalize=", Sys.getenv("OPENEO_STALE_OUTPUT_FINALIZE_SEC"), "s"
+)
+
 aws.host <- Sys.getenv("AWSHOST")
 
 if (aws.host == "") {

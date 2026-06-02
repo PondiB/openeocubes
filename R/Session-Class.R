@@ -257,8 +257,8 @@ SessionInstance <- R6Class(
           gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES", "YES")
 
           createSessionInstance(config)
-          openeocubes:::addEndpoint()
-          Session$initDirectory(cleanup = TRUE)
+          openeocubes:::assignSessionResources()
+          Session$initDirectory(cleanup = FALSE)
           Session$assignJob(job_obj)
           Session$runJob(job_obj)
         },
@@ -271,7 +271,8 @@ SessionInstance <- R6Class(
       self$job_executor[[job$id]] <- list(
         process = worker,
         stdout = stdout_file,
-        stderr = stderr_file
+        stderr = stderr_file,
+        started_at = Sys.time()
       )
 
       Sys.sleep(0.1)
@@ -301,6 +302,14 @@ SessionInstance <- R6Class(
         return(job)
       }
 
+      dir <- file.path(Session$getConfig()$workspace.path, job$output.folder)
+      if (!dir.exists(dir)) dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+      error_file <- file.path(dir, "worker_error.txt")
+
+      files <- setdiff(list.files(dir, all.files = FALSE), "jobInfo.txt")
+      result_files <- files[grepl("\\.tif(f)?$|\\.nc$", files, ignore.case = TRUE)]
+      has_result <- length(result_files) > 0
+
       executor <- self$job_executor[[job$id]]
       if (is.null(executor$process)) {
         return(job)
@@ -308,6 +317,75 @@ SessionInstance <- R6Class(
       worker <- executor$process
       is_alive <- tryCatch(worker$is_alive(), error = function(e) NA)
       if (isTRUE(is_alive)) {
+        timeout_sec <- suppressWarnings(as.numeric(Sys.getenv("OPENEO_ASYNC_JOB_TIMEOUT_SEC", unset = "1200")))
+        if (is.na(timeout_sec) || timeout_sec <= 0) {
+          timeout_sec <- 1200
+        }
+        stale_finalize_sec <- suppressWarnings(as.numeric(Sys.getenv("OPENEO_STALE_OUTPUT_FINALIZE_SEC", unset = "120")))
+        if (is.na(stale_finalize_sec) || stale_finalize_sec <= 0) {
+          stale_finalize_sec <- 120
+        }
+        running_secs <- if (!is.null(executor$started_at)) {
+          as.numeric(difftime(Sys.time(), executor$started_at, units = "secs"))
+        } else {
+          NA_real_
+        }
+        mtime_values <- if (has_result) {
+          file.info(file.path(dir, result_files))$mtime
+        } else {
+          as.POSIXct(character(0))
+        }
+        mtime_values <- mtime_values[!is.na(mtime_values)]
+        stable_secs <- if (length(mtime_values) > 0) {
+          as.numeric(difftime(Sys.time(), max(mtime_values), units = "secs"))
+        } else {
+          NA_real_
+        }
+        stderr_lines_alive <- if (file.exists(executor$stderr)) {
+          tryCatch(readLines(executor$stderr, warn = FALSE), error = function(e) character(0))
+        } else {
+          character(0)
+        }
+        has_export_started <- any(grepl(
+          "GeoTiff_output detected in the session|Geotiff run |The above format is being saved",
+          stderr_lines_alive,
+          fixed = FALSE
+        ))
+
+        if (has_result && has_export_started && !is.na(stable_secs) && stable_secs >= stale_finalize_sec) {
+          tryCatch(worker$kill(), error = function(e) NULL)
+          detail <- sprintf(
+            "Background worker stalled after export start; finalized as finished using stable output files (stable %.0fs).",
+            stable_secs
+          )
+          writeLines(detail, error_file)
+          job$status <- "finished"
+          writeJobInfo(job)
+          self$job_executor[[job$id]] <- NULL
+          return(job)
+        }
+
+        if (!is.na(running_secs) && running_secs > timeout_sec) {
+          tryCatch(worker$kill(), error = function(e) NULL)
+          if (has_result && !is.na(stable_secs) && stable_secs >= 30) {
+            detail <- sprintf(
+              "Background worker timed out after %.0fs; finalized as finished using existing output files.",
+              running_secs
+            )
+            writeLines(detail, error_file)
+            job$status <- "finished"
+            writeJobInfo(job)
+          } else {
+            detail <- sprintf(
+              "Background worker timed out after %.0fs before producing stable outputs.",
+              running_secs
+            )
+            writeLines(detail, error_file)
+            job$status <- "error"
+            writeJobInfo(job)
+          }
+          self$job_executor[[job$id]] <- NULL
+        }
         return(job)
       }
 
@@ -317,12 +395,6 @@ SessionInstance <- R6Class(
       }
 
       exit_status <- tryCatch(worker$get_exit_status(), error = function(e) NA_integer_)
-      dir <- file.path(Session$getConfig()$workspace.path, job$output.folder)
-      if (!dir.exists(dir)) dir.create(dir, recursive = TRUE, showWarnings = FALSE)
-      error_file <- file.path(dir, "worker_error.txt")
-
-      files <- setdiff(list.files(dir, all.files = FALSE), "jobInfo.txt")
-      has_result <- any(grepl("\\.tif(f)?$|\\.nc$", files, ignore.case = TRUE))
       stderr_lines <- if (file.exists(executor$stderr)) {
         tryCatch(readLines(executor$stderr, warn = FALSE), error = function(e) character(0))
       } else {
@@ -330,13 +402,12 @@ SessionInstance <- R6Class(
       }
       has_done <- any(grepl("Done\\. The result can be downloaded\\.", stderr_lines, fixed = FALSE))
 
-      if (!is.na(exit_status) && exit_status == 0L && has_result && has_done) {
+      if (!is.na(exit_status) && exit_status == 0L && has_result) {
+        if (!has_done) {
+          detail <- "Background worker exited cleanly and output files exist, but completion marker was missing."
+          writeLines(detail, error_file)
+        }
         job$status <- "finished"
-        writeJobInfo(job)
-      } else if (!is.na(exit_status) && exit_status == 0L && has_result && !has_done) {
-        detail <- "Background worker exited before export completed (missing Done marker in worker log)."
-        writeLines(detail, error_file)
-        job$status <- "error"
         writeJobInfo(job)
       } else {
         detail <- private$lastNonEmptyLogLine(executor$stderr)

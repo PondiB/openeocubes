@@ -43,3 +43,5 @@ vignettes/*.pdf
 
 #results from backend jobs
 /results
+
+/test_workspace
