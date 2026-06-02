@@ -1,0 +1,8 @@
+<PAMDataset>
+  <PAMRasterBand band="1">
+    <Description>prediction</Description>
+    <Metadata>
+      <MDI key="STATISTICS_VALID_PERCENT">0</MDI>
+    </Metadata>
+  </PAMRasterBand>
+</PAMDataset>

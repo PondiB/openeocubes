@@ -1,0 +1,28 @@
+{
+  "classes": [
+    {
+      "class_id": 1,
+      "class_name": "barley"
+    },
+    {
+      "class_id": 2,
+      "class_name": "corn"
+    },
+    {
+      "class_id": 3,
+      "class_name": "permanent meadows"
+    },
+    {
+      "class_id": 4,
+      "class_name": "rapeseed"
+    },
+    {
+      "class_id": 5,
+      "class_name": "temporary meadows"
+    },
+    {
+      "class_id": 6,
+      "class_name": "wheat"
+    }
+  ]
+}

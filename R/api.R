@@ -5,6 +5,7 @@
 #' @include processes-math.R
 #' @include processes-ml.R
 #' @include processes-cube.R
+#' @include process-graph-adapter.R
 #' @include api_job.R
 #' @include api_process_graphs.R
 NULL
@@ -190,7 +191,7 @@ NULL
   tryCatch(
     {
       sent_job <- jsonlite::fromJSON(req$rook.input$read_lines(), simplifyDataFrame = FALSE)
-      process_graph <- sent_job$process
+      process_graph <- adaptProcessGraph(sent_job$process)
       newJob <- Job$new(process = process_graph)
 
       job <- newJob$run()
@@ -419,8 +420,12 @@ Session$createEndpoint(
   Session$assignProcess(subtract)
   Session$assignProcess(multiply)
   Session$assignProcess(divide)
+  Session$assignProcess(eq)
+  Session$assignProcess(lte)
+  Session$assignProcess(or)
   Session$assignProcess(evi)
   Session$assignProcess(mask)
+  Session$assignProcess(mask_scl)
 
   # assign ml processes
   Session$assignProcess(ml_fit)

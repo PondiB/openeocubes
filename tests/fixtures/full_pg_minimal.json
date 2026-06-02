@@ -1,0 +1,322 @@
+{
+  "loadcollection1": {
+    "process_id": "load_collection",
+    "arguments": {
+      "bands": ["coastal", "blue", "green", "red", "nir", "scl"],
+      "id": "sentinel-2-l2a",
+      "spatial_extent": {
+        "west": -4.02,
+        "south": 48.1,
+        "east": -3.74,
+        "north": 48.2,
+        "crs": 4326
+      },
+      "temporal_extent": ["2017-05-01T00:00:00Z", "2017-05-31T23:59:59Z"],
+      "properties": {
+        "eo:cloud_cover": {
+          "process_graph": {
+            "lte1": {
+              "process_id": "lte",
+              "arguments": {
+                "x": { "from_parameter": "value" },
+                "y": 50
+              },
+              "result": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "reducedimension1": {
+    "process_id": "reduce_dimension",
+    "arguments": {
+      "data": { "from_node": "loadcollection1" },
+      "dimension": "bands",
+      "reducer": {
+        "process_graph": {
+          "arrayelement1": {
+            "process_id": "array_element",
+            "arguments": {
+              "data": { "from_parameter": "data" },
+              "index": 12
+            }
+          },
+          "eq1": {
+            "process_id": "eq",
+            "arguments": {
+              "x": { "from_node": "arrayelement1" },
+              "y": 3
+            }
+          },
+          "eq2": {
+            "process_id": "eq",
+            "arguments": {
+              "x": { "from_node": "arrayelement1" },
+              "y": 8
+            }
+          },
+          "or1": {
+            "process_id": "or",
+            "arguments": {
+              "x": { "from_node": "eq1" },
+              "y": { "from_node": "eq2" }
+            }
+          },
+          "eq3": {
+            "process_id": "eq",
+            "arguments": {
+              "x": { "from_node": "arrayelement1" },
+              "y": 9
+            }
+          },
+          "or2": {
+            "process_id": "or",
+            "arguments": {
+              "x": { "from_node": "or1" },
+              "y": { "from_node": "eq3" }
+            },
+            "result": true
+          }
+        }
+      }
+    }
+  },
+  "filterbands1": {
+    "process_id": "filter_bands",
+    "arguments": {
+      "data": { "from_node": "loadcollection1" },
+      "bands": ["coastal", "blue", "green", "red", "nir"]
+    }
+  },
+  "mask1": {
+    "process_id": "mask",
+    "arguments": {
+      "data": { "from_node": "filterbands1" },
+      "mask": { "from_node": "reducedimension1" }
+    }
+  },
+  "aggregatetemporalperiod1": {
+    "process_id": "aggregate_temporal_period",
+    "arguments": {
+      "data": { "from_node": "mask1" },
+      "period": "month",
+      "reducer": {
+        "process_graph": {
+          "median1": {
+            "process_id": "median",
+            "arguments": {
+              "data": { "from_parameter": "data" }
+            },
+            "result": true
+          }
+        }
+      }
+    }
+  },
+  "ndvi1": {
+    "process_id": "ndvi",
+    "arguments": {
+      "data": { "from_node": "aggregatetemporalperiod1" },
+      "nir": "nir",
+      "red": "red",
+      "target_band": "NDVI"
+    }
+  },
+  "mlmclassrandomforest1": {
+    "process_id": "mlm_class_random_forest",
+    "arguments": {
+      "max_variables": "sqrt",
+      "num_trees": 10,
+      "seed": 42
+    }
+  },
+  "loadcollection2": {
+    "process_id": "load_collection",
+    "arguments": {
+      "bands": ["coastal", "blue", "green", "red", "nir", "scl"],
+      "id": "sentinel-2-l2a",
+      "spatial_extent": {
+        "west": -4.02,
+        "south": 48.2,
+        "east": -3.74,
+        "north": 48.3,
+        "crs": 4326
+      },
+      "temporal_extent": ["2017-05-01T00:00:00Z", "2017-05-31T23:59:59Z"],
+      "properties": {
+        "eo:cloud_cover": {
+          "process_graph": {
+            "lte1": {
+              "process_id": "lte",
+              "arguments": {
+                "x": { "from_parameter": "value" },
+                "y": 50
+              },
+              "result": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "reducedimension2": {
+    "process_id": "reduce_dimension",
+    "arguments": {
+      "data": { "from_node": "loadcollection2" },
+      "dimension": "bands",
+      "reducer": {
+        "process_graph": {
+          "arrayelement1": {
+            "process_id": "array_element",
+            "arguments": {
+              "data": { "from_parameter": "data" },
+              "index": 12
+            }
+          },
+          "eq1": {
+            "process_id": "eq",
+            "arguments": {
+              "x": { "from_node": "arrayelement1" },
+              "y": 3
+            }
+          },
+          "eq2": {
+            "process_id": "eq",
+            "arguments": {
+              "x": { "from_node": "arrayelement1" },
+              "y": 8
+            }
+          },
+          "or1": {
+            "process_id": "or",
+            "arguments": {
+              "x": { "from_node": "eq1" },
+              "y": { "from_node": "eq2" }
+            }
+          },
+          "eq3": {
+            "process_id": "eq",
+            "arguments": {
+              "x": { "from_node": "arrayelement1" },
+              "y": 9
+            }
+          },
+          "or2": {
+            "process_id": "or",
+            "arguments": {
+              "x": { "from_node": "or1" },
+              "y": { "from_node": "eq3" }
+            },
+            "result": true
+          }
+        }
+      }
+    }
+  },
+  "filterbands2": {
+    "process_id": "filter_bands",
+    "arguments": {
+      "data": { "from_node": "loadcollection2" },
+      "bands": ["coastal", "blue", "green", "red", "nir"]
+    }
+  },
+  "mask2": {
+    "process_id": "mask",
+    "arguments": {
+      "data": { "from_node": "filterbands2" },
+      "mask": { "from_node": "reducedimension2" }
+    }
+  },
+  "aggregatetemporalperiod2": {
+    "process_id": "aggregate_temporal_period",
+    "arguments": {
+      "data": { "from_node": "mask2" },
+      "period": "month",
+      "reducer": {
+        "process_graph": {
+          "median1": {
+            "process_id": "median",
+            "arguments": {
+              "data": { "from_parameter": "data" }
+            },
+            "result": true
+          }
+        }
+      }
+    }
+  },
+  "ndvi2": {
+    "process_id": "ndvi",
+    "arguments": {
+      "data": { "from_node": "aggregatetemporalperiod2" },
+      "nir": "nir",
+      "red": "red",
+      "target_band": "NDVI"
+    }
+  },
+  "aggregatespatial1": {
+    "process_id": "aggregate_spatial",
+    "arguments": {
+      "data": { "from_node": "ndvi2" },
+      "geometries": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "class_name": "barley"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [-3.99, 48.25],
+                  [-3.98, 48.25],
+                  [-3.98, 48.26],
+                  [-3.99, 48.26],
+                  [-3.99, 48.25]
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "reducer": {
+        "process_graph": {
+          "median1": {
+            "process_id": "median",
+            "arguments": {
+              "data": { "from_parameter": "data" }
+            },
+            "result": true
+          }
+        }
+      }
+    }
+  },
+  "mlfit1": {
+    "process_id": "ml_fit",
+    "arguments": {
+      "model": { "from_node": "mlmclassrandomforest1" },
+      "target": "class_name",
+      "training_set": { "from_node": "aggregatespatial1" }
+    }
+  },
+  "mlpredict1": {
+    "process_id": "ml_predict",
+    "arguments": {
+      "data": { "from_node": "ndvi1" },
+      "model": { "from_node": "mlfit1" }
+    }
+  },
+  "saveresult1": {
+    "process_id": "save_result",
+    "arguments": {
+      "data": { "from_node": "mlpredict1" },
+      "format": "GTiff",
+      "options": {}
+    },
+    "result": true
+  }
+}

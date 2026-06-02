@@ -77,7 +77,109 @@ if (shared_dir == "") {
 
 #############################################################################
 
+.ml_prediction_tmp_dir <- function(job = NULL) {
+  base <- Sys.getenv("SHARED_TEMP_DIR", unset = tempdir())
+  if (!is.null(job) && !is.null(job$id) && nzchar(as.character(job$id))) {
+    subdir <- file.path(base, paste0("ml_predict_", job$id))
+    dir.create(subdir, recursive = TRUE, showWarnings = FALSE)
+    return(subdir)
+  }
+  base
+}
 
+.ml_extract_class_levels <- function(model) {
+  if (inherits(model, "train") && !is.null(model$levels)) {
+    return(as.character(model$levels))
+  }
+  if (inherits(model, "xgb.Booster")) {
+    return(attr(model, "class_levels"))
+  }
+  if (is.list(model) && identical(model$type, "caret_final") && !is.null(model$levels)) {
+    return(as.character(model$levels))
+  }
+  NULL
+}
+
+.ml_write_prediction_class_map <- function(model, job) {
+  if (is.null(job) || is.null(job$id)) {
+    return(invisible(NULL))
+  }
+  levels <- .ml_extract_class_levels(model)
+  if (is.null(levels) || !length(levels)) {
+    return(invisible(NULL))
+  }
+  out_dir <- file.path(Session$getConfig()$workspace.path, job$output.folder)
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  mapping <- data.frame(
+    class_id = seq_along(levels),
+    class_name = levels,
+    stringsAsFactors = FALSE
+  )
+  jsonlite::write_json(
+    list(classes = mapping),
+    file.path(out_dir, "prediction_classes.json"),
+    auto_unbox = TRUE,
+    pretty = TRUE
+  )
+  invisible(NULL)
+}
+
+.ml_serialize_worker_model <- function(model, model_file) {
+  dir.create(dirname(model_file), recursive = TRUE, showWarnings = FALSE)
+  saveRDS(model, model_file, compress = FALSE)
+  invisible(model_file)
+}
+
+.ml_ensure_ml_predict_packages <- function() {
+  if (requireNamespace("randomForest", quietly = TRUE)) {
+    suppressPackageStartupMessages(library(randomForest, quietly = TRUE))
+  }
+  if (requireNamespace("caret", quietly = TRUE)) {
+    suppressPackageStartupMessages(library(caret, quietly = TRUE))
+  }
+}
+
+.ml_read_rds_local <- function(source_file) {
+  if (!file.exists(source_file)) {
+    stop("Missing RDS file: ", source_file)
+  }
+  local_file <- file.path(
+    tempdir(),
+    paste0("ml_local_", Sys.getpid(), "_", sample.int(1000000000L, 1L), ".rds")
+  )
+  last_error <- NULL
+  for (attempt in seq_len(8L)) {
+    result <- tryCatch({
+      if (!isTRUE(file.copy(source_file, local_file, overwrite = TRUE))) {
+        stop("file.copy failed")
+      }
+      readRDS(local_file)
+    }, error = function(e) {
+      last_error <<- conditionMessage(e)
+      NULL
+    })
+    if (!is.null(result)) {
+      return(result)
+    }
+    Sys.sleep(0.05 * attempt)
+  }
+  stop("Failed to read RDS '", source_file, "': ", last_error)
+}
+
+.ml_predict_class_response <- function(local_model, pixel_df) {
+  .ml_ensure_ml_predict_packages()
+  if (inherits(local_model, "train")) {
+    pred <- predict(local_model, newdata = pixel_df)
+  } else if (inherits(local_model, "randomForest")) {
+    pred <- predict(local_model, newdata = pixel_df)
+  } else {
+    pred <- predict(local_model, newdata = pixel_df)
+  }
+  if (is.factor(pred)) {
+    return(as.integer(pred))
+  }
+  as.numeric(pred)
+}
 
 ##### ml-processes #####
 
@@ -702,18 +804,19 @@ ml_predict <- Process$new(
     
     mlm_single <- function(data_cube, model) {
       message("Preparing prediction with apply_pixel using temporary directory...")
-      tmp <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
+      tmp <- .ml_prediction_tmp_dir(job)
       
       if (is.character(model)) {
         message("Model is a file path: ", model)
         model_file <- model
       } else {
         if (is_torch_model(model)) {
-          model_file <- tempfile(fileext = ".pt")
+          model_file <- file.path(tmp, "ml_model.pt")
           torch::torch_save(model, model_file)
         } else {
-          model_file <- file.path(tmp, "model.rds")
-          saveRDS(model, model_file)
+          model_file <- file.path(tmp, "ml_model.rds")
+          .ml_serialize_worker_model(model, model_file)
+          .ml_write_prediction_class_map(model, job)
           message("Classic ML model saved to RDS single: ", model_file)
         }
       }
@@ -737,6 +840,35 @@ ml_predict <- Process$new(
       Sys.setenv(NSTEPS = nsteps)
       
       predict_pixel_fun <- function(x) {
+        suppressPackageStartupMessages({
+          require(randomForest, quietly = TRUE)
+          require(caret, quietly = TRUE)
+        })
+
+        read_rds_local <- function(source_file) {
+          local_file <- file.path(
+            tempdir(),
+            paste0("ml_local_", Sys.getpid(), "_", sample.int(1000000000L, 1L), ".rds")
+          )
+          last_error <- NULL
+          for (attempt in seq_len(8L)) {
+            result <- tryCatch({
+              if (!isTRUE(file.copy(source_file, local_file, overwrite = TRUE))) {
+                stop("file.copy failed")
+              }
+              readRDS(local_file)
+            }, error = function(e) {
+              last_error <<- conditionMessage(e)
+              NULL
+            })
+            if (!is.null(result)) {
+              return(result)
+            }
+            Sys.sleep(0.05 * attempt)
+          }
+          stop("Failed to read RDS '", source_file, "': ", last_error)
+        }
+
         local_tmp <- Sys.getenv("TMPDIRPATH")
         nsteps <- as.numeric(Sys.getenv("NSTEPS"))
         model_file <- Sys.getenv("MODEL_FILE")
@@ -749,16 +881,18 @@ ml_predict <- Process$new(
         
         if (!is.matrix(x)) x <- matrix(x, nrow = 1)
         
-        local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
+        local_bands <- read_rds_local(file.path(local_tmp, "band_names.rds"))
         if (is.null(colnames(x))) colnames(x) <- local_bands
         
         pixel_df <- as.data.frame(x)
         
-        library(torch)
-        if (endsWith(model_file, ".pt")) {
-          local_model <- torch::torch_load(model_file)
+        if (endsWith(tolower(model_file), ".pt")) {
+          local_pt <- file.path(tempdir(), paste0("ml_model_", Sys.getpid(), ".pt"))
+          file.copy(model_file, local_pt, overwrite = TRUE)
+          library(torch)
+          local_model <- torch::torch_load(local_pt)
         } else {
-          local_model <- readRDS(model_file)
+          local_model <- read_rds_local(model_file)
         }
 
         infer_torch_layout <- function(model, n_bands, nsteps) {
@@ -795,6 +929,7 @@ ml_predict <- Process$new(
           }
           return(as.numeric(pred_value))
         } else if (is_torch_model(local_model)) {
+          library(torch)
           message("Deep Learning model detected in predict_pixel_fun")
           pixel_matrix <- as.matrix(pixel_df)
           n_channels <- length(local_bands)
@@ -818,9 +953,10 @@ ml_predict <- Process$new(
           pred_class <- as.numeric(torch::as_array(pred_class_tensor))
           return(pred_class)
         } else {
-          message("Classic ML model used in predict_pixel_fun")
-          pred <- predict(local_model, newdata = pixel_df)
-          return(as.numeric(pred))
+          if (any(is.na(pixel_df))) {
+            return(as.numeric(NA))
+          }
+          return(as.integer(predict(local_model, newdata = pixel_df)))
         }
       }
       
@@ -852,6 +988,7 @@ ml_predict <- Process$new(
         } else {
           model_file <- file.path(tmp, "model.rds")
           saveRDS(model, model_file)
+          .ml_write_prediction_class_map(model, job)
           message("Classic ML model saved to RDS multi: ", model_file)
         }
       }
@@ -877,34 +1014,65 @@ ml_predict <- Process$new(
       message("temp", tmp)
       
       predict_time_fun <- function(x) {
+        fun_env <- environment()
         local_tmp <- Sys.getenv("TMPDIRPATH")
         local_nsteps <- as.numeric(Sys.getenv("NSTEPS"))
         model_file <- Sys.getenv("MODEL_FILE")
-        
-        
+
         is_torch_model <- function(model) {
           inherits(model, "nn_module") ||
             "nn_module" %in% class(model) ||
             (!is.null(model$conv_layers) && !is.null(model$dense))
         }
-        
-        if (!is.matrix(x)) {
-          x <- matrix(x, nrow = length(readRDS(file.path(local_tmp, "band_names.rds"))))
+
+        if (!exists("local_bands", envir = fun_env, inherits = FALSE)) {
+          assign(
+            "local_bands",
+            readRDS(file.path(local_tmp, "band_names.rds")),
+            envir = fun_env
+          )
         }
-        
-        local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
+        local_bands <- get("local_bands", envir = fun_env, inherits = FALSE)
+
+        if (!is.matrix(x)) {
+          x <- matrix(x, nrow = length(local_bands))
+        }
+
         n_bands <- length(local_bands)
         if (nrow(x) != n_bands || ncol(x) != local_nsteps) {
           stop("The dimensions of the pixel time series do not match: Expected ",
                n_bands, " Lines and ", local_nsteps, " Columns, but preserved: ",
                nrow(x), " x ", ncol(x))
         }
-        
+
         if (endsWith(model_file, ".pt")) {
           library(torch)
           local_model <- torch::torch_load(model_file)
+        } else if (!exists("local_model", envir = fun_env, inherits = FALSE)) {
+          local_model_path <- file.path(tempdir(), paste0("ml_model_", Sys.getpid(), ".rds"))
+          copied <- FALSE
+          last_error <- NULL
+          for (attempt in seq_len(8L)) {
+            copied <- tryCatch({
+              isTRUE(file.copy(model_file, local_model_path, overwrite = TRUE)) &&
+                file.info(local_model_path)$size > 0
+            }, error = function(e) {
+              last_error <<- conditionMessage(e)
+              FALSE
+            })
+            if (copied) break
+            Sys.sleep(0.05 * attempt)
+          }
+          if (!copied) {
+            stop(
+              "Failed to copy model file '", model_file, "': ",
+              if (is.null(last_error)) "unknown error" else last_error
+            )
+          }
+          assign("local_model", readRDS(local_model_path), envir = fun_env)
+          local_model <- get("local_model", envir = fun_env, inherits = FALSE)
         } else {
-          local_model <- readRDS(model_file)
+          local_model <- get("local_model", envir = fun_env, inherits = FALSE)
         }
 
         infer_torch_layout <- function(model, n_bands, nsteps) {
@@ -927,7 +1095,6 @@ ml_predict <- Process$new(
           wide_vec <- as.vector(x)
           wide_mat <- matrix(wide_vec, nrow = 1)
           wide_names <- unlist(lapply(seq_len(local_nsteps), function(i) paste0(local_bands, "_T", i)))
-          message("Wide names: ", paste(wide_names, collapse = ", "))
           if (length(wide_vec) != length(wide_names)) {
             stop("Mismatch: vector length is ", length(wide_vec), " but expected ", length(wide_names))
           }
@@ -977,7 +1144,6 @@ ml_predict <- Process$new(
           wide_vec <- as.vector(x)
           wide_mat <- matrix(wide_vec, nrow = 1)
           wide_names <- unlist(lapply(seq_len(local_nsteps), function(i) paste0(local_bands, "_T", i)))
-          message("Wide names: ", paste(wide_names, collapse = ", "))
           if (length(wide_vec) != length(wide_names)) {
             stop("Mismatch: vector length is ", length(wide_vec), " but expected ", length(wide_names))
           }

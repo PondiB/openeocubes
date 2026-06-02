@@ -1,0 +1,6 @@
+Job info
+Job_ID: 2c1cef6591ce
+Job_Title: full_pg.json submission
+Job_Description: Submit full_pg.json graph via openeo R client
+Job_Status: error
+Job_Created: 2026-06-02 16:56:24.826052
