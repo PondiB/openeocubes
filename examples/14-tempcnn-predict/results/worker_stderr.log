@@ -1,0 +1,254 @@
+Using internal shared dir: /tmp/openeocubes_shared_temp
+run
+Executable Process called ...
+Executable Process called ...
+Executable Process called ...
+Executable Process called ...
+crs is : 25832
+After Temporal extent: 2017-05-01T00:00:00Z/2017-09-30T23:59:59Z
+After Spatial extent ...
+Using dx and dy of 30 m for projected CRS
+After default Spatial extent for stac..
+crs is not 4326...
+Transformed to 4326...
+STAC API call....
+Number of STAC items: 93
+Tiles: 32ULC, 32UMC
+Cloud cover per tile:
+Items by cloud filter: 13 by 93
+Items by manual filter: 13 by 93
+Image collection created...
+## Temporal extent of the cube does not align with dt and has been extended to 2017-05-01/2017-09-30
+bands: bluegreenrednir
+data cube is created: 
+{
+    "bands": [
+        "blue",
+        "green",
+        "red",
+        "nir"
+    ],
+    "cube_type": "select_bands",
+    "in_cube": {
+        "band_names": [
+            "blue",
+            "green",
+            "red",
+            "nir"
+        ],
+        "cube_type": "apply_pixel",
+        "expr": [
+            "b02",
+            "b03",
+            "b04",
+            "b08"
+        ],
+        "in_cube": {
+            "chunk_size": [
+                1,
+                64,
+                64
+            ],
+            "cube_type": "image_collection",
+            "file": "/tmp/Rtmp4RaZ8f/file734345472d.db",
+            "strict": false,
+            "view": {
+                "aggregation": "median",
+                "resampling": "average",
+                "space": {
+                    "bottom": 5755389.9000000004,
+                    "left": 402920.70000000001,
+                    "nx": 100,
+                    "ny": 100,
+                    "right": 405920.70000000001,
+                    "srs": "EPSG:25832",
+                    "top": 5758389.9000000004
+                },
+                "time": {
+                    "dt": "P1M",
+                    "t0": "2017-05-01",
+                    "t1": "2017-09-30"
+                }
+            }
+        },
+        "keep_bands": false
+    }
+}
+
+Result invoked in Executable Process
+
+Fill NA values...
+NA values filled!
+Result invoked in Executable Process
+Executable Process called ...
+Executable Process called ...
+Result invoked in Executable Process
+Executable Process called ...
+Executable Process called ...
+Executable Process called ...
+crs is : 25832
+After Temporal extent: 2017-05-01T00:00:00Z/2017-09-30T23:59:59Z
+After Spatial extent ...
+Using dx and dy of 30 m for projected CRS
+After default Spatial extent for stac..
+crs is not 4326...
+Transformed to 4326...
+STAC API call....
+Number of STAC items: 139
+Tiles: 31UGT, 32ULC, 32UMC
+Cloud cover per tile:
+Items by cloud filter: 21 by 139
+Items by manual filter: 21 by 139
+Image collection created...
+## Size of the cube in x direction does not align with dx, extent will be enlarged by 8.500000 at both sides.
+## Size of the cube in y direction does not align with dy, extent will be enlarged by 4.000000 at both sides.
+## Temporal extent of the cube does not align with dt and has been extended to 2017-05-01/2017-09-30
+bands: bluegreenrednir
+data cube is created: 
+{
+    "bands": [
+        "blue",
+        "green",
+        "red",
+        "nir"
+    ],
+    "cube_type": "select_bands",
+    "in_cube": {
+        "band_names": [
+            "blue",
+            "green",
+            "red",
+            "nir"
+        ],
+        "cube_type": "apply_pixel",
+        "expr": [
+            "b02",
+            "b03",
+            "b04",
+            "b08"
+        ],
+        "in_cube": {
+            "chunk_size": [
+                1,
+                192,
+                192
+            ],
+            "cube_type": "image_collection",
+            "file": "/tmp/Rtmp4RaZ8f/file73721b4c1.db",
+            "strict": false,
+            "view": {
+                "aggregation": "median",
+                "resampling": "average",
+                "space": {
+                    "bottom": 5702890,
+                    "left": 385296.5,
+                    "nx": 539,
+                    "ny": 573,
+                    "right": 401466.5,
+                    "srs": "EPSG:25832",
+                    "top": 5720080
+                },
+                "time": {
+                    "dt": "P1M",
+                    "t0": "2017-05-01",
+                    "t1": "2017-09-30"
+                }
+            }
+        },
+        "keep_bands": false
+    }
+}
+
+Result invoked in Executable Process
+
+Fill NA values...
+NA values filled!
+Result invoked in Executable Process
+=== CUBE DIAGNOSTICS ===
+class(data): fill_time_cube, cube, xptr
+bands: blue, green, red, nir
+dims class: list
+dims names: t, y, x
+dims$x: low, high, count, pixel_size, chunk_size
+dims$x$low: 385296.5
+dims$y$low: 5702890
+srs: "EPSG:25832"
+========================
+Linking to GEOS 3.14.1, GDAL 3.13.0, PROJ 9.8.1; sf_use_s2() is TRUE
+Training data is loaded
+load
+n features: 35
+empty: 0 | invalid: 2
+input CRS: 4326
+input bbox: xmin=7.39477 ymin=51.4321 xmax=7.53358 ymax=51.6033
+reducer raw value: "mean" | class: character | length: 1
+geometries adding fid to it
+fid set
+cube CRS: EPSG:25832
+repair_geoms: Starting with 35 features
+Geometry types after repair: POLYGON
+repair_geoms: Ending with 35 features
+Setting precision for projected CRS to 0.01
+train CRS: EPSG:25832
+cube CRS: EPSG:25832
+train bbox: xmin=388832 ymin=5698900 xmax=398063 ymax=5718130
+cube  bbox: xmin=385296 ymin=5702890 xmax=401466 ymax=5720080
+Filtering geometries to cube extent with mode 'within' and buffer 0...
+n geometries before filtering: 35
+n geometries intersecting cube bbox: 33
+n geometries kept after initial filter: 33
+n geometries kept after buffer check: 33
+n geometries after trimming: 33
+n features in bbox: 33 (von 35)
+Go to extraction now...
+extract_geom() OK. Result-type: sf, data.frame
+Result invoked in Executable Process
+ml_fit is being prepared...
+Deep learning model recognized. Start DL calculation...
+Detection of multiple time steps: 5
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+Found bands: blue, green, red, nir
+Training data prepared.
+multi time steps
+
+Attaching package: ‘torch’
+
+The following object is masked from ‘package:gdalcubes’:
+
+    as_array
+
+Vor dem seed42
+Number of classes detected: 6
+Epoch: 1/5, Loss: 1.9104
+Epoch: 2/5, Loss: 1.7392
+Epoch: 3/5, Loss: 1.6223
+Epoch: 4/5, Loss: 1.4634
+Epoch: 5/5, Loss: 1.3873
+Accuracy: 43.75%
+Confusion Matrix:
+Model saved in Torch file: /tmp/openeocubes_shared_temp/ml_fit_799067669.pt
+Result invoked in Executable Process
+external model loading...
+Loading external model...
+Torch model successfully loaded.
+Preparing batched torch prediction...
+Bands: blue, green, red, nir
+Batched torch predict pixels: 10000 of 10000; non-NA predictions: 10000
+Result invoked in Executable Process
+Data is being saved in format :
+GTiff
+The above format is being saved
+Result invoked in Executable Process
+GeoTiff_output detected in the session 
+Done. The result can be downloaded.
+Copied job results to download dir

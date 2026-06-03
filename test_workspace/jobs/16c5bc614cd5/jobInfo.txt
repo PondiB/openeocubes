@@ -1,6 +1,0 @@
-Job info
-Job_ID: 16c5bc614cd5
-Job_Title: NULL
-Job_Description: NULL
-Job_Status: running
-Job_Created: 1780417936.70883

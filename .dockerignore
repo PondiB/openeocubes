@@ -1,0 +1,9 @@
+.git
+.github
+test_workspace
+examples/**/results
+**/*.tif
+**/*.tif.aux.xml
+*.log
+.Rhistory
+.Rproj.user

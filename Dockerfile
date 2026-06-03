@@ -15,7 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libproj-dev libgdal-dev libgeos-dev \
     libnetcdf-dev libcurl4-openssl-dev libcpprest-dev \
     libsqlite3-dev libboost-all-dev \
-    libsodium-dev libudunits2-dev \
+    libsodium-dev libudunits2-dev libuv1-dev \
+    libfontconfig1-dev libfreetype6-dev libgit2-dev \
     zlib1g-dev libunwind-dev libssl-dev libxml2-dev \
     doxygen graphviz \
     python3 python3-pip python3-dev \
@@ -41,6 +42,7 @@ RUN R -e "install.packages(c('gdalcubes','plumber','useful','ids','R6','s2','sf'
 # Install missing required packages explicitly
 # Note: stats and tools are base R packages, no need to install
 RUN R -e "install.packages(c('kernlab','readr','reticulate','xgboost','randomForest','terra','abind','tidyr','httr','caret','torch','dplyr','base64enc','jsonlite','tibble','rlang'), repos='https://cloud.r-project.org')"
+RUN R -e "library(torch); if (!torch_is_installed()) install_torch(restart_session = FALSE)"
 
 RUN mkdir -p /opt/dockerfiles/ /var/openeo/workspace/ /var/openeo/workspace/data/
 

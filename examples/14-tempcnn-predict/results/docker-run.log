@@ -1,0 +1,35 @@
+Backend URL   : http://localhost:8000 
+Training data : /opt/dockerfiles/examples/train_data/land_train_data.geojson 
+Collection    : sentinel-2-l2a 
+TempCNN epochs: 5  batch: 32 
+Connected to service:  http://localhost:8000 
+Please check the terms of service (terms_of_service()) and the privacy policy (privacy_policy()). By further usage of this service, you acknowledge and agree to those terms and policies.
+Warning: Connected host is not production-ready. Unexpected errors might occur.
+Login successful.
+Submitting async job...
+Job was sucessfully registered on the back-end.
+Job 'f0e6c0eead2d' has been successfully queued for evaluation.
+Created job: f0e6c0eead2d 
+Poll 1/480 - status: queued
+Poll 2/480 - status: running
+Poll 3/480 - status: running
+Poll 4/480 - status: running
+Poll 5/480 - status: running
+Poll 6/480 - status: running
+Poll 7/480 - status: running
+Poll 8/480 - status: running
+Poll 9/480 - status: running
+Poll 10/480 - status: running
+Poll 11/480 - status: finished
+[[1]]
+[1] "/Users/brianpondi/ml-dev/openeocubes/examples/14-tempcnn-predict/results/worker_stderr.log"
+
+[[2]]
+[1] "/Users/brianpondi/ml-dev/openeocubes/examples/14-tempcnn-predict/results/worker_stdout.log"
+
+[[3]]
+[1] "/Users/brianpondi/ml-dev/openeocubes/examples/14-tempcnn-predict/results/prediction.tif"
+
+Results downloaded to: /Users/brianpondi/ml-dev/openeocubes/examples/14-tempcnn-predict/results 
+Elapsed: 2.516125 mins 
+prediction.tif non-NA: 10000 of 10000 | unique: 1, 2, 3, 4, 6 

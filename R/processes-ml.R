@@ -181,6 +181,440 @@ if (shared_dir == "") {
   as.numeric(pred)
 }
 
+.ml_sanitize_band_names <- function(nms) {
+  nms <- as.character(nms)
+  if (length(nms) == 1L) {
+    s <- gsub("X[0-9]+[\\._]", "", nms, perl = TRUE)
+    parts <- unlist(regmatches(s, gregexpr("[A-Za-z][A-Za-z0-9_]+", s, perl = TRUE)))
+    parts <- parts[nzchar(parts)]
+    return(parts)
+  }
+  out <- gsub("^X[0-9]+[\\._]", "", nms, perl = TRUE)
+  sub("^[\\._]+", "", out, perl = TRUE)
+}
+
+.ml_wide_feature_names <- function(band_names, nsteps) {
+  unlist(lapply(seq_len(nsteps), function(i) paste0(band_names, "_T", i)))
+}
+
+.ml_fill_pixel_gaps <- function(mat) {
+  for (b in seq_len(nrow(mat))) {
+    row_vals <- mat[b, ]
+    valid <- which(!is.na(row_vals))
+    if (length(valid) == 0L) {
+      return(NULL)
+    }
+    if (length(valid) < length(row_vals)) {
+      if (length(valid) == 1L) {
+        row_vals[is.na(row_vals)] <- row_vals[valid]
+      } else {
+        row_vals <- stats::approx(
+          x = valid,
+          y = row_vals[valid],
+          xout = seq_along(row_vals),
+          method = "linear",
+          rule = 2
+        )$y
+      }
+      mat[b, ] <- row_vals
+    }
+  }
+  mat
+}
+
+.ml_chunk_array_to_wide_matrix <- function(x, band_names) {
+  n_bands <- dim(x)[1L]
+  nsteps <- dim(x)[2L]
+  ny <- dim(x)[3L]
+  nx <- dim(x)[4L]
+  n_pixels <- ny * nx
+  feature_names <- .ml_wide_feature_names(band_names, nsteps)
+  wide <- matrix(
+    aperm(x, c(3L, 4L, 1L, 2L)),
+    nrow = n_pixels,
+    ncol = n_bands * nsteps
+  )
+  colnames(wide) <- feature_names
+  wide
+}
+
+.ml_prepare_wide_prediction_matrix <- function(wide_mat, n_bands, nsteps) {
+  n_pixels <- nrow(wide_mat)
+  valid <- !apply(
+    matrix(wide_mat, ncol = nsteps, byrow = TRUE),
+    1L,
+    function(row) all(is.na(row))
+  )
+  if (!any(valid)) {
+    return(list(matrix = wide_mat, valid = valid))
+  }
+
+  filled <- wide_mat
+  band_cols <- lapply(seq_len(n_bands), function(b) seq(b, n_bands * nsteps, by = n_bands))
+
+  for (b in seq_len(n_bands)) {
+    cols <- band_cols[[b]]
+    band_ts <- wide_mat[valid, cols, drop = FALSE]
+    for (i in seq_len(nrow(band_ts))) {
+      row_vals <- band_ts[i, ]
+      obs <- which(!is.na(row_vals))
+      if (length(obs) == 0L) {
+        valid[which(valid)[i]] <- FALSE
+        next
+      }
+      if (length(obs) < length(row_vals)) {
+        if (length(obs) == 1L) {
+          row_vals[is.na(row_vals)] <- row_vals[obs]
+        } else {
+          row_vals <- stats::approx(
+            x = obs,
+            y = row_vals[obs],
+            xout = seq_along(row_vals),
+            method = "linear",
+            rule = 2
+          )$y
+        }
+        filled[which(valid)[i], cols] <- row_vals
+      }
+    }
+  }
+
+  list(matrix = filled, valid = valid)
+}
+
+.ml_training_feature_medians <- function(model, feature_names) {
+  out <- stats::setNames(rep(NA_real_, length(feature_names)), feature_names)
+  if (inherits(model, "train") && !is.null(model$trainingData)) {
+    cols <- intersect(feature_names, names(model$trainingData))
+    if (length(cols)) {
+      out[cols] <- vapply(
+        cols,
+        function(col) stats::median(model$trainingData[[col]], na.rm = TRUE),
+        numeric(1)
+      )
+    }
+  }
+  out
+}
+
+.ml_batched_torch_predict_cube <- function(data_cube, model, job = NULL) {
+  message("Preparing batched torch prediction...")
+  if (!requireNamespace("torch", quietly = TRUE)) {
+    stop("Package 'torch' is required for torch model prediction.")
+  }
+
+  if (is.character(model)) {
+    if (!file.exists(model)) {
+      stop("Torch model file does not exist: ", model)
+    }
+    model <- torch::torch_load(model)
+  }
+
+  data_cube <- tryCatch(
+    gdalcubes::fill_time(data_cube, "linear"),
+    error = function(e) {
+      message("fill_time skipped: ", conditionMessage(e))
+      data_cube
+    }
+  )
+
+  raw_band_names <- gdalcubes::bands(data_cube)$name
+  band_names <- .ml_sanitize_band_names(raw_band_names)
+  message("Bands: ", paste(band_names, collapse = ", "))
+
+  nsteps <- gdalcubes::dimensions(data_cube)$t$count
+  n_bands <- length(band_names)
+
+  arr <- gdalcubes::as_array(data_cube)
+  if (length(dim(arr)) != 4L) {
+    stop("Expected a 4D array (band, time, y, x) for batched torch prediction.")
+  }
+  ny <- dim(arr)[3L]
+  nx <- dim(arr)[4L]
+  n_pixels <- ny * nx
+
+  wide <- matrix(
+    aperm(arr, c(3L, 4L, 1L, 2L)),
+    nrow = n_pixels,
+    ncol = n_bands * nsteps
+  )
+
+  valid <- rep(FALSE, n_pixels)
+  for (i in seq_len(n_pixels)) {
+    mat <- matrix(wide[i, ], nrow = n_bands, ncol = nsteps)
+    mat_filled <- .ml_fill_pixel_gaps(mat)
+    if (is.null(mat_filled)) {
+      next
+    }
+    valid[i] <- TRUE
+    wide[i, ] <- as.vector(mat_filled)
+  }
+
+  preds <- rep(NA_real_, n_pixels)
+  predict_idx <- which(valid)
+  batch_size <- as.integer(Sys.getenv("ML_TORCH_PREDICT_BATCH", unset = "256"))
+  if (!is.finite(batch_size) || batch_size < 1L) {
+    batch_size <- 256L
+  }
+
+  infer_torch_layout <- function(m, nb, ns) {
+    candidates <- list(
+      NCT = torch::torch_randn(1, nb, ns),
+      NTC = torch::torch_randn(1, ns, nb)
+    )
+    for (k in names(candidates)) {
+      ok <- tryCatch({ m(candidates[[k]]); TRUE }, error = function(e) FALSE)
+      if (ok) {
+        return(k)
+      }
+    }
+    stop("Torch model accepts neither NCT nor NTC with given dims.")
+  }
+
+  model$eval()
+  layout <- infer_torch_layout(model, n_bands, nsteps)
+
+  if (length(predict_idx)) {
+    for (start in seq(1L, length(predict_idx), by = batch_size)) {
+      end <- min(start + batch_size - 1L, length(predict_idx))
+      idx <- predict_idx[start:end]
+      B <- length(idx)
+      batch_arr <- array(NA_real_, dim = c(B, n_bands, nsteps))
+      for (j in seq_len(B)) {
+        batch_arr[j, , ] <- matrix(wide[idx[j], ], nrow = n_bands, ncol = nsteps)
+      }
+      batch_tensor <- torch::torch_tensor(batch_arr, dtype = torch::torch_float())
+      if (layout == "NTC") {
+        batch_tensor <- batch_tensor$permute(c(1L, 3L, 2L))
+      }
+      torch::with_no_grad({
+        out <- model(batch_tensor)
+      })
+      pred_classes <- as.numeric(torch::torch_argmax(out, dim = 2L))
+      preds[idx] <- pred_classes
+    }
+  }
+
+  message(
+    "Batched torch predict pixels: ", length(predict_idx), " of ", n_pixels,
+    "; non-NA predictions: ", sum(!is.na(preds))
+  )
+
+  tmp <- .ml_prediction_tmp_dir(job)
+  if (is.null(job) || is.null(job$id) || !nzchar(as.character(job$id))) {
+    tmp <- file.path(
+      Sys.getenv("SHARED_TEMP_DIR", unset = tempdir()),
+      paste0("ml_predict_", format(Sys.time(), "%Y%m%d%H%M%S"), "_", sample.int(1000000L, 1L))
+    )
+    dir.create(tmp, recursive = TRUE, showWarnings = FALSE)
+  }
+  pred_grid <- matrix(preds, nrow = ny, ncol = nx)
+  pred_meta_file <- file.path(tmp, "pred_grid.rds")
+  y_coords <- tryCatch(
+    as.numeric(gdalcubes::dimension_values(data_cube)$y),
+    error = function(e) as.numeric(dimnames(arr)[[3L]])
+  )
+  x_coords <- tryCatch(
+    as.numeric(gdalcubes::dimension_values(data_cube)$x),
+    error = function(e) as.numeric(dimnames(arr)[[4L]])
+  )
+  saveRDS(
+    list(
+      pred_grid = pred_grid,
+      y_coords = y_coords,
+      x_coords = x_coords
+    ),
+    pred_meta_file
+  )
+  Sys.setenv(ML_PRED_GRID_FILE = pred_meta_file)
+
+  chunk_fun <- function() {
+    x <- gdalcubes::read_chunk_as_array(with.dimnames = TRUE)
+    meta <- readRDS(Sys.getenv("ML_PRED_GRID_FILE"))
+    chunk_nsteps <- dim(x)[2L]
+    chunk_ny <- dim(x)[3L]
+    chunk_nx <- dim(x)[4L]
+    y_names <- as.numeric(dimnames(x)[[3L]])
+    x_names <- as.numeric(dimnames(x)[[4L]])
+    yi <- match(y_names, meta$y_coords)
+    xi <- match(x_names, meta$x_coords)
+    if (any(is.na(yi)) || any(is.na(xi))) {
+      yi <- vapply(y_names, function(y) which.min(abs(meta$y_coords - y)), integer(1))
+      xi <- vapply(x_names, function(xv) which.min(abs(meta$x_coords - xv)), integer(1))
+    }
+    if (chunk_ny == nrow(meta$pred_grid) && chunk_nx == ncol(meta$pred_grid) &&
+          length(yi) == chunk_ny && length(xi) == chunk_nx &&
+          all(yi == seq_len(chunk_ny)) && all(xi == seq_len(chunk_nx))) {
+      slice <- meta$pred_grid
+    } else {
+      slice <- meta$pred_grid[yi, xi, drop = FALSE]
+    }
+    out <- array(NA_real_, dim = c(1L, chunk_nsteps, chunk_ny, chunk_nx))
+    for (t in seq_len(chunk_nsteps)) {
+      out[1L, t, , ] <- slice
+    }
+    gdalcubes::write_chunk_from_array(out)
+  }
+
+  old_parallel <- gdalcubes::gdalcubes_options()$parallel
+  if (!identical(old_parallel, 1L)) {
+    gdalcubes::gdalcubes_options(parallel = 1L)
+  }
+  on.exit({
+    if (!identical(old_parallel, 1L)) {
+      gdalcubes::gdalcubes_options(parallel = old_parallel)
+    }
+  }, add = TRUE)
+
+  tryCatch(
+    gdalcubes::chunk_apply(data_cube, chunk_fun),
+    error = function(e) {
+      message("Error during batched torch chunk_apply write: ", conditionMessage(e))
+      NULL
+    }
+  )
+}
+
+.ml_batched_classic_predict_cube <- function(data_cube, model, job = NULL) {
+  message("Preparing batched classic ML prediction...")
+  .ml_ensure_ml_predict_packages()
+  .ml_write_prediction_class_map(model, job)
+
+  data_cube <- tryCatch(
+    gdalcubes::fill_time(data_cube, "linear"),
+    error = function(e) {
+      message("fill_time skipped: ", conditionMessage(e))
+      data_cube
+    }
+  )
+
+  raw_band_names <- gdalcubes::bands(data_cube)$name
+  band_names <- .ml_sanitize_band_names(raw_band_names)
+  message("Bands: ", paste(band_names, collapse = ", "))
+
+  nsteps <- gdalcubes::dimensions(data_cube)$t$count
+  n_bands <- length(band_names)
+  feature_names <- .ml_wide_feature_names(band_names, nsteps)
+  col_medians <- .ml_training_feature_medians(model, feature_names)
+
+  arr <- gdalcubes::as_array(data_cube)
+  if (length(dim(arr)) != 4L) {
+    stop("Expected a 4D array (band, time, y, x) for batched prediction.")
+  }
+  ny <- dim(arr)[3L]
+  nx <- dim(arr)[4L]
+  n_pixels <- ny * nx
+
+  wide <- matrix(
+    aperm(arr, c(3L, 4L, 1L, 2L)),
+    nrow = n_pixels,
+    ncol = n_bands * nsteps
+  )
+  colnames(wide) <- feature_names
+
+  valid <- rep(FALSE, n_pixels)
+  preds <- rep(NA_real_, n_pixels)
+  for (i in seq_len(n_pixels)) {
+    mat <- matrix(wide[i, ], nrow = n_bands, ncol = nsteps)
+    mat_filled <- .ml_fill_pixel_gaps(mat)
+    row <- if (is.null(mat_filled)) wide[i, ] else as.vector(mat_filled)
+    if (all(is.na(row))) {
+      next
+    }
+    valid[i] <- TRUE
+    missing <- is.na(row)
+    if (any(missing)) {
+      row[missing] <- col_medians[feature_names[missing]]
+    }
+    wide[i, ] <- row
+  }
+
+  predict_idx <- which(valid)
+  if (length(predict_idx)) {
+    pixel_df <- as.data.frame(wide[predict_idx, , drop = FALSE])
+    colnames(pixel_df) <- feature_names
+    preds[predict_idx] <- .ml_predict_class_response(model, pixel_df)
+  }
+  message(
+    "Batched predict pixels: ", length(predict_idx), " of ", n_pixels,
+    "; non-NA predictions: ", sum(!is.na(preds))
+  )
+
+  tmp <- .ml_prediction_tmp_dir(job)
+  if (is.null(job) || is.null(job$id) || !nzchar(as.character(job$id))) {
+    tmp <- file.path(
+      Sys.getenv("SHARED_TEMP_DIR", unset = tempdir()),
+      paste0("ml_predict_", format(Sys.time(), "%Y%m%d%H%M%S"), "_", sample.int(1000000L, 1L))
+    )
+    dir.create(tmp, recursive = TRUE, showWarnings = FALSE)
+  }
+  pred_grid <- matrix(preds, nrow = ny, ncol = nx)
+  pred_meta_file <- file.path(tmp, "pred_grid.rds")
+  y_coords <- tryCatch(
+    as.numeric(gdalcubes::dimension_values(data_cube)$y),
+    error = function(e) as.numeric(dimnames(arr)[[3L]])
+  )
+  x_coords <- tryCatch(
+    as.numeric(gdalcubes::dimension_values(data_cube)$x),
+    error = function(e) as.numeric(dimnames(arr)[[4L]])
+  )
+  saveRDS(
+    list(
+      pred_grid = pred_grid,
+      y_coords = y_coords,
+      x_coords = x_coords
+    ),
+    pred_meta_file
+  )
+  Sys.setenv(ML_PRED_GRID_FILE = pred_meta_file)
+
+  chunk_fun <- function() {
+    x <- gdalcubes::read_chunk_as_array(with.dimnames = TRUE)
+    meta <- readRDS(Sys.getenv("ML_PRED_GRID_FILE"))
+    chunk_nsteps <- dim(x)[2L]
+    chunk_ny <- dim(x)[3L]
+    chunk_nx <- dim(x)[4L]
+    y_names <- as.numeric(dimnames(x)[[3L]])
+    x_names <- as.numeric(dimnames(x)[[4L]])
+    yi <- match(y_names, meta$y_coords)
+    xi <- match(x_names, meta$x_coords)
+    if (any(is.na(yi)) || any(is.na(xi))) {
+      yi <- vapply(y_names, function(y) which.min(abs(meta$y_coords - y)), integer(1))
+      xi <- vapply(x_names, function(x) which.min(abs(meta$x_coords - x)), integer(1))
+    }
+    if (chunk_ny == nrow(meta$pred_grid) && chunk_nx == ncol(meta$pred_grid) &&
+          length(yi) == chunk_ny && length(xi) == chunk_nx &&
+          all(yi == seq_len(chunk_ny)) && all(xi == seq_len(chunk_nx))) {
+      slice <- meta$pred_grid
+    } else {
+      slice <- meta$pred_grid[yi, xi, drop = FALSE]
+    }
+    out <- array(NA_real_, dim = c(1L, chunk_nsteps, chunk_ny, chunk_nx))
+    for (t in seq_len(chunk_nsteps)) {
+      out[1L, t, , ] <- slice
+    }
+    gdalcubes::write_chunk_from_array(out)
+  }
+
+  old_parallel <- gdalcubes::gdalcubes_options()$parallel
+  if (!identical(old_parallel, 1L)) {
+    gdalcubes::gdalcubes_options(parallel = 1L)
+  }
+  on.exit({
+    if (!identical(old_parallel, 1L)) {
+      gdalcubes::gdalcubes_options(parallel = old_parallel)
+    }
+  }, add = TRUE)
+
+  tryCatch(
+    gdalcubes::chunk_apply(data_cube, chunk_fun),
+    error = function(e) {
+      message("Error during batched chunk_apply write: ", conditionMessage(e))
+      NULL
+    }
+  )
+}
+
 ##### ml-processes #####
 
 ##### ml_fit #####
@@ -409,7 +843,12 @@ ml_fit <- Process$new(
       dl_model$input_layout <- "NCT"
       
       dl_model$class_levels <- levels(as.factor(training_data[[target]]))
-      model_file <- tempfile(fileext = ".pt")
+      shared <- Sys.getenv("SHARED_TEMP_DIR", unset = tempdir())
+      dir.create(shared, recursive = TRUE, showWarnings = FALSE)
+      model_file <- file.path(
+        shared,
+        paste0("ml_fit_", sample.int(1000000000L, 1L), ".pt")
+      )
       torch_save(dl_model, model_file)
 
       message("Model saved in Torch file: ", model_file)
@@ -976,13 +1415,27 @@ ml_predict <- Process$new(
     }
     
     mlm_multi <- function(data_cube, model) {
+      is_torch_model_local <- function(m) {
+        inherits(m, "nn_module") ||
+          "nn_module" %in% class(m) ||
+          (!is.null(m$conv_layers) && !is.null(m$dense))
+      }
+
+      if (is_torch_model_local(model)) {
+        return(.ml_batched_torch_predict_cube(data_cube, model, job))
+      }
+
+      if (!inherits(model, "xgb.Booster")) {
+        return(.ml_batched_classic_predict_cube(data_cube, model, job))
+      }
+
       message("Preparing prediction with apply_time using temporary directory...")
       tmp <- Sys.getenv("SHARED_TEMP_DIR", unset = tempdir())
-      
+
       if (is.character(model)) {
         model_file <- model
       } else {
-        if (is_torch_model(model)) {
+        if (is_torch_model_local(model)) {
           model_file <- tempfile(fileext = ".pt")
           torch::torch_save(model, model_file)
         } else {
@@ -992,13 +1445,13 @@ ml_predict <- Process$new(
           message("Classic ML model saved to RDS multi: ", model_file)
         }
       }
-      
+
       Sys.setenv(MODEL_FILE = model_file)
-      
+
       raw_band_names <- gdalcubes::bands(data_cube)$name
-      cube_band_names <- sanitize_band_names(raw_band_names)
+      cube_band_names <- .ml_sanitize_band_names(raw_band_names)
       message("Bands santalize: ", paste(cube_band_names, collapse = ", "))
-      
+
       band_names_file <- file.path(tmp, "band_names.rds")
       tryCatch({
         saveRDS(cube_band_names, band_names_file)
@@ -1006,23 +1459,32 @@ ml_predict <- Process$new(
         stop("Error when saving the band names: ", e$message)
       })
       Sys.setenv(TMPDIRPATH = tmp)
-      
+
       time_steps <- gdalcubes::dimension_values(data_cube)$t
       nsteps <- length(time_steps)
       Sys.setenv(NSTEPS = nsteps)
       message("Number of time steps: ", nsteps)
       message("temp", tmp)
-      
+
       predict_time_fun <- function(x) {
         fun_env <- environment()
         local_tmp <- Sys.getenv("TMPDIRPATH")
         local_nsteps <- as.numeric(Sys.getenv("NSTEPS"))
         model_file <- Sys.getenv("MODEL_FILE")
 
-        is_torch_model <- function(model) {
-          inherits(model, "nn_module") ||
-            "nn_module" %in% class(model) ||
-            (!is.null(model$conv_layers) && !is.null(model$dense))
+        suppressWarnings(suppressPackageStartupMessages({
+          if (requireNamespace("randomForest", quietly = TRUE)) {
+            library(randomForest)
+          }
+          if (requireNamespace("caret", quietly = TRUE)) {
+            library(caret)
+          }
+        }))
+
+        is_torch_model <- function(m) {
+          inherits(m, "nn_module") ||
+            "nn_module" %in% class(m) ||
+            (!is.null(m$conv_layers) && !is.null(m$dense))
         }
 
         if (!exists("local_bands", envir = fun_env, inherits = FALSE)) {
@@ -1075,18 +1537,17 @@ ml_predict <- Process$new(
           local_model <- get("local_model", envir = fun_env, inherits = FALSE)
         }
 
-        infer_torch_layout <- function(model, n_bands, nsteps) {
+        infer_torch_layout <- function(m, n_bands, nsteps) {
           candidates <- list(
             NCT = torch::torch_randn(1, n_bands, nsteps),
             NTC = torch::torch_randn(1, nsteps, n_bands)
           )
           for (k in names(candidates)) {
-            ok <- tryCatch({ model(candidates[[k]]); TRUE }, error = function(e) FALSE)
-            if (ok) return(list(kind="torch", layout=k))
+            ok <- tryCatch({ m(candidates[[k]]); TRUE }, error = function(e) FALSE)
+            if (ok) return(list(kind = "torch", layout = k))
           }
           stop("Torch model accepts neither NCT nor NTC with given dims.")
         }
-
 
         if (inherits(local_model, "xgb.Booster")) {
           is_class <- attr(local_model, "classification")
@@ -1094,7 +1555,7 @@ ml_predict <- Process$new(
 
           wide_vec <- as.vector(x)
           wide_mat <- matrix(wide_vec, nrow = 1)
-          wide_names <- unlist(lapply(seq_len(local_nsteps), function(i) paste0(local_bands, "_T", i)))
+          wide_names <- .ml_wide_feature_names(local_bands, local_nsteps)
           if (length(wide_vec) != length(wide_names)) {
             stop("Mismatch: vector length is ", length(wide_vec), " but expected ", length(wide_names))
           }
@@ -1104,32 +1565,32 @@ ml_predict <- Process$new(
           if (any(is.na(pixel_df))) {
             return(matrix(NA, nrow = 1, ncol = local_nsteps))
           }
-          
+
           dmat <- xgboost::xgb.DMatrix(as.matrix(pixel_df))
           raw_pred <- predict(local_model, dmat)
-          
+
           if (isTRUE(is_class) && length(labels) > 2) {
             p_mat <- matrix(raw_pred, ncol = length(labels), byrow = TRUE)
-            pred_value <- max.col(p_mat)  
+            pred_value <- max.col(p_mat)
           } else if (isTRUE(is_class)) {
-            pred_value <- ifelse(raw_pred >= 0.5, 2L, 1L) 
+            pred_value <- ifelse(raw_pred >= 0.5, 2L, 1L)
           } else {
             pred_value <- raw_pred
           }
           result_matrix <- matrix(rep(pred_value, local_nsteps), nrow = 1)
           return(result_matrix)
-        } else if (is_torch_model(local_model)){
+        } else if (is_torch_model(local_model)) {
           message("Deep Learning model detected")
           library(torch)
           layout_info <- infer_torch_layout(local_model, n_bands = n_bands, nsteps = local_nsteps)
           pixel_tensor <- torch::torch_tensor(x, dtype = torch_float())
 
           if (layout_info$layout == "NCT") {
-              message("Using NCT layout for prediction")
+            message("Using NCT layout for prediction")
             pixel_tensor <- pixel_tensor$view(c(1, n_bands, local_nsteps))
           } else if (layout_info$layout == "NTC") {
             message("Using NTC layout for prediction")
-            pixel_tensor <- pixel_tensor$transpose(1,2)$view(c(1, local_nsteps, n_bands))
+            pixel_tensor <- pixel_tensor$transpose(1, 2)$view(c(1, local_nsteps, n_bands))
           } else {
             stop("Unknown torch layout: ", layout_info$layout)
           }
@@ -1140,27 +1601,10 @@ ml_predict <- Process$new(
           pred_class <- as.numeric(torch::as_array(pred_class_tensor))
           return(matrix(rep(pred_class, local_nsteps), nrow = 1))
         } else {
-          message("Classic machine learning detected")
-          wide_vec <- as.vector(x)
-          wide_mat <- matrix(wide_vec, nrow = 1)
-          wide_names <- unlist(lapply(seq_len(local_nsteps), function(i) paste0(local_bands, "_T", i)))
-          if (length(wide_vec) != length(wide_names)) {
-            stop("Mismatch: vector length is ", length(wide_vec), " but expected ", length(wide_names))
-          }
-          colnames(wide_mat) <- wide_names
-          pixel_df <- as.data.frame(wide_mat)
-          
-          if(any(is.na(pixel_df))){
-            return(matrix(NA, nrow = 1, ncol = local_nsteps))
-          }
-
-          pred <- predict(local_model, newdata = pixel_df)
-          pred_value <- as.numeric(pred)
-          result_matrix <- matrix(rep(pred_value, local_nsteps), nrow = 1)
-          return(result_matrix)
+          stop("Classic ML models must use batched chunk_apply prediction.")
         }
       }
-      
+
       prediction_cube <- tryCatch({
         gdalcubes::apply_time(
           data_cube,
@@ -1172,7 +1616,7 @@ ml_predict <- Process$new(
         message("Error during apply_time: ", conditionMessage(e))
         NULL
       })
-      
+
       return(prediction_cube)
     }
     

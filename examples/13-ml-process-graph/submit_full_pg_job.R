@@ -26,9 +26,9 @@ graph_path <- Sys.getenv(
 backend_url <- Sys.getenv("OPENEO_BACKEND_URL", unset = "http://localhost:8000")
 username <- Sys.getenv("OPENEO_USER", unset = "user")
 password <- Sys.getenv("OPENEO_PASSWORD", unset = "password")
-poll_seconds <- as.numeric(Sys.getenv("OPENEO_POLL_SECONDS", unset = "5"))
-max_polls <- as.integer(Sys.getenv("OPENEO_MAX_POLLS", unset = "120"))
-wait_for_finish <- tolower(Sys.getenv("OPENEO_WAIT_FOR_FINISH", unset = "false")) %in% c("1", "true", "yes")
+poll_seconds <- as.numeric(Sys.getenv("OPENEO_POLL_SECONDS", unset = "10"))
+max_polls <- as.integer(Sys.getenv("OPENEO_MAX_POLLS", unset = "240"))
+wait_for_finish <- tolower(Sys.getenv("OPENEO_WAIT_FOR_FINISH", unset = "true")) %in% c("1", "true", "yes")
 download_dir <- Sys.getenv(
   "OPENEO_DOWNLOAD_DIR",
   unset = file.path(script_dir, "results")
