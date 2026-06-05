@@ -50,7 +50,7 @@ data cube is created:
                 64
             ],
             "cube_type": "image_collection",
-            "file": "/tmp/Rtmp4RaZ8f/file734345472d.db",
+            "file": "/tmp/RtmpWwLC60/file736a32c74e.db",
             "strict": false,
             "view": {
                 "aggregation": "median",
@@ -134,7 +134,7 @@ data cube is created:
                 192
             ],
             "cube_type": "image_collection",
-            "file": "/tmp/Rtmp4RaZ8f/file73721b4c1.db",
+            "file": "/tmp/RtmpWwLC60/file73610e3f63.db",
             "strict": false,
             "view": {
                 "aggregation": "median",
@@ -236,7 +236,7 @@ Epoch: 4/5, Loss: 1.4634
 Epoch: 5/5, Loss: 1.3873
 Accuracy: 43.75%
 Confusion Matrix:
-Model saved in Torch file: /tmp/openeocubes_shared_temp/ml_fit_799067669.pt
+Model saved in Torch file: /tmp/openeocubes_shared_temp/ml_fit_364747027.pt
 Result invoked in Executable Process
 external model loading...
 Loading external model...

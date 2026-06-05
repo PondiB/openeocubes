@@ -112,6 +112,8 @@ Job <- R6Class(
         self$status = "running"
         writeJobInfo(self)
         self$results = self$process$process_graph$execute()
+        self$status = "finished"
+        writeJobInfo(self)
         invisible(self)
      },
         error=function (e) {

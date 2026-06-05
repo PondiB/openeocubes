@@ -96,7 +96,7 @@ eq <- Process$new(
     "Data types are checked strictly; integer values are equal to floating-point numbers.",
     "If any operand is a no-data value, the result is `null`."
   ),
-  categories = as.array("texts", "comparison"),
+  categories = as.array(c("texts", "comparison")),
   parameters = list(
     Parameter$new(
       name = "x",

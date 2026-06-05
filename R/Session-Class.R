@@ -458,8 +458,10 @@ SessionInstance <- R6Class(
             )
           } else if (format$title == "GeoTiff") {
             message("Geotiff run ")
-            gdalcubes::gdalcubes_options(parallel = 1)
-            on.exit(gdalcubes::gdalcubes_options(parallel = 8), add = TRUE)
+            old_parallel <- gdalcubes::gdalcubes_options()$parallel
+            if (is.null(old_parallel)) old_parallel <- 8L
+            gdalcubes::gdalcubes_options(parallel = 1L)
+            on.exit(gdalcubes::gdalcubes_options(parallel = old_parallel), add = TRUE)
             out_files <- gdalcubes::write_tif(job$results, dir = dir)
           } else {
             throwError("FormatUnsupported")
@@ -472,8 +474,10 @@ SessionInstance <- R6Class(
             )
           } else if (format == "GTiff") {
             message("GeoTiff_output detected in the session ")
-            gdalcubes::gdalcubes_options(parallel = 1)
-            on.exit(gdalcubes::gdalcubes_options(parallel = 8), add = TRUE)
+            old_parallel <- gdalcubes::gdalcubes_options()$parallel
+            if (is.null(old_parallel)) old_parallel <- 8L
+            gdalcubes::gdalcubes_options(parallel = 1L)
+            on.exit(gdalcubes::gdalcubes_options(parallel = old_parallel), add = TRUE)
             out_files <- gdalcubes::write_tif(job$results, dir = dir)
           } else {
             throwError("FormatUnsupported")

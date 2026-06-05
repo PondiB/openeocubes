@@ -55,6 +55,10 @@ NULL
   if (!is.numeric(y) || length(y) != 1) {
     .adapterError(node_id, "lte y argument must be a single number.")
   }
+  other_props <- setdiff(names(properties), "eo:cloud_cover")
+  if (length(other_props) > 0) {
+    .adapterError(node_id, paste0("unsupported properties: ", paste(other_props, collapse = ", ")))
+  }
 
   args$cloud_cover <- as.numeric(y)
   args$properties <- NULL

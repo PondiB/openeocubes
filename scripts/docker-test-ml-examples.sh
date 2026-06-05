@@ -14,8 +14,6 @@ OPENEO_MAX_POLLS="${OPENEO_MAX_POLLS:-480}"
 OPENEO_POLL_SECONDS="${OPENEO_POLL_SECONDS:-15}"
 # Paths visible inside the backend container (see docker-compose volume mount)
 DOCKER_TRAINING_GEOJSON="/opt/dockerfiles/examples/train_data/land_train_data.geojson"
-
-DOCKER_TRAINING_GEOJSON="/opt/dockerfiles/examples/train_data/land_train_data.geojson"
 HOST_TRAINING_GEOJSON="${ROOT}/examples/train_data/land_train_data.geojson"
 
 echo "==> Ensuring Docker backend is running..."

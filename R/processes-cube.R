@@ -902,7 +902,7 @@ filter_bands <- Process$new(
       }
       cube <- gdalcubes::select_bands(data, select_names)
       if (!identical(select_names, bands)) {
-        rename_expr <- setNames(select_names, bands)
+        rename_expr <- setNames(tolower(select_names), bands)
         cube <- gdalcubes::apply_pixel(cube, rename_expr, names = bands, keep_bands = FALSE)
       }
     }

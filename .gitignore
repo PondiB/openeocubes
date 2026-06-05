@@ -45,3 +45,5 @@ vignettes/*.pdf
 /results
 
 /test_workspace
+
+/shared_temp
