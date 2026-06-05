@@ -1,10 +1,15 @@
 services:
   openeocubes:
     build: .
+    platform: linux/amd64
     environment:
       - TZ=Etc/UTC
       - DEBIAN_FRONTEND=noninteractive
+      - OPENEO_ASYNC_JOB_TIMEOUT_SEC=1800
+      - OPENEO_STALE_OUTPUT_FINALIZE_SEC=30
     container_name: openeocubes
     ports:
       - "8000:8000"
+    volumes:
+      - ./examples:/opt/dockerfiles/examples:ro
     restart: always

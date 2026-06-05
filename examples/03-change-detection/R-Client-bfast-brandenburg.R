@@ -45,12 +45,14 @@ change_detection = 'function(x) {
   if (all(is.na(kndvi))) {
     return(c(NA,NA))
   }
+    if (!requireNamespace("bfast", quietly = TRUE)) {
+      return(c(NA, NA))
+    }
     kndvi_ts = ts(kndvi, start = c(2016, 1), frequency = 12)
-    library(bfast)
     tryCatch({
-        result = bfastmonitor(kndvi_ts, start = c(2020,1), level = 0.01)
+        result = bfast::bfastmonitor(kndvi_ts, start = c(2020,1), level = 0.01)
         return(c(result$breakpoint, result$magnitude))
-      }, error = function(x) {
+      }, error = function(e) {
         return(c(NA,NA))
       })
   }'

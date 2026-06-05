@@ -1,0 +1,107 @@
+Backend URL: http://localhost:8000 
+Graph path : /Users/brianpondi/ml-dev/openeocubes/examples/13-ml-process-graph/full_pg.json 
+Connected to service:  http://localhost:8000 
+Please check the terms of service (terms_of_service()) and the privacy policy (privacy_policy()). By further usage of this service, you acknowledge and agree to those terms and policies.
+Warning: Connected host is not production-ready. Unexpected errors might occur.
+Login successful.
+Created job: a4925c7fa64f 
+Job 'a4925c7fa64f' has been successfully queued for evaluation.
+Job queued.
+Poll 1/480 - status: queued
+Poll 2/480 - status: running
+Poll 3/480 - status: running
+Poll 4/480 - status: running
+Poll 5/480 - status: running
+Poll 6/480 - status: running
+Poll 7/480 - status: running
+Poll 8/480 - status: running
+Poll 9/480 - status: running
+Poll 10/480 - status: running
+Poll 11/480 - status: running
+Poll 12/480 - status: running
+Poll 13/480 - status: running
+Poll 14/480 - status: running
+Poll 15/480 - status: running
+Poll 16/480 - status: running
+Poll 17/480 - status: running
+Poll 18/480 - status: running
+Poll 19/480 - status: running
+Poll 20/480 - status: running
+Poll 21/480 - status: running
+Poll 22/480 - status: running
+Poll 23/480 - status: running
+Poll 24/480 - status: running
+Poll 25/480 - status: running
+Poll 26/480 - status: running
+Poll 27/480 - status: running
+Poll 28/480 - status: running
+Poll 29/480 - status: running
+Poll 30/480 - status: running
+Poll 31/480 - status: running
+Poll 32/480 - status: running
+Poll 33/480 - status: running
+Poll 34/480 - status: running
+Poll 35/480 - status: running
+Poll 36/480 - status: running
+Poll 37/480 - status: running
+Poll 38/480 - status: running
+Poll 39/480 - status: running
+Poll 40/480 - status: running
+Poll 41/480 - status: running
+Poll 42/480 - status: running
+Poll 43/480 - status: running
+Poll 44/480 - status: running
+Poll 45/480 - status: running
+Poll 46/480 - status: running
+Poll 47/480 - status: running
+Poll 48/480 - status: running
+Poll 49/480 - status: running
+Poll 50/480 - status: running
+Poll 51/480 - status: running
+Poll 52/480 - status: running
+Poll 53/480 - status: running
+Poll 54/480 - status: running
+Poll 55/480 - status: running
+Poll 56/480 - status: running
+Poll 57/480 - status: running
+Poll 58/480 - status: running
+Poll 59/480 - status: running
+Poll 60/480 - status: running
+Poll 61/480 - status: running
+Poll 62/480 - status: running
+Poll 63/480 - status: running
+Poll 64/480 - status: running
+Poll 65/480 - status: running
+Poll 66/480 - status: running
+Poll 67/480 - status: running
+Poll 68/480 - status: running
+Poll 69/480 - status: running
+Poll 70/480 - status: running
+Poll 71/480 - status: running
+Poll 72/480 - status: running
+Poll 73/480 - status: running
+Poll 74/480 - status: running
+Poll 75/480 - status: running
+Poll 76/480 - status: running
+Poll 77/480 - status: finished
+Job finished successfully.
+Assets:
+Results for job:  
+
+                 asset_name
+1   prediction_classes.json
+2          worker_error.txt
+3         worker_stderr.log
+4         worker_stdout.log
+5 prediction_classes.json.1
+6            prediction.tif
+                                                                   href
+1       http://localhost:8000/jobs/a4925c7fa64f/prediction_classes.json
+2              http://localhost:8000/jobs/a4925c7fa64f/worker_error.txt
+3             http://localhost:8000/jobs/a4925c7fa64f/worker_stderr.log
+4             http://localhost:8000/jobs/a4925c7fa64f/worker_stdout.log
+5       http://localhost:8000/jobs/a4925c7fa64f/prediction_classes.json
+6 http://localhost:8000/jobs/a4925c7fa64f/cube_62b6e446bd2017-05-01.tif
+Downloaded: /Users/brianpondi/ml-dev/openeocubes/examples/13-ml-process-graph/results/prediction.tif 
+Downloaded: /Users/brianpondi/ml-dev/openeocubes/examples/13-ml-process-graph/results/prediction_classes.json 
+Results downloaded to: /Users/brianpondi/ml-dev/openeocubes/examples/13-ml-process-graph/results 

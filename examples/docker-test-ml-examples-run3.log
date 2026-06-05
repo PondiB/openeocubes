@@ -1,0 +1,36 @@
+==> Ensuring Docker backend is running...
+==> Starting Docker backend...
+ Network openeocubes_default Creating 
+ Network openeocubes_default Created 
+ Container openeocubes Creating 
+ Container openeocubes Created 
+ Container openeocubes Starting 
+ Container openeocubes Started 
+==> Waiting for backend at http://localhost:8000...
+Backend is up.
+
+==> Example 14: TempCNN (epochs=5)...
+Backend URL   : http://localhost:8000 
+Training data : /opt/dockerfiles/examples/train_data/land_train_data.geojson 
+Collection    : sentinel-2-l2a 
+TempCNN epochs: 5  batch: 32 
+Connected to service:  http://localhost:8000 
+Please check the terms of service (terms_of_service()) and the privacy policy (privacy_policy()). By further usage of this service, you acknowledge and agree to those terms and policies.
+Warning: Connected host is not production-ready. Unexpected errors might occur.
+Login successful.
+Submitting async job...
+Job was sucessfully registered on the back-end.
+Job 'b92d91d9969a' has been successfully queued for evaluation.
+Created job: b92d91d9969a 
+Poll 1/480 - status: queued
+Poll 2/480 - status: running
+Poll 3/480 - status: running
+Poll 4/480 - status: running
+Poll 5/480 - status: running
+Poll 6/480 - status: running
+Poll 7/480 - status: error
+Job failed. Backend logs:
+no applicable method for 'status' applied to an object of class "character"
+NULL
+Error: Job ended with status 'error'.
+Execution halted

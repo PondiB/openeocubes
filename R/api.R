@@ -5,6 +5,7 @@
 #' @include processes-math.R
 #' @include processes-ml.R
 #' @include processes-cube.R
+#' @include process-graph-adapter.R
 #' @include api_job.R
 #' @include api_process_graphs.R
 NULL
@@ -190,7 +191,7 @@ NULL
   tryCatch(
     {
       sent_job <- jsonlite::fromJSON(req$rook.input$read_lines(), simplifyDataFrame = FALSE)
-      process_graph <- sent_job$process
+      process_graph <- adaptProcessGraph(sent_job$process)
       newJob <- Job$new(process = process_graph)
 
       job <- newJob$run()
@@ -252,6 +253,63 @@ NULL
   res$status <- 204
 }
 
+
+#' Register collections and processes on the active Session instance.
+assignSessionResources = function() {
+  Session$assignData(sentinel_2_l2a)
+  Session$assignData(landsat_c2_l2)
+  Session$assignProcess(load_collection)
+  Session$assignProcess(load_stac)
+  Session$assignProcess(save_result)
+  Session$assignProcess(aggregate_temporal_period)
+  Session$assignProcess(aggregate_spatial)
+  Session$assignProcess(array_element)
+  Session$assignProcess(array_interpolate_linear)
+  Session$assignProcess(filter_bands)
+  Session$assignProcess(filter_bbox)
+  Session$assignProcess(filter_spatial)
+  Session$assignProcess(filter_temporal)
+  Session$assignProcess(merge_cubes)
+  Session$assignProcess(ndvi)
+  Session$assignProcess(rename_dimension)
+  Session$assignProcess(reduce_dimension)
+  Session$assignProcess(rename_labels)
+  Session$assignProcess(resample_spatial)
+  Session$assignProcess(run_udf)
+  Session$assignProcess(min)
+  Session$assignProcess(max)
+  Session$assignProcess(median)
+  Session$assignProcess(mean)
+  Session$assignProcess(add)
+  Session$assignProcess(subtract)
+  Session$assignProcess(multiply)
+  Session$assignProcess(divide)
+  Session$assignProcess(eq)
+  Session$assignProcess(lte)
+  Session$assignProcess(or)
+  Session$assignProcess(evi)
+  Session$assignProcess(mask)
+  Session$assignProcess(mask_scl)
+  Session$assignProcess(ml_fit)
+  Session$assignProcess(ml_predict)
+  Session$assignProcess(mlm_class_random_forest)
+  Session$assignProcess(mlm_regr_random_forest)
+  Session$assignProcess(mlm_class_tempcnn)
+  Session$assignProcess(save_ml_model)
+  Session$assignProcess(mlm_class_svm)
+  Session$assignProcess(mlm_regr_svm)
+  Session$assignProcess(mlm_class_xgboost)
+  Session$assignProcess(mlm_regr_xgboost)
+  Session$assignProcess(load_ml_model)
+  Session$assignProcess(mlm_class_mlp)
+  Session$assignProcess(mlm_class_lighttae)
+  Session$assignProcess(mlm_class_stgf)
+  Session$assignProcess(load_stac_ml)
+  Session$assignProcess(ml_validate)
+  Session$assignProcess(ml_tune_grid)
+  Session$assignProcess(ml_tune_random)
+  Session$assignProcess(ml_smooth_class)
+}
 
 #' dedicate the handler functions to the corresponding paths
 addEndpoint = function() {
@@ -389,58 +447,5 @@ Session$createEndpoint(
   )
 
 
-  # assign data collection
-  Session$assignData(sentinel_2_l2a)
-  Session$assignData(landsat_c2_l2)
-  # assign processes
-  Session$assignProcess(load_collection)
-  Session$assignProcess(load_stac)
-  Session$assignProcess(save_result)
-  Session$assignProcess(aggregate_temporal_period)
-  Session$assignProcess(aggregate_spatial)
-  Session$assignProcess(array_element)
-  Session$assignProcess(array_interpolate_linear)
-  Session$assignProcess(filter_bands)
-  Session$assignProcess(filter_bbox)
-  Session$assignProcess(filter_spatial)
-  Session$assignProcess(filter_temporal)
-  Session$assignProcess(merge_cubes)
-  Session$assignProcess(ndvi)
-  Session$assignProcess(rename_dimension)
-  Session$assignProcess(reduce_dimension)
-  Session$assignProcess(rename_labels)
-  Session$assignProcess(resample_spatial)
-  Session$assignProcess(run_udf)
-  Session$assignProcess(min)
-  Session$assignProcess(max)
-  Session$assignProcess(median)
-  Session$assignProcess(mean)
-  Session$assignProcess(add)
-  Session$assignProcess(subtract)
-  Session$assignProcess(multiply)
-  Session$assignProcess(divide)
-  Session$assignProcess(evi)
-  Session$assignProcess(mask)
-
-  # assign ml processes
-  Session$assignProcess(ml_fit)
-  Session$assignProcess(ml_predict)
-  Session$assignProcess(mlm_class_random_forest)
-  Session$assignProcess(mlm_regr_random_forest)
-  Session$assignProcess(mlm_class_tempcnn)
-  Session$assignProcess(save_ml_model)
-  Session$assignProcess(mlm_class_svm)
-  Session$assignProcess(mlm_regr_svm)
-  Session$assignProcess(mlm_class_xgboost)
-  Session$assignProcess(mlm_regr_xgboost)
-  Session$assignProcess(load_ml_model)
-  Session$assignProcess(mlm_class_mlp)
-  Session$assignProcess(mlm_class_lighttae)
-  Session$assignProcess(mlm_class_stgf)
-  Session$assignProcess(load_stac_ml)
-  Session$assignProcess(ml_validate)
-  Session$assignProcess(ml_tune_grid)
-  Session$assignProcess(ml_tune_random)
-  Session$assignProcess(ml_smooth_class)
-
+  assignSessionResources()
 }
