@@ -116,6 +116,12 @@ load_collection <- Process$new(
       description = "Only adds the specified bands into the data cube so that bands that don't match the list of band names are not available.",
       schema = list(type = "array"),
       optional = TRUE
+    ), 
+    Parameter$new(
+      name = "cloud_cover", 
+      description = "Filter for maximum permissible cloud cover. If the filter is set, images exceeding the value x are removed. If this parameter is not set, the Claude Cover used is 30 percent.", 
+      schema = list(type = "number"),
+      optional = TRUE
     )
   ),
   returns = eo_datacube,
@@ -123,6 +129,7 @@ load_collection <- Process$new(
                        spatial_extent,
                        temporal_extent,
                        bands = NULL,
+                       cloud_cover = NULL,
                        job) {
     # Check if 'crs' is present in spatial_extent and convert it to numeric; if missing, default to 4326
     crs <- ifelse("crs" %in% names(spatial_extent),
@@ -164,7 +171,6 @@ load_collection <- Process$new(
       message("Using dx and dy of ", target_resolution_m, " m for projected CRS")
     }
 
-    # spatial extent for stac call
     xmin_stac <- xmin
     ymin_stac <- ymin
     xmax_stac <- xmax
@@ -184,26 +190,69 @@ load_collection <- Process$new(
       ymax_stac <- max_bbx$ymax
       message("Transformed to 4326...")
     }
-
-    # Connect to STAC API and get satellite data
     message("STAC API call....")
-    stac_object <- stac("https://earth-search.aws.element84.com/v1")
+    stac_object <- stac("https://planetarycomputer.microsoft.com/api/stac/v1/")
     items <- stac_object %>%
       stac_search(
         collections = id,
         bbox = c(xmin_stac, ymin_stac, xmax_stac, ymax_stac),
         datetime = time_range,
-        limit = 10000
+        limit = 500
       ) %>%
-      post_request() %>%
+      get_request() %>%
       items_fetch()
-    # create image collection from stac items features
+
+    
+    message("Number of STAC items: ", length(items$features))
+    tile_ids <- sapply(items$features, function(x) x$properties$`s2:mgrs_tile` %||% "unknown")
+    message("Tiles: ", paste(sort(unique(tile_ids)), collapse = ", "))
+    
+    stac_bands <- bands
+    needs_rename <- FALSE
+
+    if (!is.null(bands) && grepl("^sentinel-2", id)) {
+      band_map <- c(
+        coastal = "B01", blue = "B02", green = "B03", red = "B04",
+        rededge1 = "B05", rededge2 = "B06", rededge3 = "B07",
+        nir = "B08", nir08 = "B8A", nir09 = "B09",
+        cirrus = "B10", swir16 = "B11", swir22 = "B12", scl = "SCL"
+      )
+      stac_bands <- unname(band_map[bands])
+      needs_rename <- TRUE
+    }
+
+    
+    if (!is.null(cloud_cover)) {
+      cloud_cover_valuable <- cloud_cover
+    } else {
+      cloud_cover_valuable <- 30L
+    }
+    cloud_covers <- sapply(items$features, function(x) {
+      tile  <- x$properties$`s2:mgrs_tile` %||% "unknown"
+      cloud <- x$properties$`eo:cloud_cover` %||% NA
+      c(tile = tile, cloud = cloud)
+    })
+    message("Cloud cover per tile:")
+    print(t(cloud_covers))
+
+    kept <- sum(sapply(items$features, function(x) {
+      x[["properties"]][["eo:cloud_cover"]] < cloud_cover_valuable
+    }))
+    message("Items by cloud filter: ", kept, " by ", length(items$features))
+ 
+    filtered_features <- Filter(function(x) {
+      cc <- x$properties$`eo:cloud_cover` %||% 100
+      cc < cloud_cover_valuable
+    }, items$features)
+
+    message("Items by manual filter: ", length(filtered_features), " by ", length(items$features))
+
+    items$features <- filtered_features
+    items <- items_sign(items, sign_fn = sign_planetary_computer())
+
     img.col <- stac_image_collection(
       items$features,
-      property_filter =
-        function(x) {
-          x[["eo:cloud_cover"]] < 30
-        }
+      asset_names = stac_bands
     )
     message("Image collection created...")
     # Define cube view with monthly aggregation
@@ -227,9 +276,21 @@ load_collection <- Process$new(
     )
     # gdalcubes creation
     cube <- gdalcubes::raster_cube(img.col, v.overview)
+    
+  if (needs_rename) {
+      rename_expr <- setNames(tolower(stac_bands), bands)
+      cube <- gdalcubes::apply_pixel(cube, rename_expr, names = bands, keep_bands = FALSE)
+    }
+
+    message("bands: ", bands)
 
     if (!is.null(bands)) {
-      cube <- gdalcubes::select_bands(cube, bands)
+      cube <- tryCatch(
+        gdalcubes::select_bands(cube, bands),
+        error = function(e) {
+          stop("Error selecting bands: ", e$message)
+        }
+      )
     }
     message("data cube is created: ")
     message(as_json(cube))
@@ -282,6 +343,28 @@ aggregate_spatial <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, geometries, reducer = NULL, target_dimension = NULL, context = NULL, job) {
+
+
+      message("=== CUBE DIAGNOSTICS ===")
+      message("class(data): ", paste(class(data), collapse = ", "))
+      message("bands: ", paste(gdalcubes::bands(data)$name, collapse = ", "))
+      
+      dims <- tryCatch(gdalcubes::dimensions(data), error = function(e) {
+        message("dimensions() ERROR: ", e$message)
+        NULL
+      })
+      message("dims class: ", paste(class(dims), collapse = ", "))
+      message("dims names: ", paste(names(dims), collapse = ", "))
+      message("dims$x: ", paste(names(dims$x), collapse = ", "))
+      message("dims$x$low: ", deparse(dims$x$low))
+      message("dims$y$low: ", deparse(dims$y$low))
+      
+      srs <- tryCatch(gdalcubes::srs(data), error = function(e) {
+        message("srs() ERROR: ", e$message)
+        NULL
+      })
+      message("srs: ", deparse(srs))
+      message("========================")
     library(sf)
     library(gdalcubes)
 
@@ -328,8 +411,63 @@ aggregate_spatial <- Process$new(
       message("repair_geoms: Starting with ", nrow(g), " features")
       
       g <- sf::st_zm(g, drop = TRUE, what = "ZM")
+
+      safe_valid_flags <- function(obj) {
+        flags <- tryCatch(
+          sf::st_is_valid(obj),
+          error = function(e) {
+            message("st_is_valid failed: ", conditionMessage(e))
+            rep(FALSE, nrow(obj))
+          }
+        )
+        flags[is.na(flags)] <- FALSE
+        flags
+      }
+
+      safe_make_valid <- function(obj) {
+        convert_to_sf <- function(candidate, template) {
+          if (inherits(candidate, "sf")) {
+            return(candidate)
+          }
+          if (inherits(candidate, "sfc")) {
+            converted <- template
+            sf::st_geometry(converted) <- candidate
+            return(converted)
+          }
+          stop("Unsupported return type from st_make_valid.")
+        }
+
+        errors <- character(0)
+
+        if (requireNamespace("lwgeom", quietly = TRUE)) {
+          repaired <- tryCatch(
+            convert_to_sf(lwgeom::st_make_valid(obj), obj),
+            error = function(e) {
+              errors <<- c(errors, paste0("lwgeom::st_make_valid: ", conditionMessage(e)))
+              NULL
+            }
+          )
+          if (!is.null(repaired)) {
+            return(repaired)
+          }
+        }
+
+        repaired <- tryCatch(
+          convert_to_sf(sf::st_make_valid(obj), obj),
+          error = function(e) {
+            errors <<- c(errors, paste0("sf::st_make_valid: ", conditionMessage(e)))
+            NULL
+          }
+        )
+        if (!is.null(repaired)) {
+          return(repaired)
+        }
+
+        message("make_valid failed; keeping original geometries. Details: ", paste(errors, collapse = " | "))
+        obj
+      }
       
-      n_invalid <- sum(!sf::st_is_valid(g))
+      n_invalid <- sum(!safe_valid_flags(g))
       if (n_invalid > 0) {
         message("Found ", n_invalid, " invalid geometries, attempting repair...")
         
@@ -342,39 +480,33 @@ aggregate_spatial <- Process$new(
           g <- sf::st_transform(g, 3857)
           g <- sf::st_transform(g, original_crs)
           
-          n_still_invalid <- sum(!sf::st_is_valid(g))
+          n_still_invalid <- sum(!safe_valid_flags(g))
           message("After round-trip: ", n_still_invalid, " invalid geometries remain")
           
           if (n_still_invalid > 0) {
             message("Applying make_valid to remaining invalid geometries...")
-            if (requireNamespace("lwgeom", quietly = TRUE)) {
-              g <- lwgeom::st_make_valid(g)
-            } else {
-              g <- sf::st_make_valid(g)
-            }
+            g <- safe_make_valid(g)
             
-            n_final_invalid <- sum(!sf::st_is_valid(g))
+            valid_flags <- safe_valid_flags(g)
+            n_final_invalid <- sum(!valid_flags)
             message("After make_valid: ", n_final_invalid, " invalid geometries remain")
             
             if (n_final_invalid > 0) {
               message("Removing ", n_final_invalid, " geometries that could not be repaired")
-              g <- g[sf::st_is_valid(g), , drop = FALSE]
+              g <- g[valid_flags, , drop = FALSE]
               message("After removing invalid: ", nrow(g), " valid geometries remain")
             }
           }
         } else {
-          if (requireNamespace("lwgeom", quietly = TRUE)) {
-            g <- lwgeom::st_make_valid(g)
-          } else {
-            g <- sf::st_make_valid(g)
-          }
+          g <- safe_make_valid(g)
           
-          n_final_invalid <- sum(!sf::st_is_valid(g))
+          valid_flags <- safe_valid_flags(g)
+          n_final_invalid <- sum(!valid_flags)
           message("After make_valid: ", n_final_invalid, " invalid geometries remain")
           
           if (n_final_invalid > 0) {
             message("Removing ", n_final_invalid, " geometries that could not be repaired")
-            g <- g[sf::st_is_valid(g), , drop = FALSE]
+            g <- g[valid_flags, , drop = FALSE]
             message("After removing invalid: ", nrow(g), " valid geometries remain")
           }
         }
@@ -551,23 +683,25 @@ aggregate_spatial <- Process$new(
     log_crs("input", sf::st_crs(geometries))
     log_bbox("input", geometries)
 
-    reducer_type <- if (!is.null(reducer)) {
-      switch(reducer,
-        "mean" = base::mean,
-        "median" = stats::median,
-        "min" = base::min,
-        "max" = base::max,
-        "sum" = base::sum,
-        "count"  = function(x) sum(!is.na(x)),
-        "sd" = stats::sd,
-        "var" = stats::var,
-        stop("The specified reducer is not supported")
-      )
-    } else {
-      NULL
-    }
+    message("reducer raw value: ", deparse(reducer), " | class: ", class(reducer), " | length: ", length(reducer))
 
-    message("geomeotreies adding fid to it")
+  reducer_type <- if (!is.null(reducer) && length(reducer) > 0 && nzchar(reducer)) {
+    switch(reducer,
+      "mean"   = function(x) base::mean(x, na.rm = TRUE),
+      "median" = function(x) stats::median(x, na.rm = TRUE),
+      "min"    = function(x) base::min(x, na.rm = TRUE),
+      "max"    = function(x) base::max(x, na.rm = TRUE),
+      "sum"    = function(x) base::sum(x, na.rm = TRUE),
+      "count"  = function(x) sum(!is.na(x)),
+      "sd"     = function(x) stats::sd(x, na.rm = TRUE),
+      "var"    = function(x) stats::var(x, na.rm = TRUE),
+      stop("The specified reducer is not supported: ", reducer)
+    )
+  } else {
+    NULL
+  }
+
+    message("geometries adding fid to it")
     geometries <- add_fid_if_missing(geometries)
     geometries$fid <- as.integer(geometries$fid)
 
@@ -751,8 +885,26 @@ filter_bands <- Process$new(
   ),
   returns = eo_datacube,
   operation = function(data, bands, job) {
+    cube <- data
     if (!is.null(bands)) {
-      cube <- gdalcubes::select_bands(data, bands)
+      band_map <- c(
+        coastal = "B01", blue = "B02", green = "B03", red = "B04",
+        rededge1 = "B05", rededge2 = "B06", rededge3 = "B07",
+        nir = "B08", nir08 = "B8A", nir09 = "B09",
+        cirrus = "B10", swir16 = "B11", swir22 = "B12", scl = "SCL"
+      )
+      cube_band_names <- gdalcubes::bands(data)$name
+      select_names <- bands
+      if (any(bands %in% names(band_map)) && any(cube_band_names %in% unname(band_map))) {
+        select_names <- vapply(bands, function(b) {
+          if (b %in% names(band_map)) band_map[[b]] else b
+        }, character(1))
+      }
+      cube <- gdalcubes::select_bands(data, select_names)
+      if (!identical(select_names, bands)) {
+        rename_expr <- setNames(tolower(select_names), bands)
+        cube <- gdalcubes::apply_pixel(cube, rename_expr, names = bands, keep_bands = FALSE)
+      }
     }
     message("Filtered data cube ....")
     message(gdalcubes::as_json(cube))
@@ -1623,6 +1775,7 @@ array_interpolate_linear <- Process$new(
   }
 )
 
+
 #' save result
 save_result <- Process$new(
   id = "save_result",
@@ -1658,3 +1811,113 @@ save_result <- Process$new(
     return(data)
   }
 )
+mask <- Process$new(
+  id = "mask",
+  summary = "Apply a raster mask",
+  description = "Applies a raster mask to a data cube. Pixels in data are masked where the corresponding mask pixels are non-zero or true.",
+  categories = as.array(c("cubes", "masks")),
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A raster data cube.",
+      schema = list(type = "object", subtype = "datacube")
+    ),
+    Parameter$new(
+      name = "mask",
+      description = "A raster data cube used as mask.",
+      schema = list(type = "object", subtype = "datacube")
+    ),
+    Parameter$new(
+      name = "replacement",
+      description = "Replacement value for masked pixels. If null, masked pixels are set to nodata.",
+      schema = list(type = c("number", "boolean", "string", "null")),
+      optional = TRUE
+    )
+  ),
+  returns = eo_datacube,
+  operation = function(data, mask, replacement = NULL, job) {
+    if (!("cube" %in% class(data)) || !("cube" %in% class(mask))) {
+      stop("mask currently supports only raster data cubes for both 'data' and 'mask'.")
+    }
+
+    mask_bands <- gdalcubes::bands(mask)$name
+    if (length(mask_bands) < 1) {
+      stop("Mask data cube must contain at least one band.")
+    }
+    if (length(mask_bands) > 1) {
+      warning("Mask has multiple bands; only the first band is used.")
+    }
+    mask_band <- mask_bands[[1]]
+
+    if (!is.null(replacement)) {
+      stop("mask(..., replacement=...) is currently not supported by this backend.")
+    }
+
+    combined <- gdalcubes::join_bands(c(data, mask))
+    keep_expression <- sprintf("(%s == 0) || (%s == FALSE)", mask_band, mask_band)
+    masked <- gdalcubes::filter_pixel(combined, keep_expression)
+    spectral_bands <- gdalcubes::bands(data)$name
+    gdalcubes::select_bands(masked, spectral_bands)
+  }
+)
+
+mask_scl <- Process$new(
+  id = "mask_scl",
+  summary = "Mask a data cube using the SCL band",
+  description = "Masks the data cube using the SCL (Scene Classification Layer) band. Pixels with SCL values in invalid_values are set to null. The SCL band is dropped from the result.",
+  categories = as.array(c("cubes", "filter")),
+  parameters = list(
+    Parameter$new(
+      name = "data",
+      description = "A data cube containing a 'scl' band alongside spectral bands.",
+      schema = list(type = "object", subtype = "datacube")
+    ),
+    Parameter$new(
+      name = "invalid_values",
+      description = "List of SCL values considered invalid (to be masked). Defaults to c(0,1,3,8,9,10).",
+      schema = list(type = "array"),
+      optional = TRUE
+    )
+  ),
+  returns = eo_datacube,
+  operation = function(data, invalid_values = c(0, 1, 3, 8, 9, 10), job) {
+    message("Applying SCL mask...")
+
+    all_bands <- gdalcubes::bands(data)$name
+
+    if (!"scl" %in% tolower(all_bands)) {
+      stop("No 'scl' band found in data cube. Load it via load_collection(..., bands = c(..., 'scl'))")
+    }
+
+    spectral_bands <- all_bands[tolower(all_bands) != "scl"]
+
+    filter_expr <- paste(
+      sprintf("scl != %d", as.integer(invalid_values)),
+      collapse = " && "
+    )
+
+    message(sprintf(
+      "Invalid SCL values (masked out): [%s]",
+      paste(invalid_values, collapse = ", ")
+    ))
+    message("filter_pixel expression: ", filter_expr)
+
+    filtered <- tryCatch(
+      gdalcubes::filter_pixel(data, filter_expr),
+      error = function(e) stop("filter_pixel failed: ", e$message)
+    )
+
+    result <- tryCatch(
+      gdalcubes::select_bands(filtered, spectral_bands),
+      error = function(e) stop("select_bands failed: ", e$message)
+    )
+
+    message("Mask applied successfully! Bands in result: ", paste(gdalcubes::bands(result)$name, collapse = ", "))
+    return(result)
+  }
+)
+
+
+
+
+

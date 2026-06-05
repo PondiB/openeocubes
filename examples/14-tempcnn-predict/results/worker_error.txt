@@ -1,0 +1,1 @@
+Background worker stalled after export start; finalized as finished using stable output files (stable 41s).

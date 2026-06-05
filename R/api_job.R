@@ -1,6 +1,10 @@
 
 refreshJobFromFile <- function(job) {
   tryCatch({
+    if (!is.null(Session) && "reconcileJobStatus" %in% names(Session)) {
+      job <- Session$reconcileJobStatus(job)
+    }
+
     info_dir  <- file.path(Session$getConfig()$workspace.path, job$output.folder)
     info_file <- file.path(info_dir, "jobInfo.txt")
     
@@ -77,6 +81,7 @@ refreshJobFromFile <- function(job) {
       job = Session$jobs[[index]]
       
       job <- refreshJobFromFile(job)
+      Session$jobs[[index]] <- job
       
       tryCatch({
         res$body = jsonlite::toJSON(job$jobInfo(), na = "null", null = "null", auto_unbox = TRUE)
@@ -97,7 +102,7 @@ refreshJobFromFile <- function(job) {
 .createNewJob = function(req, res) {
   tryCatch({
     sent_job = jsonlite::fromJSON(req$rook.input$read_lines(), simplifyDataFrame = FALSE)
-    process_graph = sent_job$process
+    process_graph = adaptProcessGraph(sent_job$process)
     
     job = Job$new(process = process_graph)
     job$status  = "created"
@@ -158,6 +163,8 @@ refreshJobFromFile <- function(job) {
       throwError("JobNotFound")
     } else {
       job <- Session$jobs[[index]]
+      job <- refreshJobFromFile(job)
+      Session$jobs[[index]] <- job
 
       job_results <- file.path(Session$getConfig()$workspace.path, "jobs", job_id)
       files <- if (dir.exists(job_results)) list.files(job_results) else character(0)
@@ -187,6 +194,13 @@ refreshJobFromFile <- function(job) {
           names(apList) <- others[i]
           assets <- append(assets, apList)
         }
+      }
+
+      if (file.exists(file.path(job_results, "prediction_classes.json"))) {
+        link_classes <- paste(Session$getConfig()$base_url, "jobs", job_id, "prediction_classes.json", sep = "/")
+        apList <- list(list(href = link_classes))
+        names(apList) <- "prediction_classes.json"
+        assets <- append(assets, apList)
       }
 
       if (!is.null(chosen_tif)) {

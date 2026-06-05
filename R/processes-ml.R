@@ -77,7 +77,543 @@ if (shared_dir == "") {
 
 #############################################################################
 
+.ml_prediction_tmp_dir <- function(job = NULL) {
+  base <- Sys.getenv("SHARED_TEMP_DIR", unset = tempdir())
+  if (!is.null(job) && !is.null(job$id) && nzchar(as.character(job$id))) {
+    subdir <- file.path(base, paste0("ml_predict_", job$id))
+    dir.create(subdir, recursive = TRUE, showWarnings = FALSE)
+    return(subdir)
+  }
+  base
+}
 
+.ml_extract_class_levels <- function(model) {
+  if (inherits(model, "train") && !is.null(model$levels)) {
+    return(as.character(model$levels))
+  }
+  if (inherits(model, "xgb.Booster")) {
+    return(attr(model, "class_levels"))
+  }
+  if (is.list(model) && identical(model$type, "caret_final") && !is.null(model$levels)) {
+    return(as.character(model$levels))
+  }
+  NULL
+}
+
+.ml_write_prediction_class_map <- function(model, job) {
+  if (is.null(job) || is.null(job$id)) {
+    return(invisible(NULL))
+  }
+  levels <- .ml_extract_class_levels(model)
+  if (is.null(levels) || !length(levels)) {
+    return(invisible(NULL))
+  }
+  out_dir <- file.path(Session$getConfig()$workspace.path, job$output.folder)
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  mapping <- data.frame(
+    class_id = seq_along(levels),
+    class_name = levels,
+    stringsAsFactors = FALSE
+  )
+  jsonlite::write_json(
+    list(classes = mapping),
+    file.path(out_dir, "prediction_classes.json"),
+    auto_unbox = TRUE,
+    pretty = TRUE
+  )
+  invisible(NULL)
+}
+
+.ml_serialize_worker_model <- function(model, model_file) {
+  dir.create(dirname(model_file), recursive = TRUE, showWarnings = FALSE)
+  saveRDS(model, model_file, compress = FALSE)
+  invisible(model_file)
+}
+
+.ml_ensure_ml_predict_packages <- function() {
+  if (requireNamespace("randomForest", quietly = TRUE)) {
+    suppressPackageStartupMessages(library(randomForest, quietly = TRUE))
+  }
+  if (requireNamespace("caret", quietly = TRUE)) {
+    suppressPackageStartupMessages(library(caret, quietly = TRUE))
+  }
+}
+
+.ml_read_rds_local <- function(source_file) {
+  if (!file.exists(source_file)) {
+    stop("Missing RDS file: ", source_file)
+  }
+  local_file <- file.path(
+    tempdir(),
+    paste0("ml_local_", Sys.getpid(), "_", sample.int(1000000000L, 1L), ".rds")
+  )
+  last_error <- NULL
+  for (attempt in seq_len(8L)) {
+    result <- tryCatch({
+      if (!isTRUE(file.copy(source_file, local_file, overwrite = TRUE))) {
+        stop("file.copy failed")
+      }
+      readRDS(local_file)
+    }, error = function(e) {
+      last_error <<- conditionMessage(e)
+      NULL
+    })
+    if (!is.null(result)) {
+      return(result)
+    }
+    Sys.sleep(0.05 * attempt)
+  }
+  stop("Failed to read RDS '", source_file, "': ", last_error)
+}
+
+.ml_predict_class_response <- function(local_model, pixel_df) {
+  .ml_ensure_ml_predict_packages()
+  if (inherits(local_model, "train")) {
+    pred <- predict(local_model, newdata = pixel_df)
+  } else if (inherits(local_model, "randomForest")) {
+    pred <- predict(local_model, newdata = pixel_df)
+  } else {
+    pred <- predict(local_model, newdata = pixel_df)
+  }
+  if (is.factor(pred)) {
+    return(as.integer(pred))
+  }
+  as.numeric(pred)
+}
+
+.ml_sanitize_band_names <- function(nms) {
+  nms <- as.character(nms)
+  if (length(nms) == 1L) {
+    s <- gsub("X[0-9]+[\\._]", "", nms, perl = TRUE)
+    parts <- unlist(regmatches(s, gregexpr("[A-Za-z][A-Za-z0-9_]+", s, perl = TRUE)))
+    parts <- parts[nzchar(parts)]
+    return(parts)
+  }
+  out <- gsub("^X[0-9]+[\\._]", "", nms, perl = TRUE)
+  sub("^[\\._]+", "", out, perl = TRUE)
+}
+
+.ml_wide_feature_names <- function(band_names, nsteps) {
+  unlist(lapply(seq_len(nsteps), function(i) paste0(band_names, "_T", i)))
+}
+
+.ml_fill_pixel_gaps <- function(mat) {
+  for (b in seq_len(nrow(mat))) {
+    row_vals <- mat[b, ]
+    valid <- which(!is.na(row_vals))
+    if (length(valid) == 0L) {
+      return(NULL)
+    }
+    if (length(valid) < length(row_vals)) {
+      if (length(valid) == 1L) {
+        row_vals[is.na(row_vals)] <- row_vals[valid]
+      } else {
+        row_vals <- stats::approx(
+          x = valid,
+          y = row_vals[valid],
+          xout = seq_along(row_vals),
+          method = "linear",
+          rule = 2
+        )$y
+      }
+      mat[b, ] <- row_vals
+    }
+  }
+  mat
+}
+
+.ml_chunk_array_to_wide_matrix <- function(x, band_names) {
+  n_bands <- dim(x)[1L]
+  nsteps <- dim(x)[2L]
+  ny <- dim(x)[3L]
+  nx <- dim(x)[4L]
+  n_pixels <- ny * nx
+  feature_names <- .ml_wide_feature_names(band_names, nsteps)
+  wide <- matrix(
+    aperm(x, c(3L, 4L, 1L, 2L)),
+    nrow = n_pixels,
+    ncol = n_bands * nsteps
+  )
+  colnames(wide) <- feature_names
+  wide
+}
+
+.ml_prepare_wide_prediction_matrix <- function(wide_mat, n_bands, nsteps) {
+  n_pixels <- nrow(wide_mat)
+  valid <- !apply(
+    matrix(wide_mat, ncol = nsteps, byrow = TRUE),
+    1L,
+    function(row) all(is.na(row))
+  )
+  if (!any(valid)) {
+    return(list(matrix = wide_mat, valid = valid))
+  }
+
+  filled <- wide_mat
+  band_cols <- lapply(seq_len(n_bands), function(b) seq(b, n_bands * nsteps, by = n_bands))
+
+  for (b in seq_len(n_bands)) {
+    cols <- band_cols[[b]]
+    band_ts <- wide_mat[valid, cols, drop = FALSE]
+    for (i in seq_len(nrow(band_ts))) {
+      row_vals <- band_ts[i, ]
+      obs <- which(!is.na(row_vals))
+      if (length(obs) == 0L) {
+        valid[which(valid)[i]] <- FALSE
+        next
+      }
+      if (length(obs) < length(row_vals)) {
+        if (length(obs) == 1L) {
+          row_vals[is.na(row_vals)] <- row_vals[obs]
+        } else {
+          row_vals <- stats::approx(
+            x = obs,
+            y = row_vals[obs],
+            xout = seq_along(row_vals),
+            method = "linear",
+            rule = 2
+          )$y
+        }
+        filled[which(valid)[i], cols] <- row_vals
+      }
+    }
+  }
+
+  list(matrix = filled, valid = valid)
+}
+
+.ml_training_feature_medians <- function(model, feature_names) {
+  out <- stats::setNames(rep(NA_real_, length(feature_names)), feature_names)
+  if (inherits(model, "train") && !is.null(model$trainingData)) {
+    cols <- intersect(feature_names, names(model$trainingData))
+    if (length(cols)) {
+      out[cols] <- vapply(
+        cols,
+        function(col) stats::median(model$trainingData[[col]], na.rm = TRUE),
+        numeric(1)
+      )
+    }
+  }
+  out
+}
+
+.ml_batched_torch_predict_cube <- function(data_cube, model, job = NULL) {
+  message("Preparing batched torch prediction...")
+  if (!requireNamespace("torch", quietly = TRUE)) {
+    stop("Package 'torch' is required for torch model prediction.")
+  }
+
+  if (is.character(model)) {
+    if (!file.exists(model)) {
+      stop("Torch model file does not exist: ", model)
+    }
+    model <- torch::torch_load(model)
+  }
+
+  data_cube <- tryCatch(
+    gdalcubes::fill_time(data_cube, "linear"),
+    error = function(e) {
+      message("fill_time skipped: ", conditionMessage(e))
+      data_cube
+    }
+  )
+
+  raw_band_names <- gdalcubes::bands(data_cube)$name
+  band_names <- .ml_sanitize_band_names(raw_band_names)
+  message("Bands: ", paste(band_names, collapse = ", "))
+
+  nsteps <- gdalcubes::dimensions(data_cube)$t$count
+  n_bands <- length(band_names)
+
+  arr <- gdalcubes::as_array(data_cube)
+  if (length(dim(arr)) != 4L) {
+    stop("Expected a 4D array (band, time, y, x) for batched torch prediction.")
+  }
+  ny <- dim(arr)[3L]
+  nx <- dim(arr)[4L]
+  n_pixels <- ny * nx
+
+  wide <- matrix(
+    aperm(arr, c(3L, 4L, 1L, 2L)),
+    nrow = n_pixels,
+    ncol = n_bands * nsteps
+  )
+
+  valid <- rep(FALSE, n_pixels)
+  for (i in seq_len(n_pixels)) {
+    mat <- matrix(wide[i, ], nrow = n_bands, ncol = nsteps)
+    mat_filled <- .ml_fill_pixel_gaps(mat)
+    if (is.null(mat_filled)) {
+      next
+    }
+    valid[i] <- TRUE
+    wide[i, ] <- as.vector(mat_filled)
+  }
+
+  preds <- rep(NA_real_, n_pixels)
+  predict_idx <- which(valid)
+  batch_size <- as.integer(Sys.getenv("ML_TORCH_PREDICT_BATCH", unset = "256"))
+  if (!is.finite(batch_size) || batch_size < 1L) {
+    batch_size <- 256L
+  }
+
+  infer_torch_layout <- function(m, nb, ns) {
+    candidates <- list(
+      NCT = torch::torch_randn(1, nb, ns),
+      NTC = torch::torch_randn(1, ns, nb)
+    )
+    for (k in names(candidates)) {
+      ok <- tryCatch({ m(candidates[[k]]); TRUE }, error = function(e) FALSE)
+      if (ok) {
+        return(k)
+      }
+    }
+    stop("Torch model accepts neither NCT nor NTC with given dims.")
+  }
+
+  model$eval()
+  layout <- infer_torch_layout(model, n_bands, nsteps)
+
+  if (length(predict_idx)) {
+    for (start in seq(1L, length(predict_idx), by = batch_size)) {
+      end <- min(start + batch_size - 1L, length(predict_idx))
+      idx <- predict_idx[start:end]
+      B <- length(idx)
+      batch_arr <- array(NA_real_, dim = c(B, n_bands, nsteps))
+      for (j in seq_len(B)) {
+        batch_arr[j, , ] <- matrix(wide[idx[j], ], nrow = n_bands, ncol = nsteps)
+      }
+      batch_tensor <- torch::torch_tensor(batch_arr, dtype = torch::torch_float())
+      if (layout == "NTC") {
+        batch_tensor <- batch_tensor$permute(c(1L, 3L, 2L))
+      }
+      torch::with_no_grad({
+        out <- model(batch_tensor)
+      })
+      pred_classes <- as.numeric(torch::torch_argmax(out, dim = 2L))
+      preds[idx] <- pred_classes
+    }
+  }
+
+  message(
+    "Batched torch predict pixels: ", length(predict_idx), " of ", n_pixels,
+    "; non-NA predictions: ", sum(!is.na(preds))
+  )
+
+  tmp <- .ml_prediction_tmp_dir(job)
+  if (is.null(job) || is.null(job$id) || !nzchar(as.character(job$id))) {
+    tmp <- file.path(
+      Sys.getenv("SHARED_TEMP_DIR", unset = tempdir()),
+      paste0("ml_predict_", format(Sys.time(), "%Y%m%d%H%M%S"), "_", sample.int(1000000L, 1L))
+    )
+    dir.create(tmp, recursive = TRUE, showWarnings = FALSE)
+  }
+  pred_grid <- matrix(preds, nrow = ny, ncol = nx)
+  pred_meta_file <- file.path(tmp, "pred_grid.rds")
+  y_coords <- tryCatch(
+    as.numeric(gdalcubes::dimension_values(data_cube)$y),
+    error = function(e) as.numeric(dimnames(arr)[[3L]])
+  )
+  x_coords <- tryCatch(
+    as.numeric(gdalcubes::dimension_values(data_cube)$x),
+    error = function(e) as.numeric(dimnames(arr)[[4L]])
+  )
+  saveRDS(
+    list(
+      pred_grid = pred_grid,
+      y_coords = y_coords,
+      x_coords = x_coords
+    ),
+    pred_meta_file
+  )
+  Sys.setenv(ML_PRED_GRID_FILE = pred_meta_file)
+
+  chunk_fun <- function() {
+    x <- gdalcubes::read_chunk_as_array(with.dimnames = TRUE)
+    meta <- readRDS(Sys.getenv("ML_PRED_GRID_FILE"))
+    chunk_nsteps <- dim(x)[2L]
+    chunk_ny <- dim(x)[3L]
+    chunk_nx <- dim(x)[4L]
+    y_names <- as.numeric(dimnames(x)[[3L]])
+    x_names <- as.numeric(dimnames(x)[[4L]])
+    yi <- match(y_names, meta$y_coords)
+    xi <- match(x_names, meta$x_coords)
+    if (any(is.na(yi)) || any(is.na(xi))) {
+      yi <- vapply(y_names, function(y) which.min(abs(meta$y_coords - y)), integer(1))
+      xi <- vapply(x_names, function(xv) which.min(abs(meta$x_coords - xv)), integer(1))
+    }
+    if (chunk_ny == nrow(meta$pred_grid) && chunk_nx == ncol(meta$pred_grid) &&
+          length(yi) == chunk_ny && length(xi) == chunk_nx &&
+          all(yi == seq_len(chunk_ny)) && all(xi == seq_len(chunk_nx))) {
+      slice <- meta$pred_grid
+    } else {
+      slice <- meta$pred_grid[yi, xi, drop = FALSE]
+    }
+    out <- array(NA_real_, dim = c(1L, chunk_nsteps, chunk_ny, chunk_nx))
+    for (t in seq_len(chunk_nsteps)) {
+      out[1L, t, , ] <- slice
+    }
+    gdalcubes::write_chunk_from_array(out)
+  }
+
+  old_parallel <- gdalcubes::gdalcubes_options()$parallel
+  if (!identical(old_parallel, 1L)) {
+    gdalcubes::gdalcubes_options(parallel = 1L)
+  }
+  on.exit({
+    if (!identical(old_parallel, 1L)) {
+      gdalcubes::gdalcubes_options(parallel = old_parallel)
+    }
+  }, add = TRUE)
+
+  tryCatch(
+    gdalcubes::chunk_apply(data_cube, chunk_fun),
+    error = function(e) {
+      message("Error during batched torch chunk_apply write: ", conditionMessage(e))
+      NULL
+    }
+  )
+}
+
+.ml_batched_classic_predict_cube <- function(data_cube, model, job = NULL) {
+  message("Preparing batched classic ML prediction...")
+  .ml_ensure_ml_predict_packages()
+  .ml_write_prediction_class_map(model, job)
+
+  data_cube <- tryCatch(
+    gdalcubes::fill_time(data_cube, "linear"),
+    error = function(e) {
+      message("fill_time skipped: ", conditionMessage(e))
+      data_cube
+    }
+  )
+
+  raw_band_names <- gdalcubes::bands(data_cube)$name
+  band_names <- .ml_sanitize_band_names(raw_band_names)
+  message("Bands: ", paste(band_names, collapse = ", "))
+
+  nsteps <- gdalcubes::dimensions(data_cube)$t$count
+  n_bands <- length(band_names)
+  feature_names <- .ml_wide_feature_names(band_names, nsteps)
+  col_medians <- .ml_training_feature_medians(model, feature_names)
+
+  arr <- gdalcubes::as_array(data_cube)
+  if (length(dim(arr)) != 4L) {
+    stop("Expected a 4D array (band, time, y, x) for batched prediction.")
+  }
+  ny <- dim(arr)[3L]
+  nx <- dim(arr)[4L]
+  n_pixels <- ny * nx
+
+  wide <- matrix(
+    aperm(arr, c(3L, 4L, 1L, 2L)),
+    nrow = n_pixels,
+    ncol = n_bands * nsteps
+  )
+  colnames(wide) <- feature_names
+
+  valid <- rep(FALSE, n_pixels)
+  preds <- rep(NA_real_, n_pixels)
+  for (i in seq_len(n_pixels)) {
+    mat <- matrix(wide[i, ], nrow = n_bands, ncol = nsteps)
+    mat_filled <- .ml_fill_pixel_gaps(mat)
+    row <- if (is.null(mat_filled)) wide[i, ] else as.vector(mat_filled)
+    if (all(is.na(row))) {
+      next
+    }
+    valid[i] <- TRUE
+    missing <- is.na(row)
+    if (any(missing)) {
+      row[missing] <- col_medians[feature_names[missing]]
+    }
+    wide[i, ] <- row
+  }
+
+  predict_idx <- which(valid)
+  if (length(predict_idx)) {
+    pixel_df <- as.data.frame(wide[predict_idx, , drop = FALSE])
+    colnames(pixel_df) <- feature_names
+    preds[predict_idx] <- .ml_predict_class_response(model, pixel_df)
+  }
+  message(
+    "Batched predict pixels: ", length(predict_idx), " of ", n_pixels,
+    "; non-NA predictions: ", sum(!is.na(preds))
+  )
+
+  tmp <- .ml_prediction_tmp_dir(job)
+  if (is.null(job) || is.null(job$id) || !nzchar(as.character(job$id))) {
+    tmp <- file.path(
+      Sys.getenv("SHARED_TEMP_DIR", unset = tempdir()),
+      paste0("ml_predict_", format(Sys.time(), "%Y%m%d%H%M%S"), "_", sample.int(1000000L, 1L))
+    )
+    dir.create(tmp, recursive = TRUE, showWarnings = FALSE)
+  }
+  pred_grid <- matrix(preds, nrow = ny, ncol = nx)
+  pred_meta_file <- file.path(tmp, "pred_grid.rds")
+  y_coords <- tryCatch(
+    as.numeric(gdalcubes::dimension_values(data_cube)$y),
+    error = function(e) as.numeric(dimnames(arr)[[3L]])
+  )
+  x_coords <- tryCatch(
+    as.numeric(gdalcubes::dimension_values(data_cube)$x),
+    error = function(e) as.numeric(dimnames(arr)[[4L]])
+  )
+  saveRDS(
+    list(
+      pred_grid = pred_grid,
+      y_coords = y_coords,
+      x_coords = x_coords
+    ),
+    pred_meta_file
+  )
+  Sys.setenv(ML_PRED_GRID_FILE = pred_meta_file)
+
+  chunk_fun <- function() {
+    x <- gdalcubes::read_chunk_as_array(with.dimnames = TRUE)
+    meta <- readRDS(Sys.getenv("ML_PRED_GRID_FILE"))
+    chunk_nsteps <- dim(x)[2L]
+    chunk_ny <- dim(x)[3L]
+    chunk_nx <- dim(x)[4L]
+    y_names <- as.numeric(dimnames(x)[[3L]])
+    x_names <- as.numeric(dimnames(x)[[4L]])
+    yi <- match(y_names, meta$y_coords)
+    xi <- match(x_names, meta$x_coords)
+    if (any(is.na(yi)) || any(is.na(xi))) {
+      yi <- vapply(y_names, function(y) which.min(abs(meta$y_coords - y)), integer(1))
+      xi <- vapply(x_names, function(x) which.min(abs(meta$x_coords - x)), integer(1))
+    }
+    if (chunk_ny == nrow(meta$pred_grid) && chunk_nx == ncol(meta$pred_grid) &&
+          length(yi) == chunk_ny && length(xi) == chunk_nx &&
+          all(yi == seq_len(chunk_ny)) && all(xi == seq_len(chunk_nx))) {
+      slice <- meta$pred_grid
+    } else {
+      slice <- meta$pred_grid[yi, xi, drop = FALSE]
+    }
+    out <- array(NA_real_, dim = c(1L, chunk_nsteps, chunk_ny, chunk_nx))
+    for (t in seq_len(chunk_nsteps)) {
+      out[1L, t, , ] <- slice
+    }
+    gdalcubes::write_chunk_from_array(out)
+  }
+
+  old_parallel <- gdalcubes::gdalcubes_options()$parallel
+  if (!identical(old_parallel, 1L)) {
+    gdalcubes::gdalcubes_options(parallel = 1L)
+  }
+  on.exit({
+    if (!identical(old_parallel, 1L)) {
+      gdalcubes::gdalcubes_options(parallel = old_parallel)
+    }
+  }, add = TRUE)
+
+  tryCatch(
+    gdalcubes::chunk_apply(data_cube, chunk_fun),
+    error = function(e) {
+      message("Error during batched chunk_apply write: ", conditionMessage(e))
+      NULL
+    }
+  )
+}
 
 ##### ml-processes #####
 
@@ -135,7 +671,7 @@ ml_fit <- Process$new(
       features
     }
     
-    identify_predictors <- function(training_set, pattern = "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22|(?i)NDVI(_T\\d+)?)$") {
+    identify_predictors <- function(training_set, pattern = "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22|(?i)NDVI)(_T\\d+)?$") {
       predictor_names <- colnames(training_set)
       predictor_names <- predictor_names[
         grepl(pattern, predictor_names, perl = TRUE) &
@@ -306,8 +842,13 @@ ml_fit <- Process$new(
       dl_model$input_data_columns <- features_data
       dl_model$input_layout <- "NCT"
       
-      
-      model_file <- tempfile(fileext = ".pt")
+      dl_model$class_levels <- levels(as.factor(training_data[[target]]))
+      shared <- Sys.getenv("SHARED_TEMP_DIR", unset = tempdir())
+      dir.create(shared, recursive = TRUE, showWarnings = FALSE)
+      model_file <- file.path(
+        shared,
+        paste0("ml_fit_", sample.int(1000000000L, 1L), ".pt")
+      )
       torch_save(dl_model, model_file)
 
       message("Model saved in Torch file: ", model_file)
@@ -380,7 +921,9 @@ ml_fit <- Process$new(
       }
 
       train_data <- as.matrix(x)
+      colnames(train_data) <- predictor_names 
       message("X dims: ", paste(dim(train_data), collapse = " x "))
+      message("colnames gesetzt: ", paste(head(colnames(train_data), 3), collapse = ", ")) 
 
       labels <- NULL
       if (is_classification) {
@@ -528,6 +1071,7 @@ ml_fit <- Process$new(
       attr(model, "params") <- params
       attr(model, "nrounds") <- n_rounds
 
+
       return(model)
     }
 
@@ -580,9 +1124,51 @@ ml_fit <- Process$new(
     })
     
     if (is_classification) {
-      if ("Accuracy" %in% colnames(model$results)) {
+
+      if (!is.null(model$method) && model$method == "rf" && !is.null(model$pred) && nrow(model$pred) > 0) {
+      
+      preds <- model$pred
+      cm <- caret::confusionMatrix(preds$pred, preds$obs)
+      
+      message("\n=== Cross-Validated Confusion Matrix (7-Fold CV ~85/15) ===")
+      print(cm$table)
+      
+      per_class <- cm$byClass
+      
+      if (is.matrix(per_class)) {
+        metrics_df <- data.frame(
+          Class = gsub("Class: ", "", rownames(per_class)),
+          Precision = round(per_class[, "Pos Pred Value"], 4),
+          Recall = round(per_class[, "Sensitivity"], 4),
+          F1 = round(per_class[, "F1"], 4),
+          Specificity = round(per_class[, "Specificity"], 4),
+          Balanced_Accuracy = round(per_class[, "Balanced Accuracy"], 4),
+          stringsAsFactors = FALSE
+        )
+      } else {
+        metrics_df <- data.frame(
+          Class = "Positive",
+          Precision = round(per_class["Pos Pred Value"], 4),
+          Recall = round(per_class["Sensitivity"], 4),
+          F1 = round(per_class["F1"], 4),
+          Specificity = round(per_class["Specificity"], 4),
+          Balanced_Accuracy = round(per_class["Balanced Accuracy"], 4),
+          stringsAsFactors = FALSE
+        )
+      }
+      message("\n=== Per-Class Metrics (7-Fold CV ~85/15) ===")   
+      print(metrics_df, row.names = FALSE)
+      
+      message(sprintf("\nMacro-Avg Precision : %.4f", mean(metrics_df$Precision, na.rm = TRUE)))
+      message(sprintf("Macro-Avg Recall : %.4f", mean(metrics_df$Recall, na.rm = TRUE)))
+      message(sprintf("Macro-Avg F1 : %.4f", mean(metrics_df$F1, na.rm = TRUE)))
+      message(sprintf("Overall Accuracy : %.2f%%", cm$overall["Accuracy"] * 100))
+      message(sprintf("Kappa : %.4f", cm$overall["Kappa"]))
+    } else {
+       if ("Accuracy" %in% colnames(model$results)) {
         accuracy <- max(model$results$Accuracy, na.rm = TRUE)
         message("Accuracy: ", round(accuracy * 100, 2), "%")
+        }
       }
     } else {
       if ("RMSE" %in% colnames(model$results)) {
@@ -657,18 +1243,19 @@ ml_predict <- Process$new(
     
     mlm_single <- function(data_cube, model) {
       message("Preparing prediction with apply_pixel using temporary directory...")
-      tmp <- Sys.getenv("SHARED_TEMP_DIR", tempdir())
+      tmp <- .ml_prediction_tmp_dir(job)
       
       if (is.character(model)) {
         message("Model is a file path: ", model)
         model_file <- model
       } else {
         if (is_torch_model(model)) {
-          model_file <- tempfile(fileext = ".pt")
+          model_file <- file.path(tmp, "ml_model.pt")
           torch::torch_save(model, model_file)
         } else {
-          model_file <- file.path(tmp, "model.rds")
-          saveRDS(model, model_file)
+          model_file <- file.path(tmp, "ml_model.rds")
+          .ml_serialize_worker_model(model, model_file)
+          .ml_write_prediction_class_map(model, job)
           message("Classic ML model saved to RDS single: ", model_file)
         }
       }
@@ -692,6 +1279,35 @@ ml_predict <- Process$new(
       Sys.setenv(NSTEPS = nsteps)
       
       predict_pixel_fun <- function(x) {
+        suppressPackageStartupMessages({
+          require(randomForest, quietly = TRUE)
+          require(caret, quietly = TRUE)
+        })
+
+        read_rds_local <- function(source_file) {
+          local_file <- file.path(
+            tempdir(),
+            paste0("ml_local_", Sys.getpid(), "_", sample.int(1000000000L, 1L), ".rds")
+          )
+          last_error <- NULL
+          for (attempt in seq_len(8L)) {
+            result <- tryCatch({
+              if (!isTRUE(file.copy(source_file, local_file, overwrite = TRUE))) {
+                stop("file.copy failed")
+              }
+              readRDS(local_file)
+            }, error = function(e) {
+              last_error <<- conditionMessage(e)
+              NULL
+            })
+            if (!is.null(result)) {
+              return(result)
+            }
+            Sys.sleep(0.05 * attempt)
+          }
+          stop("Failed to read RDS '", source_file, "': ", last_error)
+        }
+
         local_tmp <- Sys.getenv("TMPDIRPATH")
         nsteps <- as.numeric(Sys.getenv("NSTEPS"))
         model_file <- Sys.getenv("MODEL_FILE")
@@ -704,16 +1320,18 @@ ml_predict <- Process$new(
         
         if (!is.matrix(x)) x <- matrix(x, nrow = 1)
         
-        local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
+        local_bands <- read_rds_local(file.path(local_tmp, "band_names.rds"))
         if (is.null(colnames(x))) colnames(x) <- local_bands
         
         pixel_df <- as.data.frame(x)
         
-        library(torch)
-        if (endsWith(model_file, ".pt")) {
-          local_model <- torch::torch_load(model_file)
+        if (endsWith(tolower(model_file), ".pt")) {
+          local_pt <- file.path(tempdir(), paste0("ml_model_", Sys.getpid(), ".pt"))
+          file.copy(model_file, local_pt, overwrite = TRUE)
+          library(torch)
+          local_model <- torch::torch_load(local_pt)
         } else {
-          local_model <- readRDS(model_file)
+          local_model <- read_rds_local(model_file)
         }
 
         infer_torch_layout <- function(model, n_bands, nsteps) {
@@ -732,6 +1350,10 @@ ml_predict <- Process$new(
         if (inherits(local_model, "xgb.Booster")) {
           is_class <- attr(local_model, "classification")
           labels <- attr(local_model, "class_levels")
+
+          if (any(is.na(pixel_df))) {
+            return(as.numeric(NA))
+          }
           
           dmat <- xgboost::xgb.DMatrix(as.matrix(pixel_df))
           raw_pred <- predict(local_model, dmat)
@@ -746,6 +1368,7 @@ ml_predict <- Process$new(
           }
           return(as.numeric(pred_value))
         } else if (is_torch_model(local_model)) {
+          library(torch)
           message("Deep Learning model detected in predict_pixel_fun")
           pixel_matrix <- as.matrix(pixel_df)
           n_channels <- length(local_bands)
@@ -769,9 +1392,10 @@ ml_predict <- Process$new(
           pred_class <- as.numeric(torch::as_array(pred_class_tensor))
           return(pred_class)
         } else {
-          message("Classic ML model used in predict_pixel_fun")
-          pred <- predict(local_model, newdata = pixel_df)
-          return(as.numeric(pred))
+          if (any(is.na(pixel_df))) {
+            return(as.numeric(NA))
+          }
+          return(as.integer(predict(local_model, newdata = pixel_df)))
         }
       }
       
@@ -791,28 +1415,43 @@ ml_predict <- Process$new(
     }
     
     mlm_multi <- function(data_cube, model) {
+      is_torch_model_local <- function(m) {
+        inherits(m, "nn_module") ||
+          "nn_module" %in% class(m) ||
+          (!is.null(m$conv_layers) && !is.null(m$dense))
+      }
+
+      if (is_torch_model_local(model)) {
+        return(.ml_batched_torch_predict_cube(data_cube, model, job))
+      }
+
+      if (!inherits(model, "xgb.Booster")) {
+        return(.ml_batched_classic_predict_cube(data_cube, model, job))
+      }
+
       message("Preparing prediction with apply_time using temporary directory...")
       tmp <- Sys.getenv("SHARED_TEMP_DIR", unset = tempdir())
-      
+
       if (is.character(model)) {
         model_file <- model
       } else {
-        if (is_torch_model(model)) {
+        if (is_torch_model_local(model)) {
           model_file <- tempfile(fileext = ".pt")
           torch::torch_save(model, model_file)
         } else {
           model_file <- file.path(tmp, "model.rds")
           saveRDS(model, model_file)
+          .ml_write_prediction_class_map(model, job)
           message("Classic ML model saved to RDS multi: ", model_file)
         }
       }
-      
+
       Sys.setenv(MODEL_FILE = model_file)
-      
+
       raw_band_names <- gdalcubes::bands(data_cube)$name
-      cube_band_names <- sanitize_band_names(raw_band_names)
+      cube_band_names <- .ml_sanitize_band_names(raw_band_names)
       message("Bands santalize: ", paste(cube_band_names, collapse = ", "))
-      
+
       band_names_file <- file.path(tmp, "band_names.rds")
       tryCatch({
         saveRDS(cube_band_names, band_names_file)
@@ -820,56 +1459,95 @@ ml_predict <- Process$new(
         stop("Error when saving the band names: ", e$message)
       })
       Sys.setenv(TMPDIRPATH = tmp)
-      
+
       time_steps <- gdalcubes::dimension_values(data_cube)$t
       nsteps <- length(time_steps)
       Sys.setenv(NSTEPS = nsteps)
       message("Number of time steps: ", nsteps)
       message("temp", tmp)
-      
+
       predict_time_fun <- function(x) {
+        fun_env <- environment()
         local_tmp <- Sys.getenv("TMPDIRPATH")
         local_nsteps <- as.numeric(Sys.getenv("NSTEPS"))
         model_file <- Sys.getenv("MODEL_FILE")
-        
-        
-        is_torch_model <- function(model) {
-          inherits(model, "nn_module") ||
-            "nn_module" %in% class(model) ||
-            (!is.null(model$conv_layers) && !is.null(model$dense))
+
+        suppressWarnings(suppressPackageStartupMessages({
+          if (requireNamespace("randomForest", quietly = TRUE)) {
+            library(randomForest)
+          }
+          if (requireNamespace("caret", quietly = TRUE)) {
+            library(caret)
+          }
+        }))
+
+        is_torch_model <- function(m) {
+          inherits(m, "nn_module") ||
+            "nn_module" %in% class(m) ||
+            (!is.null(m$conv_layers) && !is.null(m$dense))
         }
-        
+
+        if (!exists("local_bands", envir = fun_env, inherits = FALSE)) {
+          assign(
+            "local_bands",
+            readRDS(file.path(local_tmp, "band_names.rds")),
+            envir = fun_env
+          )
+        }
+        local_bands <- get("local_bands", envir = fun_env, inherits = FALSE)
+
         if (!is.matrix(x)) {
-          x <- matrix(x, nrow = length(readRDS(file.path(local_tmp, "band_names.rds"))))
+          x <- matrix(x, nrow = length(local_bands))
         }
-        
-        local_bands <- readRDS(file.path(local_tmp, "band_names.rds"))
+
         n_bands <- length(local_bands)
         if (nrow(x) != n_bands || ncol(x) != local_nsteps) {
           stop("The dimensions of the pixel time series do not match: Expected ",
                n_bands, " Lines and ", local_nsteps, " Columns, but preserved: ",
                nrow(x), " x ", ncol(x))
         }
-        
+
         if (endsWith(model_file, ".pt")) {
           library(torch)
           local_model <- torch::torch_load(model_file)
+        } else if (!exists("local_model", envir = fun_env, inherits = FALSE)) {
+          local_model_path <- file.path(tempdir(), paste0("ml_model_", Sys.getpid(), ".rds"))
+          copied <- FALSE
+          last_error <- NULL
+          for (attempt in seq_len(8L)) {
+            copied <- tryCatch({
+              isTRUE(file.copy(model_file, local_model_path, overwrite = TRUE)) &&
+                file.info(local_model_path)$size > 0
+            }, error = function(e) {
+              last_error <<- conditionMessage(e)
+              FALSE
+            })
+            if (copied) break
+            Sys.sleep(0.05 * attempt)
+          }
+          if (!copied) {
+            stop(
+              "Failed to copy model file '", model_file, "': ",
+              if (is.null(last_error)) "unknown error" else last_error
+            )
+          }
+          assign("local_model", readRDS(local_model_path), envir = fun_env)
+          local_model <- get("local_model", envir = fun_env, inherits = FALSE)
         } else {
-          local_model <- readRDS(model_file)
+          local_model <- get("local_model", envir = fun_env, inherits = FALSE)
         }
 
-        infer_torch_layout <- function(model, n_bands, nsteps) {
+        infer_torch_layout <- function(m, n_bands, nsteps) {
           candidates <- list(
             NCT = torch::torch_randn(1, n_bands, nsteps),
             NTC = torch::torch_randn(1, nsteps, n_bands)
           )
           for (k in names(candidates)) {
-            ok <- tryCatch({ model(candidates[[k]]); TRUE }, error = function(e) FALSE)
-            if (ok) return(list(kind="torch", layout=k))
+            ok <- tryCatch({ m(candidates[[k]]); TRUE }, error = function(e) FALSE)
+            if (ok) return(list(kind = "torch", layout = k))
           }
           stop("Torch model accepts neither NCT nor NTC with given dims.")
         }
-
 
         if (inherits(local_model, "xgb.Booster")) {
           is_class <- attr(local_model, "classification")
@@ -877,39 +1555,42 @@ ml_predict <- Process$new(
 
           wide_vec <- as.vector(x)
           wide_mat <- matrix(wide_vec, nrow = 1)
-          wide_names <- unlist(lapply(seq_len(local_nsteps), function(i) paste0(local_bands, "_T", i)))
-          message("Wide names: ", paste(wide_names, collapse = ", "))
+          wide_names <- .ml_wide_feature_names(local_bands, local_nsteps)
           if (length(wide_vec) != length(wide_names)) {
             stop("Mismatch: vector length is ", length(wide_vec), " but expected ", length(wide_names))
           }
           colnames(wide_mat) <- wide_names
           pixel_df <- as.data.frame(wide_mat)
-          
+
+          if (any(is.na(pixel_df))) {
+            return(matrix(NA, nrow = 1, ncol = local_nsteps))
+          }
+
           dmat <- xgboost::xgb.DMatrix(as.matrix(pixel_df))
           raw_pred <- predict(local_model, dmat)
-          
+
           if (isTRUE(is_class) && length(labels) > 2) {
             p_mat <- matrix(raw_pred, ncol = length(labels), byrow = TRUE)
-            pred_value <- max.col(p_mat)  
+            pred_value <- max.col(p_mat)
           } else if (isTRUE(is_class)) {
-            pred_value <- ifelse(raw_pred >= 0.5, 2L, 1L) 
+            pred_value <- ifelse(raw_pred >= 0.5, 2L, 1L)
           } else {
             pred_value <- raw_pred
           }
           result_matrix <- matrix(rep(pred_value, local_nsteps), nrow = 1)
           return(result_matrix)
-        } else if (is_torch_model(local_model)){
+        } else if (is_torch_model(local_model)) {
           message("Deep Learning model detected")
           library(torch)
           layout_info <- infer_torch_layout(local_model, n_bands = n_bands, nsteps = local_nsteps)
           pixel_tensor <- torch::torch_tensor(x, dtype = torch_float())
 
           if (layout_info$layout == "NCT") {
-              message("Using NCT layout for prediction")
+            message("Using NCT layout for prediction")
             pixel_tensor <- pixel_tensor$view(c(1, n_bands, local_nsteps))
           } else if (layout_info$layout == "NTC") {
             message("Using NTC layout for prediction")
-            pixel_tensor <- pixel_tensor$transpose(1,2)$view(c(1, local_nsteps, n_bands))
+            pixel_tensor <- pixel_tensor$transpose(1, 2)$view(c(1, local_nsteps, n_bands))
           } else {
             stop("Unknown torch layout: ", layout_info$layout)
           }
@@ -920,23 +1601,10 @@ ml_predict <- Process$new(
           pred_class <- as.numeric(torch::as_array(pred_class_tensor))
           return(matrix(rep(pred_class, local_nsteps), nrow = 1))
         } else {
-          message("Classic machine learning detected")
-          wide_vec <- as.vector(x)
-          wide_mat <- matrix(wide_vec, nrow = 1)
-          wide_names <- unlist(lapply(seq_len(local_nsteps), function(i) paste0(local_bands, "_T", i)))
-          message("Wide names: ", paste(wide_names, collapse = ", "))
-          if (length(wide_vec) != length(wide_names)) {
-            stop("Mismatch: vector length is ", length(wide_vec), " but expected ", length(wide_names))
-          }
-          colnames(wide_mat) <- wide_names
-          pixel_df <- as.data.frame(wide_mat)
-          pred <- predict(local_model, newdata = pixel_df)
-          pred_value <- as.numeric(pred)
-          result_matrix <- matrix(rep(pred_value, local_nsteps), nrow = 1)
-          return(result_matrix)
+          stop("Classic ML models must use batched chunk_apply prediction.")
         }
       }
-      
+
       prediction_cube <- tryCatch({
         gdalcubes::apply_time(
           data_cube,
@@ -948,7 +1616,7 @@ ml_predict <- Process$new(
         message("Error during apply_time: ", conditionMessage(e))
         NULL
       })
-      
+
       return(prediction_cube)
     }
     
@@ -1043,7 +1711,8 @@ ml_predict <- Process$new(
           input_name <- inp$name
           candidates <- list(
             NCT = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands, nsteps)),
-            NTC = array(rnorm(1 * nsteps * n_bands), dim = c(1, nsteps, n_bands))
+            NTC = array(rnorm(1 * nsteps * n_bands), dim = c(1, nsteps, n_bands)), 
+            FLAT = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands * nsteps))
           )
           for (k in names(candidates)) {
             ok <- tryCatch({
@@ -1066,6 +1735,9 @@ ml_predict <- Process$new(
             } else if (layout_info$layout == "NTC") {
               message("Using ONNX NTC layout for prediction")
               x <- array(t(x), dim = c(1, nsteps_local, n_bands))  
+            } else if (layout_info$layout == "FLAT") {
+              message("Using ONNX FLAT layout (MLP)")
+              x <- matrix(x, nrow = 1)
             } else {
               stop("Unknown ONNX layout: ", layout_info$layout)
             }
@@ -1082,6 +1754,9 @@ ml_predict <- Process$new(
           message("onnxruntime not available - installation is attempted")
           reticulate::py_install("onnxruntime", pip = TRUE)
           message("onnxruntime installed")
+        }
+        if (any(is.na(x))) {
+          return(as.numeric(NA))
         }
         #np <- reticulate::import("numpy")
         onnxruntime <- reticulate::import("onnxruntime")
@@ -1163,8 +1838,9 @@ ml_predict <- Process$new(
           inp <- sess$get_inputs()[[1]]
           input_name <- inp$name
           candidates <- list(
-            NCT = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands, nsteps)),
-            NTC = array(rnorm(1 * nsteps * n_bands), dim = c(1, nsteps, n_bands))
+            NCT  = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands, nsteps)),
+            NTC  = array(rnorm(1 * nsteps * n_bands), dim = c(1, nsteps, n_bands)),
+            FLAT = array(rnorm(1 * n_bands * nsteps), dim = c(1, n_bands * nsteps))  
           )
           for (k in names(candidates)) {
             ok <- tryCatch({
@@ -1172,10 +1848,9 @@ ml_predict <- Process$new(
               sess$run(NULL, setNames(list(x_np), input_name))
               TRUE
             }, error = function(e) FALSE)
-
             if (ok) return(list(kind = "onnx", layout = k, input_name = input_name))
           }
-          stop("ONNX model accepts neither NCT nor NTC with given dims.")
+          stop("ONNX model accepts neither NCT, NTC nor FLAT with given dims.")
         }
 
         
@@ -1188,6 +1863,9 @@ ml_predict <- Process$new(
             } else if (layout_info$layout == "NTC") {
               message("Using ONNX NTC layout for prediction")
               x <- array(t(x), dim = c(1, nsteps_local, n_bands))  
+            } else if (layout_info$layout == "FLAT") {
+              message("Using ONNX FLAT layout for prediction")
+              x <- matrix(as.vector(x), nrow = 1)
             } else {
               stop("Unknown ONNX layout: ", layout_info$layout)
             }
@@ -1200,6 +1878,10 @@ ml_predict <- Process$new(
           }
           colnames(wide_mat) <- wide_names
           x <- wide_mat
+        }
+
+        if (any(is.na(x))) {
+          return(matrix(NA, nrow = 1, ncol = nsteps_local))
         }
         if (!reticulate::py_module_available("numpy")) reticulate::py_install("numpy", pip = TRUE)
         if (!reticulate::py_module_available("onnxruntime")) reticulate::py_install("onnxruntime", pip = TRUE)
@@ -2364,8 +3046,9 @@ mlm_random_forest_envelope <- function(max_variables,
   model_params <- list(
     method = "rf",
     tuneGrid = mtry_grid,
-    trControl = caret::trainControl(method = "cv", number = 5),
+    trControl = caret::trainControl(method = "cv", number = 7, sampling = "up", savePredictions = "final"),
     ntree = num_trees,
+    mtry_mode = max_variables,
     seed = seed,
     classification = classification
   )
@@ -7269,3 +7952,1524 @@ download <- function(filename, res) {
   return(res)
   
 }
+
+
+
+ml_validate <- Process$new(
+  id = "ml_validate",
+  summary = "Validate a trained ML model",
+  description = "Evaluates a trained machine learning model on a validation set and computes performance metrics. The model must have been previously trained using a process such as ``ml_fit()``, ``ml_tune_grid()``, or ``ml_tune_random()``.",
+  categories = as.array("machine learning"),
+  parameters = list(
+    Parameter$new(
+      name = "model",
+      description = "A trained machine learning model to evaluate.",
+      schema = list(type = "object", subtype = "ml-model")
+    ),
+    Parameter$new(
+      name = "validation_set",
+      description = "The validation set used to evaluate the model, provided as a vector data cube or a reference. This set must contain the same independent variables the model was trained on, along with the expected target variable for comparison.",
+      schema = list(
+        list(type = "object", subtype = "datacube",
+             dimensions = list(list(type = "geometry"), list(type = "bands"))),
+        list(type = "object", subtype = "datacube",
+             dimensions = list(list(type = "geometry"), list(type = "other"))),
+        list(type = "string")
+      )
+    ),
+    Parameter$new(
+      name = "target",
+      description = "The name of the variable in the validation set that serves as the ground truth for evaluation. This may refer to class labels, continuous values, segmentation masks, or any reference variable depending on the model task. Set to `null` for unsupervised or self-supervised tasks.",
+      optional = TRUE,
+      schema = list(list(type = "string"), list(type = "null"), default = "label")
+    ),
+    Parameter$new(
+      name = "scoring",
+      description = "One or more metrics to compute for evaluating model performance. The available metrics depend on the model task and the back-end implementation. Examples include 'accuracy', 'f1', 'kappa', 'per_class', and 'auc' for classification; 'rmse', 'mae', and 'r2' for regression; 'iou' and 'dice' for segmentation; or any custom metric supported by the back-end. If set to `null`, the back-end selects an appropriate default metric based on the model task.",
+      optional = TRUE,
+      schema = list(
+        list(type = "string"),
+        list(type = "array", items = list(type = "string"), minItems = 1),
+        list(type = "null"),
+        default = NULL
+      )
+    )
+  ),
+  returns = list(
+    description = "The trained model enriched with validation scores in its metadata. The model can be directly used for prediction with ``ml_predict()``.",
+    schema = list(type = "object", subtype = "ml-model")
+  ),
+  operation = function(model, validation_set, target = "label", scoring = NULL, job) {
+
+    message("Validating model...")
+    
+    extract_time_series_features <- function(training_set, features_data, time_steps) {
+      if (time_steps >= 1) {
+        message("multi time steps")
+        features <- array(
+          data = as.matrix(training_set[, grep("_T\\d+$", colnames(training_set))]),
+          dim = c(nrow(training_set), length(features_data), time_steps)
+        )
+      } 
+      features
+    }
+    
+    identify_predictors <- function(training_set, pattern = "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22|(?i)NDVI)(_T\\d+)?$") {
+      predictor_names <- colnames(training_set)
+      predictor_names <- predictor_names[
+        grepl(pattern, predictor_names, perl = TRUE) &
+          sapply(training_set[, predictor_names, drop = FALSE], is.numeric)
+      ]
+      if (length(predictor_names) == 0) stop("No valid predictors detected. Please check.")
+      predictor_names
+    }
+    
+    convert_to_wide_format <- function(train_data, target) {
+      library(tidyr); library(dplyr); library(sf)
+      
+      band_names <- grep(
+        "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22)$",
+        names(train_data), value = TRUE, perl = TRUE
+      )
+      has_ndvi <- "NDVI" %in% colnames(train_data)
+      bands_to_use <- c(band_names, if (has_ndvi) "NDVI")
+      message("Found bands: ", paste(bands_to_use, collapse = ", "))
+      
+      train_data <- train_data %>%
+        sf::st_drop_geometry() %>%
+        dplyr::as_tibble()
+      
+      time_levels <- sort(unique(train_data$time))
+      train_data <- train_data %>%
+        dplyr::mutate(time_idx = match(time, time_levels))
+      
+      train_data_wide <- train_data %>%
+        dplyr::select(fid, time_idx, dplyr::all_of(bands_to_use)) %>%
+        tidyr::pivot_wider(
+          names_from = time_idx,
+          values_from = dplyr::all_of(bands_to_use),
+          names_glue = "{.value}_T{time_idx}"   
+        )
+      
+      cols_sorted <- c("fid", unlist(lapply(
+        seq_along(time_levels),
+        function(i) paste0(bands_to_use, "_T", i)
+      )))
+      cols_sorted <- intersect(cols_sorted, names(train_data_wide))
+      train_data_wide <- train_data_wide[, cols_sorted]
+      
+      train_data_clean <- train_data_wide %>%
+        dplyr::filter(complete.cases(.))
+      
+      target_data <- train_data %>%
+        dplyr::select(fid, !!rlang::sym(target)) %>%
+        dplyr::distinct(fid, .keep_all = TRUE)
+      
+      dplyr::left_join(train_data_clean, target_data, by = "fid")
+    }
+    
+    `%||%` <- function(a, b) if (!is.null(a)) a else b
+	
+  message("Processing model and validation set...")
+  #Torch model
+	if(is.character(model) && endsWith(model, ".pt")){
+    message("Torch model detected. Extracting features and labels...")
+		time_steps <- length(unique(validation_set$time))
+		if(any(grepl("^X\\d+\\.", names(validation_set)))){
+			names(validation_set) <- gsub("^X\\d+\\.", "", names(validation_set))
+		}
+    if (!"fid" %in% colnames(validation_set))
+        stop("The column 'fid' is missing in validation_set Please check your input data or preprocessing.")
+
+      fid_counts <- table(validation_set$fid)
+      valid_fids <- as.integer(names(fid_counts[fid_counts == time_steps]))
+      validation_set <- validation_set[validation_set$fid %in% valid_fids, ]
+      validation_set <- validation_set[order(validation_set$fid, validation_set$time), ]
+      features_data <- grep("^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22)$", names(validation_set), value = TRUE)
+      if ("NDVI" %in% names(validation_set)) features_data <- c(features_data, "NDVI")
+      
+      validation_data <- convert_to_wide_format(train_data = validation_set, target = target)
+      y_true_data <- validation_data[[target]]
+      message("Training data prepared.")
+      features <- extract_time_series_features(training_set = validation_data, features_data = features_data, time_steps = time_steps)
+      
+      dl_model <- torch::torch_load(model)
+      dl_model$eval()
+      x_validation_data <- torch::torch_tensor(features, dtype = torch::torch_float())
+      with_no_grad({
+        raw_output <- dl_model(x_validation_data)  
+      })
+      predictions <- as.integer(torch::as_array(torch::torch_argmax(raw_output, dim = 2)))
+      class_levels <- dl_model$class_levels
+      predictions <- class_levels[predictions]
+      message("Predictions made.")
+
+    }else if(inherits(model, "train")){
+    #Classical ML model
+    message("Machine learning model detected. Extracting features and labels...")
+    if (any(grepl("^X\\d+\\.", names(validation_set)))) {
+      names(validation_set) <- gsub("^X\\d+\\.", "", names(validation_set))
+    }
+    time_steps <- length(unique(validation_set$time))
+    if (!"fid" %in% colnames(validation_set)) {
+      stop("The column 'fid' is missing in validation_set. Please check your input data or preprocessing.")
+    }
+
+    time_steps <- length(unique(validation_set$time))
+    if(time_steps > 1){
+      message("Multiple time steps detected. Converting to wide format...")
+      validation_data <- convert_to_wide_format(train_data = validation_set, target = target)
+    }else{
+      message("Single time step detected")
+      validation_set <- sf::st_drop_geometry(validation_set)
+      validation_data <- base::as.data.frame(validation_set)
+      validation_data <- validation_data[complete.cases(validation_data), ]
+    }
+    predictor_names <- identify_predictors(validation_data)
+    x_validation_data <- lapply(validation_data[, predictor_names, drop = FALSE], as.numeric)
+    x_validation_data <- as.data.frame(x_validation_data)
+    y_true_data <- validation_data[[target]]
+    predictions <- predict(model, newdata = x_validation_data)
+    predictions <- as.character(predictions)
+   
+    message("Predictions made.")
+} else if (inherits(model, "xgb.Booster")) {
+  message("XGBoost model detected. Extracting features and labels...")
+  if (any(grepl("^X\\d+\\.", names(validation_set)))) {
+    names(validation_set) <- gsub("^X\\d+\\.", "", names(validation_set))
+  }
+
+  time_steps <- length(unique(validation_set$time))
+  if (!"fid" %in% colnames(validation_set))
+    stop("Column 'fid' missing in validation_set.")
+
+  if (time_steps > 1) {
+    message("Multiple time steps detected. Converting to wide format...")
+    validation_data <- convert_to_wide_format(train_data = validation_set, target = target)
+  } else {
+    validation_set <- sf::st_drop_geometry(validation_set)
+    validation_data <- base::as.data.frame(validation_set)
+    validation_data <- validation_data[complete.cases(validation_data), ]
+  }
+
+  predictor_names <- attr(model, "predictor_names")
+  if (is.null(predictor_names) || length(predictor_names) == 0) {
+    message("predictor_names not found – falling back to identify_predictors()")
+    predictor_names <- identify_predictors(validation_data)
+  }
+  message("Using predictor names: ", paste(predictor_names, collapse = ", "))
+
+  missing_cols <- setdiff(predictor_names, colnames(validation_data))
+  if (length(missing_cols) > 0)
+    stop("Validation data missing columns: ", paste(missing_cols, collapse = ", "))
+
+  is_classification <- isTRUE(attr(model, "classification"))
+  labels_xgb <- attr(model, "class_levels")
+
+  if (is.null(labels_xgb) || length(labels_xgb) == 0)
+    stop("class_levels attribute missing or empty in XGBoost model. ",
+         "Model was likely not trained with ml_fit().")
+  message("Class levels in model (", length(labels_xgb), "): ",
+          paste(labels_xgb, collapse = ", "))
+
+  x_validation_data <- as.matrix(validation_data[, predictor_names, drop = FALSE])
+  storage.mode(x_validation_data) <- "double"
+  colnames(x_validation_data) <- predictor_names   
+
+
+  y_true_data <- validation_data[[target]]
+  message("Validation samples: ", nrow(x_validation_data))
+  message("Classes in validation (", length(unique(y_true_data)), "): ", paste(sort(unique(y_true_data)), collapse = ", "))
+  message("x_validation_data dims: ", nrow(x_validation_data), " x ", ncol(x_validation_data))
+  message("storage.mode: ", storage.mode(x_validation_data))
+  message("any NA: ", anyNA(x_validation_data))
+  message("Validation feature names: ", paste(colnames(x_validation_data), collapse = ", "))
+  message("xgboost version: ", as.character(packageVersion("xgboost")))
+
+  raw_predictions <- predict(model, x_validation_data)
+  message("predict() returned class: ", paste(class(raw_predictions), collapse = ", "),
+          ", dims: ", if (!is.null(dim(raw_predictions))) paste(dim(raw_predictions), collapse = "x") else "NULL",
+          ", length: ", length(raw_predictions))
+
+  n_cls <- length(labels_xgb)
+  if (is_classification && n_cls > 2) {
+    if (is.matrix(raw_predictions)) {
+      p_mat <- raw_predictions
+    } else {
+      expected_len <- nrow(x_validation_data) * n_cls
+      if (length(raw_predictions) != expected_len)
+        stop(sprintf("multi:softprob length mismatch: got %d, expected %d (%d samples x %d classes)", length(raw_predictions), expected_len, nrow(x_validation_data), n_cls))
+      p_mat <- matrix(raw_predictions, ncol = n_cls, byrow = TRUE)
+    }
+    predictions <- labels_xgb[max.col(p_mat)]
+  } else if (is_classification && n_cls == 2) {
+    if (is.matrix(raw_predictions)) raw_predictions <- raw_predictions[, 2]
+    predictions <- labels_xgb[ifelse(raw_predictions >= 0.5, 2L, 1L)]
+  } else {
+    if (is.matrix(raw_predictions)) raw_predictions <- as.numeric(raw_predictions)
+    predictions <- raw_predictions
+  }
+  message("Predictions made. Sample: ", paste(head(predictions, 3), collapse = ", "))
+  }else if(is.character(model) && endsWith(model, ".onnx")){
+    #ONNX model
+    message("ONNX model detected. Extracting features and labels...")
+    if (any(grepl("^X\\d+\\.", names(validation_set)))) {
+      names(validation_set) <- gsub("^X\\d+\\.", "", names(validation_set))
+    }
+    time_steps <- length(unique(validation_set$time))
+    if (!"fid" %in% colnames(validation_set)) {
+      stop("The column 'fid' is missing in validation_set. Please check your input data or preprocessing.")
+    }
+    time_steps <- length(unique(validation_set$time))
+    if(time_steps > 1){
+      message("Multiple time steps detected. Converting to wide format...")
+      validation_data <- convert_to_wide_format(train_data = validation_set, target = target)
+    }else{
+      message("Single time step detected")
+      validation_set <- sf::st_drop_geometry(validation_set)
+      validation_data <- base::as.data.frame(validation_set)
+      validation_data <- validation_data[complete.cases(validation_data), ]
+    }
+    predictor_names <- identify_predictors(validation_data)
+    x_validation_data <- as.matrix(validation_data[, predictor_names, drop = FALSE])
+    y_true_data <- validation_data[[target]]
+    onnxruntime <- reticulate::import("onnxruntime")
+    session <- onnxruntime$InferenceSession(model)
+    input_name <- session$get_inputs()[[1]]$name
+    numpy_x_data <- reticulate::np_array(x_validation_data, dtype = "float32")
+    raw_predictions <- session$run(NULL, setNames(list(numpy_x_data), input_name))[[1]]
+    predictions <- as.integer(raw_predictions)
+    message("Predictions made.")
+  }else{
+    stop("Unsupported model type. Please provide a trained model object or a valid file path.") 
+  }
+
+  #metric calculation
+  is_classification <- is.factor(y_true_data) || is.character(y_true_data) || (is.numeric(predictions) && length(unique(predictions)) < 20)
+  if (is.null(scoring)) {
+    scoring <- if (is_classification) list("accuracy") else list("rmse")
+  }
+
+  if (is.character(scoring)) {
+    scoring <- list(scoring)
+  }
+
+  compute_metrics <- function(metric, y_true_data, y_pred_data){
+    metric <- tolower(metric)
+    y_true_data <- as.character(y_true_data)
+    y_pred_data <- as.character(y_pred_data)
+
+    if(metric == "accuracy"){
+      mean(y_true_data == y_pred_data)
+    }else if(metric == "kappa"){
+      cm <- table(y_true_data, y_pred_data)
+      total <- sum(cm)
+      p0 <- sum(diag(cm)) / total
+      pe <- sum(rowSums(cm) * colSums(cm)) / (total^2)
+      (p0 - pe) / (1 - pe)
+    }else if(metric == "f1"){
+      classes <- unique(y_true_data)
+      f1_scores <- sapply(classes, function(cls) {
+        tp <- sum(y_true_data == cls & y_pred_data == cls)
+        fp <- sum(y_true_data != cls & y_pred_data == cls)
+        fn <- sum(y_true_data == cls & y_pred_data != cls)
+        if ((2*tp + fp + fn) == 0) {
+          return(NA_real_)
+        }
+        (2*tp) / ((2*tp) + fp + fn)
+      })
+      mean(f1_scores, na.rm = TRUE)
+    }else if(metric == "rmse"){
+      sqrt(mean((as.numeric(y_true_data) - as.numeric(y_pred_data))^2))
+    }else if(metric == "mae"){
+      mean(abs(as.numeric(y_true_data) - as.numeric(y_pred_data)))
+    }else if(metric == "r2"){
+      ss_res <- sum((as.numeric(y_true_data) - as.numeric(y_pred_data))^2)
+      ss_tot <- sum((as.numeric(y_true_data) - mean(as.numeric(y_true_data)))^2)
+      1 - (ss_res / ss_tot)
+    }else if(metric == "per_class"){
+          classes <- sort(unique(c(y_true_data, y_pred_data)))
+    per_class <- lapply(classes, function(cls) {
+        tp <- sum(y_true_data == cls & y_pred_data == cls)
+        fp <- sum(y_true_data != cls & y_pred_data == cls)
+        fn <- sum(y_true_data == cls & y_pred_data != cls)
+        precision <- if ((tp + fp) == 0) NA_real_ else tp / (tp + fp)
+        recall <- if ((tp + fn) == 0) NA_real_ else tp / (tp + fn)
+        f1 <- if (is.na(precision) || is.na(recall) || (precision + recall) == 0) NA_real_
+                     else 2 * precision * recall / (precision + recall)
+        list(class = cls, precision = precision, recall = recall, f1 = f1)
+    })
+    per_class
+    }else{
+      stop(paste("Unsupported metric:", metric))
+    }
+  }
+
+  scores <- setNames(
+    lapply(
+      scoring, 
+      function(metric) compute_metrics(metric, y_true_data, predictions)
+    ), 
+    unlist(scoring)
+  )
+    for (nm in names(scores)) {
+      val <- scores[[nm]]
+      if (is.numeric(val) && length(val) == 1) {
+        message("Score: ", nm, " = ", round(val, 4))
+      } else {
+        message("Score: ", nm, " = [per-class, see details below]")
+      }
+    }
+
+  if(is_classification){
+    confusion_matrix <- table(y_true_data, predictions)
+    message("Confusion Matrix:\n", capture.output(print(confusion_matrix)))
+
+    # Per-class metrics
+    classes <- sort(unique(c(as.character(y_true_data), as.character(predictions))))
+    per_class_metrics <- data.frame(
+        class = classes,
+        precision = NA_real_,
+        recall = NA_real_,
+        f1 = NA_real_,
+        stringsAsFactors = FALSE
+    )
+    for (i in seq_along(classes)) {
+        cls <- classes[i]
+        tp <- sum(y_true_data == cls & predictions == cls)
+        fp <- sum(y_true_data != cls & predictions == cls)
+        fn <- sum(y_true_data == cls & predictions != cls)
+        per_class_metrics$precision[i] <- if ((tp + fp) == 0) NA_real_ else tp / (tp + fp)
+        per_class_metrics$recall[i]    <- if ((tp + fn) == 0) NA_real_ else tp / (tp + fn)
+        p <- per_class_metrics$precision[i]
+        r <- per_class_metrics$recall[i]
+        per_class_metrics$f1[i] <- if (is.na(p) || is.na(r) || (p + r) == 0) NA_real_
+                                   else 2 * p * r / (p + r)
+    }
+    message("Per-class metrics:")
+    message(capture.output(print(per_class_metrics, digits = 4, row.names = FALSE)))
+
+    attr(model, "per_class_metrics") <- per_class_metrics
+  }
+
+  attr(model, "validation_scores") <- scores
+  attr(model, "validation_target") <- target
+  attr(model, "validation_n") <- nrow(validation_data)
+  return(model)
+
+  }  
+)
+
+
+ml_tune_grid <- Process$new(
+  id = "ml_tune_grid", 
+  description = "Performs exhaustive grid search over specified hyperparameter combinations to find optimal model settings. Each combination in the parameter grid is evaluated using cross-validation or a hold-out validation set, and the best trained model based on the specified scoring metrics is returned.",
+  summary = "Grid search hyperparameter tuning", 
+  categories = as.array("machine learning"),
+  parameters = list(
+    Parameter$new(
+      name = "model",
+      description = "An untrained machine learning model to be trained and evaluated for each hyperparameter combination.", 
+      schema = list(type = "object", subtype = "ml-model")
+    ), 
+    Parameter$new(
+      name = "training_set", 
+      description = "The training set for the model, provided as a vector data cube or a reference. This set contains both the independent variables and the dependent variable that the model analyzes to learn patterns and relationships within the data.", 
+      schema = list(
+          list(type = "object", subtype = "datacube", dimensions = list(list(type = "geometry"), list(type = "bands"))),
+          list(type = "object", subtype = "datacube", dimensions = list(list(type = "geometry"), list(type = "other"))), 
+          list(type = "string") 
+      )
+    ), 
+    Parameter$new(
+      name = "parameters", 
+      description = "Hyperparameter grid defining the search space. Each key is a hyperparameter name, and each value is an array of candidate values to try. All combinations will be evaluated.", 
+      schema = list(
+        type = "object", 
+        additionalProperties = list(
+          type = "array", items = list()
+        )
+      )
+    ), 
+    Parameter$new(
+      name = "target", 
+      description = "The name of the variable in the training set that serves as the target or ground truth for model training. This may refer to class labels, continuous values, segmentation masks, or any reference variable depending on the model task. Set to `null` for unsupervised or self-supervised tasks.", 
+      optional = TRUE,
+      schema = list(
+        list(type = "string"), 
+        list(type = "null"),
+        default = "label"
+      )
+    ), 
+    Parameter$new(
+      name = "scoring", 
+      description = "One or more metrics used to evaluate and compare model performance. The available metrics depend on the model task and the back-end implementation. Examples include 'accuracy', 'f1', 'kappa', and 'auc' for classification; 'rmse', 'mae', and 'r2' for regression; 'iou' and 'dice' for segmentation; or any custom metric supported by the back-end. If set to `null`, the back-end selects an appropriate default metric based on the model task. When multiple metrics are provided, the first metric in the list is used to select the best model.", 
+      optional = TRUE,
+      schema = list(
+        list(type = "string"),
+        list(type = "array", items = list(type = "string"), minItems = 1),
+        list(type = "null"),
+        default = NULL
+      )
+    ), 
+    Parameter$new(
+      name = "cv", 
+      description = "Number of cross-validation folds. If 0 or 1, uses a single train/validation split instead of cross-validation.", 
+      optional = TRUE,
+      schema = list(
+        type = "integer", minimum = 0, default = 5
+      )
+    ), 
+    Parameter$new(
+      name = "validation_split", 
+      description = "Fraction of training data used for validation when cv <= 1. Ignored when using cross-validation.", 
+      optional = TRUE, 
+      schema = list(
+        type = "number", minimum = 0, exclusiveMaximum = 1, default = 0.2
+      )
+    ),
+    Parameter$new(
+      name = "seed", 
+      description = "Random seed for reproducibility of data splits and model training.", 
+      optional = TRUE,
+      schema = list(
+        type = list(
+          "integer",
+          "null"
+        ), default = NULL
+      )
+    )
+  ), 
+  returns = list(
+    description = "A trained model with the best hyperparameter combination found during the grid search. The model metadata includes the tuning results such as the best hyperparameters and evaluation scores.", 
+    schema = list(
+      type = "object", 
+      subtype = "ml-model"
+    )
+  ), 
+  operation = function(model, training_set, parameters, target = "label", scoring = NULL, cv = 5, validation_split = 0.2, seed = NULL, job = NULL) {
+
+
+    `%||%` <- function(a, b) if (!is.null(a)) a else b
+
+
+    identify_predictors <- function(data,
+      pattern = "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22|(?i)NDVI)(_T\\d+)?$") {
+      nms <- colnames(data)
+      nms <- nms[grepl(pattern, nms, perl = TRUE) &
+                   sapply(data[, nms, drop = FALSE], is.numeric)]
+      if (length(nms) == 0) stop("No valid predictors detected.")
+      return(nms)
+    }
+
+    convert_to_wide_format <- function(train_data, target) {
+      band_names <- grep(
+        "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22)$",
+        names(train_data), value = TRUE, perl = TRUE
+      )
+      bands_to_use <- c(band_names, if ("NDVI" %in% colnames(train_data)) "NDVI")
+
+      train_data <- train_data %>% sf::st_drop_geometry() %>% dplyr::as_tibble()
+      time_levels <- sort(unique(train_data$time))
+      train_data <- train_data %>% dplyr::mutate(time_idx = match(time, time_levels))
+
+      wide <- train_data %>%
+        dplyr::select(fid, time_idx, dplyr::all_of(bands_to_use)) %>%
+        tidyr::pivot_wider(names_from = time_idx, values_from = dplyr::all_of(bands_to_use),
+                           names_glue = "{.value}_T{time_idx}")
+
+      cols_sorted <- c("fid", unlist(lapply(seq_along(time_levels),
+                                            function(i) paste0(bands_to_use, "_T", i))))
+      wide <- wide[, intersect(cols_sorted, names(wide))]
+      wide <- wide %>% dplyr::filter(complete.cases(.))
+
+      target_data <- train_data %>%
+        dplyr::select(fid, !!rlang::sym(target)) %>%
+        dplyr::distinct(fid, .keep_all = TRUE)
+
+      dplyr::left_join(wide, target_data, by = "fid")
+    }
+
+
+    update_model_params <- function(model, combo) {
+        m <- model
+        for (nm in names(combo)) {
+            if (!is.null(m$parameters) && nm %in% names(m$parameters)) {
+                
+                m$parameters[[nm]] <- combo[[nm]]
+            } else if (!is.null(m$params) && nm %in% names(m$params)) {
+                
+                m$params[[nm]] <- combo[[nm]]
+            } else if (!is.null(m$tuneGrid) && nm %in% colnames(m$tuneGrid)) {
+                
+                m$tuneGrid[[nm]] <- combo[[nm]]
+            } else if (nm %in% names(m)) {
+                
+                m[[nm]] <- combo[[nm]]
+            } else {
+                if (!is.null(m$parameters)) {
+                    m$parameters[[nm]] <- combo[[nm]]
+                } else {
+                    m[[nm]] <- combo[[nm]]
+                }
+            }
+        }
+        return(m)
+    }
+    
+
+ 
+    compute_score <- function(predicted, actual, scoring, is_classification) {
+      metric <- tolower(scoring[[1]] %||% if (is_classification) "accuracy" else "rmse")
+      predicted <- as.character(predicted)
+      actual <- as.character(actual)
+      switch(metric,
+        "accuracy" = mean(predicted == actual),
+        "kappa" = {
+          lvls <- unique(c(predicted, actual))
+          t <- table(factor(predicted, lvls), factor(actual, lvls))
+          n <- sum(t); po <- sum(diag(t)) / n
+          pe <- sum(rowSums(t) * colSums(t)) / n^2
+          (po - pe) / (1 - pe)
+        },
+        "f1" = {
+          classes <- unique(actual)
+          mean(sapply(classes, function(cls) {
+            tp <- sum(predicted == cls & actual == cls)
+            fp <- sum(predicted == cls & actual != cls)
+            fn <- sum(predicted != cls & actual == cls)
+            if ((2 * tp + fp + fn) == 0) return(0)
+            2 * tp / (2 * tp + fp + fn)
+          }))
+        },
+        "rmse" = -sqrt(mean((as.numeric(predicted) - as.numeric(actual))^2)),
+        "mae" = -mean(abs(as.numeric(predicted) - as.numeric(actual))),
+        "r2" = {
+          act <- as.numeric(actual); pred <- as.numeric(predicted)
+          1 - sum((act - pred)^2) / sum((act - mean(act))^2)
+        },
+        mean(predicted == actual)   
+      )
+    }
+
+   
+    evaluate_on_split <- function(trained_model, val_data, target, scoring, is_dl, is_classification, features_data, time_steps) {
+
+      if (is_dl) {
+          library(torch)
+          pt <- torch_load(trained_model)
+          pt$eval()
+
+          val_wide <- convert_to_wide_format(val_data, target)
+          feat_mat <- array(
+            as.matrix(val_wide[, grep("_T\\d+$", colnames(val_wide))]),
+            dim = c(nrow(val_wide), length(features_data), time_steps)
+          )
+          x_val <- torch_tensor(feat_mat, dtype = torch_float())
+          y_true <- val_wide[[target]]
+
+          with_no_grad({
+            out <- pt(x_val)
+
+            if (is_classification) {
+              pred_class <- as.integer(torch::as_array(torch_argmax(out, dim = 2)))
+              y_true <- as.numeric(as.factor(y_true))
+              return(compute_score(pred_class, y_true, scoring, is_classification))
+            } else {
+              predicted <- as.numeric(torch::as_array(out$squeeze()))
+              return(compute_score(predicted, as.numeric(y_true), scoring, is_classification))
+            }
+          })
+      }
+
+       
+        if (time_steps > 1) {
+          val_wide <- convert_to_wide_format(val_data, target)
+          predictor_names <- identify_predictors(val_wide)
+          x_val <- as.data.frame(lapply(val_wide[, predictor_names, drop = FALSE], as.numeric))
+          y_val <- val_wide[[target]]
+        } else {
+          if (inherits(val_data, "sf")) {
+            val_data <- sf::st_drop_geometry(val_data)
+          }
+          val_data <- as.data.frame(val_data)
+          predictor_names <- identify_predictors(val_data)
+          x_val <- as.data.frame(lapply(val_data[, predictor_names, drop = FALSE], as.numeric))
+          y_val <- val_data[[target]]
+        }
+
+        if (inherits(trained_model, "xgb.Booster")) {
+          dval <- xgboost::xgb.DMatrix(as.matrix(x_val))
+          pred_raw <- predict(trained_model, dval)
+          class_lvls <- attr(trained_model, "class_levels")
+
+          if (!is.null(class_lvls) && length(class_lvls) > 2) {
+            K <- length(class_lvls)
+            predicted <- class_lvls[max.col(matrix(pred_raw, ncol = K, byrow = TRUE))]
+          } else if (!is.null(class_lvls)) {
+            predicted <- ifelse(pred_raw >= 0.5, class_lvls[2], class_lvls[1])
+          } else {
+            predicted <- pred_raw
+          }
+
+        } else {
+          predicted <- as.character(predict(trained_model, newdata = x_val))
+        }
+
+        compute_score(predicted, as.character(y_val), scoring, is_classification)
+      }
+
+    is_dl <- !is.null(model$create_model) && is.function(model$create_model)
+    is_classification <- !is.null(model$classification) && isTRUE(model$classification)
+    message("ml_tune_grid | type=", if (is_dl) "DL" else "ML", " | task=", if (is_classification) "classification" else "regression")
+
+    effective_seed <- seed %||% model$parameters$seed
+    if (!is.null(effective_seed)) {
+      set.seed(as.integer(effective_seed))
+      if (is_dl) { library(torch); torch::torch_manual_seed(as.integer(effective_seed)) }
+      message("Seed: ", effective_seed)
+    }
+
+    if (any(grepl("^X\\d+\\.", names(training_set)))) {
+      names(training_set) <- gsub("^X\\d+\\.", "", names(training_set))
+    }
+
+    time_steps <- length(unique(training_set$time))
+    features_data <- grep(
+      "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22)$",
+      names(training_set), value = TRUE
+    )
+    if ("NDVI" %in% names(training_set)) features_data <- c(features_data, "NDVI")
+    message("time_steps=", time_steps, " | features=", paste(features_data, collapse = ","))
+
+    if (!is_dl && time_steps == 1) {
+      training_set <- sf::st_drop_geometry(training_set)
+      training_set <- as.data.frame(training_set)
+      training_set <- training_set[complete.cases(training_set[, features_data, drop = FALSE]), ]
+    }
+
+  
+    grid_vecs <- lapply(parameters, function(v) seq_along(v))   # index grid
+    idx_grid <- do.call(expand.grid, c(grid_vecs, stringsAsFactors = FALSE))
+    n_combos <- nrow(idx_grid)
+    message("Evaluating ", n_combos, " hyperparameter combination(s)")
+
+  
+    use_cv <- !is_dl && !is.null(cv) && cv > 1
+
+    multi_temporal <- is_dl || time_steps > 1
+
+    if (multi_temporal) {
+      fid_counts <- table(training_set$fid)
+      valid_fids <- as.integer(names(fid_counts[fid_counts == time_steps]))
+      training_set <- training_set[training_set$fid %in% valid_fids, ]
+      training_set <- training_set[order(training_set$fid, training_set$time), ]
+      message("Columns in training_set: ", paste(names(training_set), collapse = ", "))
+      message("target='", target, "' available: ", target %in% names(training_set))
+      message("First row target values: ", paste(head(training_set[[target]], 5), collapse = ", "))
+
+      
+      all_fids <- unique(training_set$fid)
+
+      message("Valid fids (with all ", time_steps, " time steps): ", length(all_fids), " of ", length(unique(c(valid_fids, as.integer(names(fid_counts))))))
+
+      fid_labels <- tryCatch({
+          training_set %>%
+          dplyr::group_by(fid) %>% dplyr::slice(1) %>%
+          dplyr::pull(!!rlang::sym(target))
+      }, error = function(e){
+        message("error (",e$message,")")
+      }
+      )
+    
+
+
+      message("fid_labels length", length(fid_labels))
+      message("fid_labels unique classes", paste(unique(fid_labels), collapse = " , "))
+      message("fid_label table")
+      print(table(fid_labels))  
+
+      if (length(fid_labels) == 0)
+        stop("fid_labels is empty – target column '", target, "' not found or empty.")
+
+
+      if (use_cv) {
+        folds <- caret::createFolds(fid_labels, k = cv, list = TRUE, returnTrain = FALSE)
+      } else {
+        val_idx <- tryCatch({
+          caret::createDataPartition(fid_labels, p = validation_split, list = FALSE)
+        }, warning = function(w) {
+          message("createDataPartition warning (", w$message, ") - falling back")
+          n_val <- max(1L, round(length(all_fids) * validation_split))
+          matrix(sample(seq_along(all_fids), n_val), ncol = 1)
+        }, error = function(e) {
+          message("createDataPartition error (", e$message, ") - falling back")
+          n_val <- max(1L, round(length(all_fids) * validation_split))
+          matrix(sample(seq_along(all_fids), n_val), ncol = 1)
+        })
+
+        val_fids <- all_fids[val_idx]
+        train_fids <- setdiff(all_fids, val_fids)
+
+        if(length(val_fids) == 0 || length(train_fids) == 0){
+          stop("Hold-out split were empty - not to much data  (", length(all_fids)," fids)")
+        }
+
+        message("Hold-out: train_fids=", length(train_fids), " val_fids=", length(val_fids))
+      }
+      }else {
+        y_all <- training_set[[target]]
+        if (use_cv) {
+          folds <- caret::createFolds(y_all, k = cv, list = TRUE, returnTrain = FALSE)
+        } else {
+          val_idx <- tryCatch({
+            caret::createDataPartition(y_all, p = validation_split, list = FALSE)
+          }, error = function(e) {
+            n_val <- max(1L, round(nrow(training_set) * validation_split))
+            matrix(sample(seq_len(nrow(training_set)), n_val), ncol = 1)
+          })
+          val_rows <- val_idx
+          train_rows <- setdiff(seq_len(nrow(training_set)), val_idx)
+        }
+      }
+
+    results <- vector("list", n_combos)
+
+    for (i in seq_len(n_combos)) {
+
+      combo <- setNames(
+        lapply(names(parameters), function(nm) parameters[[nm]][[idx_grid[i, nm]]] ),
+        names(parameters)
+      )
+      message(sprintf("\n── Combo %d/%d: %s", i, n_combos, paste(names(combo), vapply(combo, function(v) paste(v, collapse = "/"), character(1)), sep = "=", collapse = ", ")))
+
+      candidate <- update_model_params(model, combo)
+
+    if (!is.null(candidate$method) && grepl("^svm", candidate$method)) {
+      grid_params <- intersect(names(combo), c("C", "sigma", "degree", "scale"))
+      if (length(grid_params) > 0) {
+        candidate$tuneGrid <- as.data.frame(combo[grid_params])
+      }
+    }
+
+      tryCatch({
+        if (use_cv) {
+          fold_scores <- numeric(cv)
+          for (k in seq_len(cv)) {
+            if (multi_temporal) {
+              val_fids_k <- all_fids[folds[[k]]]
+              train_fids_k <- setdiff(all_fids, val_fids_k)
+              train_k <- training_set[training_set$fid %in% train_fids_k, ]
+              val_k <- training_set[training_set$fid %in% val_fids_k,   ]
+            } else {
+              val_k <- training_set[ folds[[k]], ]
+              train_k <- training_set[-folds[[k]], ]
+            }
+            trained_k <- ml_fit$operation(model = candidate, training_set = train_k, target = target, job = job)
+            fold_scores[k] <- evaluate_on_split(trained_k, val_k, target, scoring, is_dl, is_classification, features_data, time_steps)
+          }
+          score <- mean(fold_scores, na.rm = TRUE)
+          message(sprintf(" CV (%d folds): %s → mean=%.4f", cv, paste(round(fold_scores, 4), collapse=", "), score))
+
+        } else {
+          if (multi_temporal) {
+            train_part <- training_set[training_set$fid %in% train_fids, ]
+            val_part <- training_set[training_set$fid %in% val_fids,   ]
+          } else {
+            train_part <- training_set[train_rows, ]
+            val_part <- training_set[val_rows,   ]
+          }
+          trained <- ml_fit$operation(model = candidate, training_set = train_part, target = target, job = job)
+          score   <- evaluate_on_split(trained, val_part, target, scoring, is_dl, is_classification, features_data, time_steps)
+          message(sprintf("  Hold-out score: %.4f", score))
+        }
+
+        results[[i]] <- list(combo = combo, score = score, error = NA_character_)
+
+      }, error = function(e) {
+        message(" ERROR: ", e$message)
+        results[[i]] <<- list(combo = combo, score = -Inf, error = e$message)
+      })
+    }
+
+    scores <- sapply(results, function(r) r$score %||% -Inf)
+    best_i <- which.max(scores)
+    best_combo <- results[[best_i]]$combo
+
+    message(sprintf("\n── Best: combo %d | score=%.4f", best_i, scores[best_i]))
+    for (nm in names(best_combo))
+      message(sprintf("   %s = %s", nm, paste(best_combo[[nm]], collapse = "/")))
+
+    message("\n── Training final model on full dataset...")
+    best_config <- update_model_params(model, best_combo)
+
+    final_model <- ml_fit$operation(
+      model = best_config,
+      training_set = training_set,
+      target = target,
+      job = job
+    )
+
+    tuning_df <- data.frame(
+      combo_id = seq_len(n_combos),
+      score = scores,
+      error = sapply(results, function(r) r$error %||% NA_character_),
+      stringsAsFactors = FALSE
+    )
+    for (nm in names(parameters)) {
+      tuning_df[[nm]] <- vapply(results,
+        function(r) paste(r$combo[[nm]], collapse = "/"), character(1))
+    }
+
+    attr(final_model, "tuning_results") <- tuning_df
+    attr(final_model, "best_params") <- best_combo
+    attr(final_model, "best_score") <- scores[best_i]
+    attr(final_model, "scoring_metric") <- scoring %||% if (is_classification) "accuracy" else "rmse"
+    attr(final_model, "validation") <- if (use_cv) paste0(cv, "-fold CV") else "hold-out"
+
+    message("ml_tune_grid complete | best score: ", round(scores[best_i], 4), " | metric: ", attr(final_model, "scoring_metric"))
+    return(final_model)
+  
+  }
+)
+
+
+ml_tune_random <- Process$new(
+  id = "ml_tune_random",
+  description = "Performs random search over hyperparameter distributions to find optimal model settings. Unlike grid search, random search samples a fixed number of parameter combinations from specified distributions, which can be more efficient for high-dimensional parameter spaces. Returns the best trained model based on the specified scoring metrics.", 
+  summary = "Random search hyperparameter tuning", 
+  categories = as.array("machine learning"),
+  parameters = list(
+    Parameter$new(
+      name = "model", 
+      description = "An untrained machine learning model to be trained and evaluated for each sampled hyperparameter combination.", 
+      schema = list(type = "object", subtype = "ml-model")
+    ), 
+    Parameter$new(
+      name = "training_set", 
+      description = "The training set for the model, provided as a vector data cube or a reference. This set contains both the independent variables and the dependent variable that the model analyzes to learn patterns and relationships within the data.", 
+      schema = list(
+        list(type = "object", subtype = "datacube", dimensions = list(list(type = "geometry"), list(type = "bands"))),
+        list(type = "object", subtype = "datacube", dimensions = list(list(type = "geometry"), list(type = "other"))), 
+        list(type = "string")
+      )
+    ), 
+    Parameter$new(
+      name = "parameters", 
+      description = "Hyperparameter distributions defining the search space. Each key is a hyperparameter name. Values can be arrays (uniform sampling), or objects specifying distributions with 'type' ('uniform', 'log_uniform', 'int_uniform', 'choice') and parameters ('min', 'max', 'values').", 
+      schema = list(
+        type = "object", 
+        additionalProperties = list(
+          anyOf = list(
+            list(type = "array", description = "List of discrete values to sample from uniformly.", items = list()), 
+            list(type = "object", description = "Distribution specification.", properties = list(
+              type = list(type = "string", enum = list("uniform", "log_uniform", "int_uniform", "choice")), 
+              min = list(type = "number"), 
+              max = list(type = "number"), 
+              values = list(type = "array") 
+            ))
+          )
+        )
+      )
+    ),
+    Parameter$new(
+      name = "n_iter", 
+      description = "Number of random parameter combinations to sample and evaluate.", 
+      optional = TRUE,
+      schema = list(
+        type = "integer", minimum = 1, default = 10
+      )
+    ), 
+    Parameter$new(
+      name = "target", 
+      description = "The name of the variable in the training set that serves as the target or ground truth for model training. This may refer to class labels, continuous values, segmentation masks, or any reference variable depending on the model task. Set to `null` for unsupervised or self-supervised tasks.", 
+      optional = TRUE,
+      schema = list(
+        list(type = "string"),
+        list(type = "null"), 
+        default = "label"
+      )
+    ), 
+    Parameter$new(
+      name = "scoring", 
+      description = "One or more metrics used to evaluate and compare model performance. The available metrics depend on the model task and the back-end implementation. Examples include 'accuracy', 'f1', 'kappa', and 'auc' for classification; 'rmse', 'mae', and 'r2' for regression; 'iou' and 'dice' for segmentation; or any custom metric supported by the back-end. If set to `null`, the back-end selects an appropriate default metric based on the model task. When multiple metrics are provided, the first metric in the list is used to select the best model.", 
+      optional = TRUE,
+      schema = list(
+        list(type = "string"), 
+        list(type = "array", items = list(type = "string"), minItems = 1),
+        list(type = "null"),
+        default = NULL
+      )
+    ), 
+    Parameter$new(
+      name = "cv", 
+      description = "Number of cross-validation folds. If 0 or 1, uses a single train/validation split instead of cross-validation.", 
+      optional = TRUE,
+      schema = list(
+        type = "integer", minimum = 0, default = 5
+      )
+    ), 
+    Parameter$new(
+      name = "validation_split",
+      description = "Fraction of training data used for validation when cv <= 1. Ignored when using cross-validation.", 
+      optional = TRUE,
+      schema = list(
+        type = "number", minimum = 0, exclusiveMaximum = 1, default = 0.2
+      )
+    ), 
+  Parameter$new(
+      name = "seed",
+      description = "Random seed for reproducibility of parameter sampling, data splits, and model training.",
+      optional = TRUE,
+      schema = list(
+          type = list(
+            "integer",
+            "null"
+          ),
+          default = NULL
+          )
+    )
+
+  ), 
+  returns = list(
+    description = "A trained model with the best hyperparameter combination found during the random search. The model metadata includes the tuning results such as the best hyperparameters and evaluation scores.", 
+    schema = list(
+      type = "object", 
+      subtype = "ml-model"
+    )
+  ), 
+  operation = function(model, training_set, parameters, n_iter = 10, target = "label", scoring = NULL, cv = 5, validation_split = 0.2, seed = NULL, job = NULL) {
+    
+    `%||%` <- function(a, b) if (!is.null(a)) a else b
+  
+    identify_predictors <- function(data,
+      pattern = "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22|(?i)NDVI)(_T\\d+)?$") {
+      nms <- colnames(data)
+      nms <- nms[grepl(pattern, nms, perl = TRUE) &
+                   sapply(data[, nms, drop = FALSE], is.numeric)]
+      if (length(nms) == 0) stop("No valid predictors detected.")
+      return(nms)
+    }
+ 
+    convert_to_wide_format <- function(train_data, target) {
+      band_names <- grep(
+        "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22)$",
+        names(train_data), value = TRUE, perl = TRUE
+      )
+      bands_to_use <- c(band_names, if ("NDVI" %in% colnames(train_data)) "NDVI")
+ 
+      train_data <- train_data %>% sf::st_drop_geometry() %>% dplyr::as_tibble()
+      time_levels <- sort(unique(train_data$time))
+      train_data <- train_data %>% dplyr::mutate(time_idx = match(time, time_levels))
+ 
+      wide <- train_data %>%
+        dplyr::select(fid, time_idx, dplyr::all_of(bands_to_use)) %>%
+        tidyr::pivot_wider(names_from = time_idx, values_from = dplyr::all_of(bands_to_use), names_glue = "{.value}_T{time_idx}")
+ 
+      cols_sorted <- c("fid", unlist(lapply(seq_along(time_levels),
+                                            function(i) paste0(bands_to_use, "_T", i))))
+      wide <- wide[, intersect(cols_sorted, names(wide))]
+      wide <- wide %>% dplyr::filter(complete.cases(.))
+ 
+      target_data <- train_data %>%
+        dplyr::select(fid, !!rlang::sym(target)) %>%
+        dplyr::distinct(fid, .keep_all = TRUE)
+ 
+      dplyr::left_join(wide, target_data, by = "fid")
+    }
+ 
+    update_model_params <- function(model, combo) {
+        m <- model
+        for (nm in names(combo)) {
+            if (!is.null(m$parameters) && nm %in% names(m$parameters)) {
+                
+                m$parameters[[nm]] <- combo[[nm]]
+            } else if (!is.null(m$params) && nm %in% names(m$params)) {
+                
+                m$params[[nm]] <- combo[[nm]]
+            } else if (!is.null(m$tuneGrid) && nm %in% colnames(m$tuneGrid)) {
+                
+                m$tuneGrid[[nm]] <- combo[[nm]]
+            } else if (nm %in% names(m)) {
+                
+                m[[nm]] <- combo[[nm]]
+            } else {
+                if (!is.null(m$parameters)) {
+                    m$parameters[[nm]] <- combo[[nm]]
+                } else {
+                    m[[nm]] <- combo[[nm]]
+                }
+            }
+        }
+        return(m)
+    }
+ 
+    
+    compute_score <- function(predicted, actual, scoring, is_classification) {
+      metric <- tolower(scoring[[1]] %||% if (is_classification) "accuracy" else "rmse")
+      predicted <- as.character(predicted)
+      actual <- as.character(actual)
+      switch(metric,
+        "accuracy" = mean(predicted == actual),
+        "kappa" = {
+          lvls <- unique(c(predicted, actual))
+          t <- table(factor(predicted, lvls), factor(actual, lvls))
+          n <- sum(t); po <- sum(diag(t)) / n
+          pe <- sum(rowSums(t) * colSums(t)) / n^2
+          (po - pe) / (1 - pe)
+        },
+        "f1" = {
+          classes <- unique(actual)
+          mean(sapply(classes, function(cls) {
+            tp <- sum(predicted == cls & actual == cls)
+            fp <- sum(predicted == cls & actual != cls)
+            fn <- sum(predicted != cls & actual == cls)
+            if ((2 * tp + fp + fn) == 0) return(0)
+            2 * tp / (2 * tp + fp + fn)
+          }))
+        },
+        "rmse" = -sqrt(mean((as.numeric(predicted) - as.numeric(actual))^2)),
+        "mae" = -mean(abs(as.numeric(predicted) - as.numeric(actual))),
+        "r2" = {
+          act <- as.numeric(actual); pred <- as.numeric(predicted)
+          1 - sum((act - pred)^2) / sum((act - mean(act))^2)
+        },
+        mean(predicted == actual)
+      )
+    }
+ 
+   
+    evaluate_on_split <- function(trained_model, val_data, target, scoring, is_dl, is_classification, features_data, time_steps) {
+ 
+      if (is_dl) {
+        library(torch)
+        pt <- torch_load(trained_model)
+        pt$eval()
+ 
+        val_wide <- convert_to_wide_format(val_data, target)
+        feat_mat <- array(
+          as.matrix(val_wide[, grep("_T\\d+$", colnames(val_wide))]),
+          dim = c(nrow(val_wide), length(features_data), time_steps)
+        )
+        x_val <- torch_tensor(feat_mat, dtype = torch_float())
+        y_true <- val_wide[[target]]
+ 
+        with_no_grad({
+          out <- pt(x_val)
+ 
+          if (is_classification) {
+            pred_class <- as.integer(torch::as_array(torch_argmax(out, dim = 2)))
+            y_true <- as.numeric(as.factor(y_true))
+            return(compute_score(pred_class, y_true, scoring, is_classification))
+          } else {
+            predicted <- as.numeric(torch::as_array(out$squeeze()))
+            return(compute_score(predicted, as.numeric(y_true), scoring, is_classification))
+          }
+        })
+      }
+ 
+      if (time_steps > 1) {
+        val_wide <- convert_to_wide_format(val_data, target)
+        predictor_names <- identify_predictors(val_wide)
+        x_val <- as.data.frame(lapply(val_wide[, predictor_names, drop = FALSE], as.numeric))
+        y_val <- val_wide[[target]]
+      } else {
+        if (inherits(val_data, "sf")) {
+          val_data <- sf::st_drop_geometry(val_data)
+        }
+        val_data <- as.data.frame(val_data)
+        predictor_names <- identify_predictors(val_data)
+        x_val <- as.data.frame(lapply(val_data[, predictor_names, drop = FALSE], as.numeric))
+        y_val <- val_data[[target]]
+      }
+ 
+      if (inherits(trained_model, "xgb.Booster")) {
+        dval <- xgboost::xgb.DMatrix(as.matrix(x_val))
+        pred_raw <- predict(trained_model, dval)
+        class_lvls <- attr(trained_model, "class_levels")
+ 
+        if (!is.null(class_lvls) && length(class_lvls) > 2) {
+          K <- length(class_lvls)
+          predicted <- class_lvls[max.col(matrix(pred_raw, ncol = K, byrow = TRUE))]
+        } else if (!is.null(class_lvls)) {
+          predicted <- ifelse(pred_raw >= 0.5, class_lvls[2], class_lvls[1])
+        } else {
+          predicted <- pred_raw
+        }
+      } else {
+        predicted <- as.character(predict(trained_model, newdata = x_val))
+      }
+ 
+      compute_score(predicted, as.character(y_val), scoring, is_classification)
+    }
+ 
+    sample_one_param <- function(spec) {
+      if (is.null(spec$type) || !is.character(spec$type)) {
+        vals <- if (is.list(spec)) spec else as.list(spec)
+        return(vals[[sample.int(length(vals), 1)]])
+      }
+
+      switch(tolower(spec$type),
+        "uniform" = {
+          runif(1, min = spec$min, max = spec$max)
+        },
+        "log_uniform" = {
+          exp(runif(1, min = log(spec$min), max = log(spec$max)))
+        },
+        "int_uniform" = {
+          sample(seq.int(as.integer(spec$min), as.integer(spec$max)), 1)
+        },
+        "choice" = {
+          vals <- spec$values
+          vals[[sample.int(length(vals), 1)]]
+        },
+        {
+          vals <- if (is.list(spec)) spec else as.list(spec)
+          vals[[sample.int(length(vals), 1)]]
+        }
+      )
+    }
+ 
+    sample_combo <- function(parameters) {
+      setNames(
+        lapply(parameters, sample_one_param),
+        names(parameters)
+      )
+    }
+ 
+    is_dl <- !is.null(model$create_model) && is.function(model$create_model)
+    is_classification <- !is.null(model$classification) && isTRUE(model$classification)
+    message("ml_tune_random | type=", if (is_dl) "DL" else "ML", " | task=", if (is_classification) "classification" else "regression")
+ 
+    effective_seed <- seed %||% model$parameters$seed
+    if (!is.null(effective_seed)) {
+      set.seed(as.integer(effective_seed))
+      if (is_dl) { library(torch); torch::torch_manual_seed(as.integer(effective_seed)) }
+      message("Seed: ", effective_seed)
+    }
+ 
+    if (any(grepl("^X\\d+\\.", names(training_set)))) {
+      names(training_set) <- gsub("^X\\d+\\.", "", names(training_set))
+    }
+ 
+    time_steps <- length(unique(training_set$time))
+    features_data <- grep(
+      "^(coastal|blue|green|red|rededge1|rededge2|rededge3|nir|nir08|nir09|cirrus|swir16|swir22)$",
+      names(training_set), value = TRUE
+    )
+    if ("NDVI" %in% names(training_set)) features_data <- c(features_data, "NDVI")
+    message("time_steps=", time_steps, " | features=", paste(features_data, collapse = ","))
+ 
+    if (!is_dl && time_steps == 1) {
+      training_set <- sf::st_drop_geometry(training_set)
+      training_set <- as.data.frame(training_set)
+      training_set <- training_set[complete.cases(training_set[, features_data, drop = FALSE]), ]
+    }
+ 
+    n_combos <- as.integer(n_iter)
+    combos <- vector("list", n_combos)
+    for (j in seq_len(n_combos)) {
+      combos[[j]] <- sample_combo(parameters)
+    }
+    message("Sampled ", n_combos, " random hyperparameter combination(s)")
+ 
+    use_cv <- !is_dl && !is.null(cv) && cv > 1
+    multi_temporal <- is_dl || time_steps > 1
+ 
+    if (multi_temporal) {
+      fid_counts <- table(training_set$fid)
+      valid_fids <- as.integer(names(fid_counts[fid_counts == time_steps]))
+      training_set <- training_set[training_set$fid %in% valid_fids, ]
+      training_set <- training_set[order(training_set$fid, training_set$time), ]
+      message("Columns in training_set: ", paste(names(training_set), collapse = ", "))
+      message("target='", target, "' available: ", target %in% names(training_set))
+      message("First row target values: ", paste(head(training_set[[target]], 5), collapse = ", "))
+
+      all_fids <- unique(training_set$fid)
+ 
+      message("Valid fids (with all ", time_steps, " time steps): ", length(all_fids), " of ", length(unique(c(valid_fids, as.integer(names(fid_counts))))))
+ 
+      fid_labels <- tryCatch({
+        training_set %>%
+          dplyr::group_by(fid) %>% dplyr::slice(1) %>%
+          dplyr::pull(!!rlang::sym(target))
+      }, error = function(e) {
+        message("error (", e$message, ")")
+      })
+ 
+      message("fid_labels length", length(fid_labels))
+      message("fid_labels unique classes", paste(unique(fid_labels), collapse = " , "))
+      message("fid_label table")
+      print(table(fid_labels))
+ 
+      if (length(fid_labels) == 0)
+        stop("fid_labels ist leer – target-Spalte '", target, "' nicht gefunden oder leer.")
+ 
+      if (use_cv) {
+        folds <- caret::createFolds(fid_labels, k = cv, list = TRUE, returnTrain = FALSE)
+      } else {
+        val_idx <- tryCatch({
+          caret::createDataPartition(fid_labels, p = validation_split, list = FALSE)
+        }, warning = function(w) {
+          message("createDataPartition warning (", w$message, ") - falling back")
+          n_val <- max(1L, round(length(all_fids) * validation_split))
+          matrix(sample(seq_along(all_fids), n_val), ncol = 1)
+        }, error = function(e) {
+          message("createDataPartition error (", e$message, ") - falling back")
+          n_val <- max(1L, round(length(all_fids) * validation_split))
+          matrix(sample(seq_along(all_fids), n_val), ncol = 1)
+        })
+ 
+        val_fids <- all_fids[val_idx]
+        train_fids <- setdiff(all_fids, val_fids)
+ 
+        if (length(val_fids) == 0 || length(train_fids) == 0) {
+          stop("Hold-out split were empty - not enough data (", length(all_fids), " fids)")
+        }
+ 
+        message("Hold-out: train_fids=", length(train_fids), " val_fids=", length(val_fids))
+      }
+    } else {
+      y_all <- training_set[[target]]
+      if (use_cv) {
+        folds <- caret::createFolds(y_all, k = cv, list = TRUE, returnTrain = FALSE)
+      } else {
+        val_idx <- tryCatch({
+          caret::createDataPartition(y_all, p = validation_split, list = FALSE)
+        }, error = function(e) {
+          n_val <- max(1L, round(nrow(training_set) * validation_split))
+          matrix(sample(seq_len(nrow(training_set)), n_val), ncol = 1)
+        })
+        val_rows <- val_idx
+        train_rows <- setdiff(seq_len(nrow(training_set)), val_idx)
+      }
+    }
+ 
+    
+    results <- vector("list", n_combos)
+ 
+    for (i in seq_len(n_combos)) {
+ 
+      combo <- combos[[i]]
+      message(sprintf("\n── Combo %d/%d: %s", i, n_combos, paste(names(combo), vapply(combo, function(v) paste(v, collapse = "/"), character(1)),sep = "=", collapse = ", ")))
+ 
+      candidate <- update_model_params(model, combo)
+ 
+      tryCatch({
+        if (use_cv) {
+          fold_scores <- numeric(cv)
+          for (k in seq_len(cv)) {
+            if (multi_temporal) {
+              val_fids_k <- all_fids[folds[[k]]]
+              train_fids_k <- setdiff(all_fids, val_fids_k)
+              train_k <- training_set[training_set$fid %in% train_fids_k, ]
+              val_k <- training_set[training_set$fid %in% val_fids_k,   ]
+            } else {
+              val_k <- training_set[ folds[[k]], ]
+              train_k <- training_set[-folds[[k]], ]
+            }
+            trained_k <- ml_fit$operation(model = candidate, training_set = train_k, target = target, job = job)
+            fold_scores[k] <- evaluate_on_split(trained_k, val_k, target, scoring, is_dl, is_classification, features_data, time_steps)
+          }
+          score <- mean(fold_scores, na.rm = TRUE)
+          message(sprintf(" CV (%d folds): %s -> mean=%.4f", cv, paste(round(fold_scores, 4), collapse = ", "), score))
+ 
+        } else {
+          if (multi_temporal) {
+            train_part <- training_set[training_set$fid %in% train_fids, ]
+            val_part <- training_set[training_set$fid %in% val_fids,   ]
+          } else {
+            train_part <- training_set[train_rows, ]
+            val_part <- training_set[val_rows,   ]
+          }
+          trained <- ml_fit$operation(model = candidate, training_set = train_part, target = target, job = job)
+          score <- evaluate_on_split(trained, val_part, target, scoring, is_dl, is_classification, features_data, time_steps)
+          message(sprintf(" Hold-out score: %.4f", score))
+        }
+ 
+        results[[i]] <- list(combo = combo, score = score, error = NA_character_)
+ 
+      }, error = function(e) {
+        message(" ERROR: ", e$message)
+        results[[i]] <<- list(combo = combo, score = -Inf, error = e$message)
+      })
+    }
+ 
+    
+    scores <- sapply(results, function(r) r$score %||% -Inf)
+    best_i <- which.max(scores)
+    best_combo <- results[[best_i]]$combo
+ 
+    message(sprintf("\n── Best: combo %d | score=%.4f", best_i, scores[best_i]))
+    for (nm in names(best_combo))
+      message(sprintf("   %s = %s", nm, paste(best_combo[[nm]], collapse = "/")))
+ 
+    
+    message("\n── Training final model on full dataset...")
+    best_config <- update_model_params(model, best_combo)
+ 
+    final_model <- ml_fit$operation(
+      model = best_config,
+      training_set = training_set,
+      target = target,
+      job = job
+    )
+ 
+    
+    tuning_df <- data.frame(
+      combo_id = seq_len(n_combos),
+      score = scores,
+      error = sapply(results, function(r) r$error %||% NA_character_),
+      stringsAsFactors = FALSE
+    )
+    for (nm in names(parameters)) {
+      tuning_df[[nm]] <- vapply(results,
+        function(r) paste(r$combo[[nm]], collapse = "/"), character(1))
+    }
+ 
+    attr(final_model, "tuning_results") <- tuning_df
+    attr(final_model, "best_params") <- best_combo
+    attr(final_model, "best_score") <- scores[best_i]
+    attr(final_model, "scoring_metric") <- scoring %||% if (is_classification) "accuracy" else "rmse"
+    attr(final_model, "validation") <- if (use_cv) paste0(cv, "-fold CV") else "hold-out"
+    attr(final_model, "search_strategy") <- "random"
+    attr(final_model, "n_iter") <- n_combos
+ 
+    message("ml_tune_random complete | best score: ", round(scores[best_i], 4), " | metric: ", attr(final_model, "scoring_metric"), " | evaluated: ", n_combos, " combinations")
+    return(final_model)
+
+
+  }
+)
+
+
+
+ml_smooth_class <- Process$new(
+  id = "ml_smooth_class", 
+  description = "Applies spatial smoothing to classification probabilities results from a machine learning model using Bayesian inference. This process helps reduce noise and improve classification accuracy by considering spatial context and neighbourhood information. The smoothing is based on a window-based approach.", 
+  summary = "Apply Bayesian smoothing to classification results", 
+  categories = as.array("machine learning"),
+  parameters = list(
+    Parameter$new(
+      name = "data", 
+      description = "The input classification probabilities data to be smoothed. This should be a classified data cube.", 
+      schema = list(
+        type = "object", 
+        subtype = "datacube"
+      )
+    ), 
+    Parameter$new(
+      name = "window_size", 
+      description = "The size of the moving window used for spatial smoothing. Must be an odd number to ensure a central pixel.", 
+      optional = TRUE,
+      schema = list(
+        type = "integer", minimum = 3, default = 7
+      )
+    ), 
+    Parameter$new(
+      name = "neighborhood_fraction", 
+      description = "The fraction of neighbouring pixels to consider in the smoothing process. Controls the influence of local spatial information.", 
+      optional = TRUE,
+      schema = list(
+        type = "number", minimum = 0, maximum = 1, default = 0.5
+      )
+    ), 
+    Parameter$new(
+      name = "smoothness", 
+      description = "Controls the degree of smoothing applied. Higher values result in smoother outputs but may lose fine details.", 
+      optional = TRUE,
+      schema = list(
+        type = "integer", minimum = 1, default = 10
+      )
+    )
+), 
+returns = list(
+  description = "A smoothed classification result with reduced noise and improved spatial consistency.", 
+  schema = list(
+    type = "object", 
+    subtype = "datacube"
+  )
+  ),
+  operation = function(data, window_size = 7, neighborhood_fraction = 0.5, smoothness = 10, job = NULL){
+    if (!inherits(data, "SpatRaster")) {
+      stop("ml_smooth_class currently supports terra::SpatRaster inputs only.")
+    }
+
+    window_size <- as.integer(window_size)
+    smoothness <- as.integer(smoothness)
+    neighborhood_fraction <- as.numeric(neighborhood_fraction)
+
+    if (is.na(window_size) || window_size < 3 || (window_size %% 2) != 1) {
+      stop("`window_size` must be an odd integer greater than or equal to 3.")
+    }
+    if (is.na(neighborhood_fraction) || neighborhood_fraction < 0 || neighborhood_fraction > 1) {
+      stop("`neighborhood_fraction` must be between 0 and 1.")
+    }
+    if (is.na(smoothness) || smoothness < 1) {
+      stop("`smoothness` must be an integer greater than or equal to 1.")
+    }
+
+    w <- matrix(1, nrow = window_size, ncol = window_size)
+
+    if (terra::nlyr(data) == 1) {
+      modal_threshold_fun <- function(x) {
+        center_index <- ceiling(length(x) / 2)
+        center_value <- x[center_index]
+        valid_values <- x[!is.na(x)]
+
+        if (length(valid_values) == 0) {
+          return(NA_real_)
+        }
+
+        counts <- table(valid_values)
+        modal_value <- names(counts)[which.max(counts)]
+        modal_fraction <- max(counts) / length(valid_values)
+
+        if (modal_fraction >= neighborhood_fraction) {
+          return(as.numeric(modal_value))
+        }
+
+        return(center_value)
+      }
+
+      result <- data
+      for (i in seq_len(smoothness)) {
+        result <- terra::focal(
+          result,
+          w = w,
+          fun = modal_threshold_fun,
+          na.policy = "omit",
+          fillvalue = NA_real_
+        )
+      }
+
+      return(result)
+    }
+
+    alpha <- min(1, max(0, neighborhood_fraction))
+    result <- data
+
+    for (i in seq_len(smoothness)) {
+      smoothed <- terra::focal(
+        result,
+        w = w,
+        fun = mean,
+        na.policy = "omit",
+        fillvalue = NA_real_
+      )
+
+      result <- ((1 - alpha) * result) + (alpha * smoothed)
+
+      layer_sum <- terra::app(result, fun = function(v) {
+        if (all(is.na(v))) {
+          return(NA_real_)
+        }
+        sum(v, na.rm = TRUE)
+      })
+
+      result <- result / layer_sum
+    }
+
+    return(result)
+  } 
+)

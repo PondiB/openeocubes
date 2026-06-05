@@ -31,6 +31,7 @@ SessionInstance <- R6Class(
       self$processes = list()
       self$data = list()
       self$jobs = list()
+      self$job_executor = list()
 
       if (is.null(configuration) || class(configuration) != "ServerConfig") {
         configuration = SessionConfig()
@@ -223,29 +224,209 @@ SessionInstance <- R6Class(
     #' @description Enqueue a job for asynchronous execution
     enqueueJob = function(job) {
       shared_dir <- Sys.getenv("SHARED_TEMP_DIR", unset = "")
-      callr::r_bg(
-      func = function(job_obj, config, shared_dir) {
-        Sys.setenv(SHARED_TEMP_DIR = shared_dir)
-        library(openeocubes)
-        gdalcubes::gdalcubes_options(parallel = 8)
-        gdalcubes::gdalcubes_set_gdal_config("VSI_CACHE", "TRUE")
-        gdalcubes::gdalcubes_set_gdal_config("GDAL_CACHEMAX", "20%")
-        gdalcubes::gdalcubes_set_gdal_config("VSI_CACHE_SIZE", "5000000")
-        gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MULTIPLEX", "YES")
-        gdalcubes::gdalcubes_set_gdal_config("GDAL_INGESTED_BYTES_AT_OPEN", "32000")
-        gdalcubes::gdalcubes_set_gdal_config("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
-        gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_VERSION", "2")
-        gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES", "YES")
+      dir <- file.path(Session$getConfig()$workspace.path, job$output.folder)
+      if (!dir.exists(dir)) dir.create(dir, recursive = TRUE, showWarnings = FALSE)
 
-        createSessionInstance(config)
-        Session$initDirectory(cleanup = TRUE)
-        Session$assignJob(job_obj)
-        Session$runJob(job_obj)
-      },
-        args = list(job, Session$getConfig(), shared_dir),
+      stdout_file <- file.path(dir, "worker_stdout.log")
+      stderr_file <- file.path(dir, "worker_stderr.log")
+      error_file <- file.path(dir, "worker_error.txt")
+      
+      worker <- callr::r_bg(
+        func = function(job_obj, config, shared_dir, stdout_file, stderr_file) {
+          Sys.setenv(SHARED_TEMP_DIR = shared_dir)
+          con_out <- file(stdout_file, open = "wt")
+          con_err <- file(stderr_file, open = "wt")
+          sink(con_out, type = "output", split = FALSE)
+          sink(con_err, type = "message", split = FALSE)
+          on.exit({
+            sink(type = "message")
+            sink(type = "output")
+            close(con_out)
+            close(con_err)
+          }, add = TRUE)
+
+          library(openeocubes)
+          gdalcubes::gdalcubes_options(parallel = 8)
+          gdalcubes::gdalcubes_set_gdal_config("VSI_CACHE", "TRUE")
+          gdalcubes::gdalcubes_set_gdal_config("GDAL_CACHEMAX", "20%")
+          gdalcubes::gdalcubes_set_gdal_config("VSI_CACHE_SIZE", "5000000")
+          gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MULTIPLEX", "YES")
+          gdalcubes::gdalcubes_set_gdal_config("GDAL_INGESTED_BYTES_AT_OPEN", "32000")
+          gdalcubes::gdalcubes_set_gdal_config("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+          gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_VERSION", "2")
+          gdalcubes::gdalcubes_set_gdal_config("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES", "YES")
+
+          createSessionInstance(config)
+          openeocubes:::assignSessionResources()
+          Session$initDirectory(cleanup = FALSE)
+          Session$assignJob(job_obj)
+          Session$runJob(job_obj)
+        },
+        args = list(job, Session$getConfig(), shared_dir, stdout_file, stderr_file),
         stdout = "",
-        stderr = ""
+        stderr = "",
+        supervise = TRUE
       )
+
+      self$job_executor[[job$id]] <- list(
+        process = worker,
+        stdout = stdout_file,
+        stderr = stderr_file,
+        started_at = Sys.time()
+      )
+
+      Sys.sleep(0.1)
+      if (!isTRUE(worker$is_alive())) {
+        exit_status <- tryCatch(worker$get_exit_status(), error = function(e) NA_integer_)
+        detail <- private$lastNonEmptyLogLine(stderr_file)
+        if (is.null(detail) || !nzchar(detail)) {
+          detail <- private$lastNonEmptyLogLine(stdout_file)
+        }
+        if (is.null(detail) || !nzchar(detail)) {
+          detail <- sprintf("Background worker exited immediately with status %s.", as.character(exit_status))
+        }
+        writeLines(detail, error_file)
+        job$status <- "error"
+        writeJobInfo(job)
+        self$job_executor[[job$id]] <- NULL
+      }
+    },
+    
+    #' @description Reconcile async worker state with persisted job status
+    #' @param job Job to reconcile
+    reconcileJobStatus = function(job) {
+      if (is.null(job) || is.null(job$id) || !is.list(self$job_executor)) {
+        return(job)
+      }
+      if (!(job$id %in% names(self$job_executor))) {
+        return(job)
+      }
+
+      dir <- file.path(Session$getConfig()$workspace.path, job$output.folder)
+      if (!dir.exists(dir)) dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+      error_file <- file.path(dir, "worker_error.txt")
+
+      files <- setdiff(list.files(dir, all.files = FALSE), "jobInfo.txt")
+      result_files <- files[grepl("\\.tif(f)?$|\\.nc$", files, ignore.case = TRUE)]
+      has_result <- length(result_files) > 0
+
+      executor <- self$job_executor[[job$id]]
+      if (is.null(executor$process)) {
+        return(job)
+      }
+      worker <- executor$process
+      is_alive <- tryCatch(worker$is_alive(), error = function(e) NA)
+      if (isTRUE(is_alive)) {
+        timeout_sec <- suppressWarnings(as.numeric(Sys.getenv("OPENEO_ASYNC_JOB_TIMEOUT_SEC", unset = "1200")))
+        if (is.na(timeout_sec) || timeout_sec <= 0) {
+          timeout_sec <- 1200
+        }
+        stale_finalize_sec <- suppressWarnings(as.numeric(Sys.getenv("OPENEO_STALE_OUTPUT_FINALIZE_SEC", unset = "120")))
+        if (is.na(stale_finalize_sec) || stale_finalize_sec <= 0) {
+          stale_finalize_sec <- 120
+        }
+        running_secs <- if (!is.null(executor$started_at)) {
+          as.numeric(difftime(Sys.time(), executor$started_at, units = "secs"))
+        } else {
+          NA_real_
+        }
+        mtime_values <- if (has_result) {
+          file.info(file.path(dir, result_files))$mtime
+        } else {
+          as.POSIXct(character(0))
+        }
+        mtime_values <- mtime_values[!is.na(mtime_values)]
+        stable_secs <- if (length(mtime_values) > 0) {
+          as.numeric(difftime(Sys.time(), max(mtime_values), units = "secs"))
+        } else {
+          NA_real_
+        }
+        stderr_lines_alive <- if (file.exists(executor$stderr)) {
+          tryCatch(readLines(executor$stderr, warn = FALSE), error = function(e) character(0))
+        } else {
+          character(0)
+        }
+        has_export_started <- any(grepl(
+          "GeoTiff_output detected in the session|Geotiff run |The above format is being saved",
+          stderr_lines_alive,
+          fixed = FALSE
+        ))
+
+        if (has_result && has_export_started && !is.na(stable_secs) && stable_secs >= stale_finalize_sec) {
+          tryCatch(worker$kill(), error = function(e) NULL)
+          detail <- sprintf(
+            "Background worker stalled after export start; finalized as finished using stable output files (stable %.0fs).",
+            stable_secs
+          )
+          writeLines(detail, error_file)
+          job$status <- "finished"
+          writeJobInfo(job)
+          self$job_executor[[job$id]] <- NULL
+          return(job)
+        }
+
+        if (!is.na(running_secs) && running_secs > timeout_sec) {
+          tryCatch(worker$kill(), error = function(e) NULL)
+          if (has_result && !is.na(stable_secs) && stable_secs >= 30) {
+            detail <- sprintf(
+              "Background worker timed out after %.0fs; finalized as finished using existing output files.",
+              running_secs
+            )
+            writeLines(detail, error_file)
+            job$status <- "finished"
+            writeJobInfo(job)
+          } else {
+            detail <- sprintf(
+              "Background worker timed out after %.0fs before producing stable outputs.",
+              running_secs
+            )
+            writeLines(detail, error_file)
+            job$status <- "error"
+            writeJobInfo(job)
+          }
+          self$job_executor[[job$id]] <- NULL
+        }
+        return(job)
+      }
+
+      if (!is.null(job$status) && job$status %in% c("finished", "error", "canceled")) {
+        self$job_executor[[job$id]] <- NULL
+        return(job)
+      }
+
+      exit_status <- tryCatch(worker$get_exit_status(), error = function(e) NA_integer_)
+      stderr_lines <- if (file.exists(executor$stderr)) {
+        tryCatch(readLines(executor$stderr, warn = FALSE), error = function(e) character(0))
+      } else {
+        character(0)
+      }
+      has_done <- any(grepl("Done\\. The result can be downloaded\\.", stderr_lines, fixed = FALSE))
+
+      if (!is.na(exit_status) && exit_status == 0L && has_result) {
+        if (!has_done) {
+          detail <- "Background worker exited cleanly and output files exist, but completion marker was missing."
+          writeLines(detail, error_file)
+        }
+        job$status <- "finished"
+        writeJobInfo(job)
+      } else {
+        detail <- private$lastNonEmptyLogLine(executor$stderr)
+        if (is.null(detail) || !nzchar(detail)) {
+          detail <- private$lastNonEmptyLogLine(executor$stdout)
+        }
+        if (is.null(detail) || !nzchar(detail)) {
+          detail <- sprintf(
+            "Background worker exited with status %s before updating job status.",
+            as.character(exit_status)
+          )
+        }
+        writeLines(detail, error_file)
+        job$status <- "error"
+        writeJobInfo(job)
+      }
+
+      self$job_executor[[job$id]] <- NULL
+      return(job)
     },
     
     
@@ -277,6 +458,10 @@ SessionInstance <- R6Class(
             )
           } else if (format$title == "GeoTiff") {
             message("Geotiff run ")
+            old_parallel <- gdalcubes::gdalcubes_options()$parallel
+            if (is.null(old_parallel)) old_parallel <- 8L
+            gdalcubes::gdalcubes_options(parallel = 1L)
+            on.exit(gdalcubes::gdalcubes_options(parallel = old_parallel), add = TRUE)
             out_files <- gdalcubes::write_tif(job$results, dir = dir)
           } else {
             throwError("FormatUnsupported")
@@ -289,6 +474,10 @@ SessionInstance <- R6Class(
             )
           } else if (format == "GTiff") {
             message("GeoTiff_output detected in the session ")
+            old_parallel <- gdalcubes::gdalcubes_options()$parallel
+            if (is.null(old_parallel)) old_parallel <- 8L
+            gdalcubes::gdalcubes_options(parallel = 1L)
+            on.exit(gdalcubes::gdalcubes_options(parallel = old_parallel), add = TRUE)
             out_files <- gdalcubes::write_tif(job$results, dir = dir)
           } else {
             throwError("FormatUnsupported")
@@ -317,6 +506,9 @@ SessionInstance <- R6Class(
         
       }, error = function(e) {
         job$status <- "error"
+        error_dir <- file.path(Session$getConfig()$workspace.path, job$output.folder)
+        if (!dir.exists(error_dir)) dir.create(error_dir, recursive = TRUE, showWarnings = FALSE)
+        writeLines(conditionMessage(e), file.path(error_dir, "worker_error.txt"))
         writeJobInfo(job)
         throwError("Internal", message = e$message)
       })
@@ -329,6 +521,26 @@ SessionInstance <- R6Class(
     config = NULL,
     token = NULL,
     base_url = NULL,
+    
+    lastNonEmptyLogLine = function(path) {
+      if (is.null(path) || !file.exists(path)) {
+        return(NULL)
+      }
+      lines <- tryCatch(readLines(path, warn = FALSE), error = function(e) character(0))
+      if (length(lines) == 0) {
+        return(NULL)
+      }
+      lines <- trimws(lines)
+      lines <- lines[nzchar(lines)]
+      if (length(lines) == 0) {
+        return(NULL)
+      }
+      error_idx <- grep("(^error\\b|\\berror\\b|execution halted)", lines, ignore.case = TRUE)
+      if (length(error_idx) > 0) {
+        return(lines[[tail(error_idx, 1)]])
+      }
+      tail(lines, 1)
+    },
     
     initRouter = function() {
       private$router = Router$new()
