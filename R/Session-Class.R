@@ -307,7 +307,7 @@ SessionInstance <- R6Class(
       error_file <- file.path(dir, "worker_error.txt")
 
       files <- setdiff(list.files(dir, all.files = FALSE), "jobInfo.txt")
-      result_files <- files[grepl("\\.tif(f)?$|\\.nc$", files, ignore.case = TRUE)]
+      result_files <- .jobExportRasterFiles(files)
       has_result <- length(result_files) > 0
 
       executor <- self$job_executor[[job$id]]
@@ -402,8 +402,8 @@ SessionInstance <- R6Class(
       }
       has_done <- any(grepl("Done\\. The result can be downloaded\\.", stderr_lines, fixed = FALSE))
 
-      if (!is.na(exit_status) && exit_status == 0L && has_result) {
-        if (!has_done) {
+      if (!is.na(exit_status) && exit_status == 0L && (has_result || has_done)) {
+        if (!has_done && has_result) {
           detail <- "Background worker exited cleanly and output files exist, but completion marker was missing."
           writeLines(detail, error_file)
         }
@@ -462,7 +462,7 @@ SessionInstance <- R6Class(
             if (is.null(old_parallel)) old_parallel <- 8L
             gdalcubes::gdalcubes_options(parallel = 1L)
             on.exit(gdalcubes::gdalcubes_options(parallel = old_parallel), add = TRUE)
-            out_files <- gdalcubes::write_tif(job$results, dir = dir)
+            out_files <- gdalcubes::write_tif(job$results, dir = dir, prefix = "prediction")
           } else {
             throwError("FormatUnsupported")
           }
@@ -478,7 +478,7 @@ SessionInstance <- R6Class(
             if (is.null(old_parallel)) old_parallel <- 8L
             gdalcubes::gdalcubes_options(parallel = 1L)
             on.exit(gdalcubes::gdalcubes_options(parallel = old_parallel), add = TRUE)
-            out_files <- gdalcubes::write_tif(job$results, dir = dir)
+            out_files <- gdalcubes::write_tif(job$results, dir = dir, prefix = "prediction")
           } else {
             throwError("FormatUnsupported")
           }

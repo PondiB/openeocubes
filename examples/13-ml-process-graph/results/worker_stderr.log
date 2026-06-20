@@ -79,7 +79,7 @@ data cube is created:
                 128
             ],
             "cube_type": "image_collection",
-            "file": "/tmp/Rtmpcqi33b/file66d2f21fdea.db",
+            "file": "/tmp/RtmpzwCy3M/file395a5bb299.db",
             "strict": false,
             "view": {
                 "aggregation": "median",
@@ -190,7 +190,7 @@ Aggregate temporal period: P1M, using reducer: median
                             128
                         ],
                         "cube_type": "image_collection",
-                        "file": "/tmp/Rtmpcqi33b/file66d2f21fdea.db",
+                        "file": "/tmp/RtmpzwCy3M/file395a5bb299.db",
                         "strict": false,
                         "view": {
                             "aggregation": "median",
@@ -308,7 +308,7 @@ NDVI calculated ....
                                 128
                             ],
                             "cube_type": "image_collection",
-                            "file": "/tmp/Rtmpcqi33b/file66d2f21fdea.db",
+                            "file": "/tmp/RtmpzwCy3M/file395a5bb299.db",
                             "strict": false,
                             "view": {
                                 "aggregation": "median",
@@ -422,7 +422,7 @@ data cube is created:
                 128
             ],
             "cube_type": "image_collection",
-            "file": "/tmp/Rtmpcqi33b/file66d288b2c8e.db",
+            "file": "/tmp/RtmpzwCy3M/file3934f27b16.db",
             "strict": false,
             "view": {
                 "aggregation": "median",
@@ -533,7 +533,7 @@ Aggregate temporal period: P1M, using reducer: median
                             128
                         ],
                         "cube_type": "image_collection",
-                        "file": "/tmp/Rtmpcqi33b/file66d288b2c8e.db",
+                        "file": "/tmp/RtmpzwCy3M/file3934f27b16.db",
                         "strict": false,
                         "view": {
                             "aggregation": "median",
@@ -651,7 +651,7 @@ NDVI calculated ....
                                 128
                             ],
                             "cube_type": "image_collection",
-                            "file": "/tmp/Rtmpcqi33b/file66d288b2c8e.db",
+                            "file": "/tmp/RtmpzwCy3M/file3934f27b16.db",
                             "strict": false,
                             "view": {
                                 "aggregation": "median",
@@ -693,7 +693,7 @@ dims$x$low: -4.02003193769259
 dims$y$low: 48.1998742364355
 srs: "EPSG:4326"
 ========================
-Linking to GEOS 3.14.1, GDAL 3.13.0, PROJ 9.8.1; sf_use_s2() is TRUE
+Linking to GEOS 3.14.1, GDAL 3.13.1, PROJ 9.8.1; sf_use_s2() is TRUE
 Training data is loaded
 n features: 3172
 empty: 0 | invalid: 2554
@@ -758,16 +758,15 @@ Loading required package: lattice
 
 === Per-Class Metrics (7-Fold CV ~85/15) ===
 
-Macro-Avg Precision : 0.8617
-Macro-Avg Recall : 0.8519
-Macro-Avg F1 : 0.8565
-Overall Accuracy : 81.56%
-Kappa : 0.7636
+Macro-Avg Precision : 0.8623
+Macro-Avg Recall : 0.8497
+Macro-Avg F1 : 0.8556
+Overall Accuracy : 81.46%
+Kappa : 0.7623
 Result invoked in Executable Process
 external model loading...
 Preparing batched classic ML prediction...
 Bands: coastal, blue, green, red, rededge1, rededge2, rededge3, nir, nir08, nir09, swir16, swir22, NDVI
-[WARNING] 3 out of 90 chunks have repoprted errors / incompleteness. This is most likely caused by failed computations and/or inaccessible image data. Please check detailed output or run with debug option again.
 Batched predict pixels: 258168 of 258168; non-NA predictions: 258168
 Result invoked in Executable Process
 Data is being saved in format :

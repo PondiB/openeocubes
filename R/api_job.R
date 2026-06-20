@@ -1,3 +1,11 @@
+.jobExportRasterFiles <- function(files) {
+  raster <- files[grepl("\\.tif(f)?$|\\.nc$", files, ignore.case = TRUE)]
+  prediction <- raster[grepl("^prediction", raster, ignore.case = TRUE)]
+  if (length(prediction) > 0) {
+    return(prediction)
+  }
+  raster[!grepl("^cube_", raster, ignore.case = TRUE)]
+}
 
 refreshJobFromFile <- function(job) {
   tryCatch({
@@ -171,10 +179,11 @@ refreshJobFromFile <- function(job) {
 
       files <- setdiff(files, "jobInfo.txt")
       tifs <- files[grepl("\\.tif(f)?$", files, ignore.case = TRUE)]
+      export_tifs <- .jobExportRasterFiles(tifs)
       others <- setdiff(files, tifs)
 
       chosen_tif <- NULL
-      if (length(tifs) >= 1) chosen_tif <- tifs[1]
+      if (length(export_tifs) >= 1) chosen_tif <- export_tifs[1]
 
       has_results <- (length(others) > 0) || (!is.null(chosen_tif))
       if (!has_results) {
