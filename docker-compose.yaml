@@ -5,7 +5,7 @@ services:
     environment:
       - TZ=Etc/UTC
       - DEBIAN_FRONTEND=noninteractive
-      - OPENEO_ASYNC_JOB_TIMEOUT_SEC=1800
+      - OPENEO_ASYNC_JOB_TIMEOUT_SEC=7200
       - OPENEO_STALE_OUTPUT_FINALIZE_SEC=30
     container_name: openeocubes
     ports:

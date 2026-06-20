@@ -4,8 +4,8 @@ Connected to service:  http://localhost:8000
 Please check the terms of service (terms_of_service()) and the privacy policy (privacy_policy()). By further usage of this service, you acknowledge and agree to those terms and policies.
 Warning: Connected host is not production-ready. Unexpected errors might occur.
 Login successful.
-Created job: 738b57d434cd 
-Job '738b57d434cd' has been successfully queued for evaluation.
+Created job: 456721470490 
+Job '456721470490' has been successfully queued for evaluation.
 Job queued.
 Poll 1/480 - status: queued
 Poll 2/480 - status: running
@@ -94,19 +94,7 @@ Poll 84/480 - status: running
 Poll 85/480 - status: running
 Poll 86/480 - status: running
 Poll 87/480 - status: running
-Poll 88/480 - status: running
-Poll 89/480 - status: running
-Poll 90/480 - status: running
-Poll 91/480 - status: running
-Poll 92/480 - status: running
-Poll 93/480 - status: running
-Poll 94/480 - status: running
-Poll 95/480 - status: running
-Poll 96/480 - status: running
-Poll 97/480 - status: running
-Poll 98/480 - status: running
-Poll 99/480 - status: running
-Poll 100/480 - status: finished
+Poll 88/480 - status: finished
 Job finished successfully.
 Assets:
 Results for job:  
@@ -118,13 +106,13 @@ Results for job:
 4         worker_stdout.log
 5 prediction_classes.json.1
 6            prediction.tif
-                                                                    href
-1        http://localhost:8000/jobs/738b57d434cd/prediction_classes.json
-2               http://localhost:8000/jobs/738b57d434cd/worker_error.txt
-3              http://localhost:8000/jobs/738b57d434cd/worker_stderr.log
-4              http://localhost:8000/jobs/738b57d434cd/worker_stdout.log
-5        http://localhost:8000/jobs/738b57d434cd/prediction_classes.json
-6 http://localhost:8000/jobs/738b57d434cd/cube_66d569f51152017-05-01.tif
+                                                              href
+1  http://localhost:8000/jobs/456721470490/prediction_classes.json
+2         http://localhost:8000/jobs/456721470490/worker_error.txt
+3        http://localhost:8000/jobs/456721470490/worker_stderr.log
+4        http://localhost:8000/jobs/456721470490/worker_stdout.log
+5  http://localhost:8000/jobs/456721470490/prediction_classes.json
+6 http://localhost:8000/jobs/456721470490/prediction2017-05-01.tif
 Downloaded: /Users/brianpondi/ml-dev/openeocubes/examples/13-ml-process-graph/results/prediction.tif 
 Downloaded: /Users/brianpondi/ml-dev/openeocubes/examples/13-ml-process-graph/results/prediction_classes.json 
 Results downloaded to: /Users/brianpondi/ml-dev/openeocubes/examples/13-ml-process-graph/results 
