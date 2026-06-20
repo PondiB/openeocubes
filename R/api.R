@@ -201,7 +201,7 @@ NULL
         if (format$title == "Network Common Data Form") {
           file <- gdalcubes::write_ncdf(job$results)
         } else if (format$title == "GeoTiff") {
-          file <- gdalcubes::write_tif(job$results)
+          file <- gdalcubes::write_tif(job$results, prefix = "prediction")
         } else {
           throwError("FormatUnsupported")
         }
@@ -209,7 +209,7 @@ NULL
         if (format == "NetCDF") {
           file <- gdalcubes::write_ncdf(job$results)
         } else if (format == "GTiff") {
-          file <- gdalcubes::write_tif(job$results)
+          file <- gdalcubes::write_tif(job$results, prefix = "prediction")
         } else {
           throwError("FormatUnsupported")
         }

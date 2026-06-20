@@ -92,24 +92,24 @@
 [45,] "30UVU" "42.379686"
                    Reference
 Prediction          barley corn permanent meadows rapeseed temporary meadows
-  barley               160    0                 1        1                 7
+  barley               158    0                 2        0                 6
   corn                   1  693                 5        0                15
-  permanent meadows      3    3               416        0               211
+  permanent meadows      3    2               413        0               210
   rapeseed               0    0                 0       94                 0
-  temporary meadows      6   13               256        4               644
-  wheat                 13    0                 5        0                 4
+  temporary meadows      7   13               259        5               646
+  wheat                 14    1                 4        0                 4
                    Reference
 Prediction          wheat
-  barley               10
+  barley                9
   corn                  1
   permanent meadows     4
   rapeseed              0
-  temporary meadows     0
+  temporary meadows     1
   wheat               483
              Class Precision Recall     F1 Specificity Balanced_Accuracy
-            barley    0.8939 0.8743 0.8840      0.9934            0.9338
+            barley    0.9029 0.8634 0.8827      0.9941            0.9287
               corn    0.9692 0.9774 0.9733      0.9906            0.9840
- permanent meadows    0.6531 0.6091 0.6303      0.9068            0.7579
+ permanent meadows    0.6535 0.6047 0.6281      0.9076            0.7561
           rapeseed    1.0000 0.9495 0.9741      1.0000            0.9747
- temporary meadows    0.6977 0.7310 0.7140      0.8715            0.8013
-             wheat    0.9564 0.9699 0.9631      0.9914            0.9806
+ temporary meadows    0.6939 0.7333 0.7130      0.8688            0.8010
+             wheat    0.9545 0.9699 0.9622      0.9910            0.9804

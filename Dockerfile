@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsqlite3-dev libboost-all-dev \
     libsodium-dev libudunits2-dev libuv1-dev \
     libfontconfig1-dev libfreetype6-dev libgit2-dev \
+    libgomp1 \
     zlib1g-dev libunwind-dev libssl-dev libxml2-dev \
     doxygen graphviz \
     python3 python3-pip python3-dev \
@@ -37,19 +38,32 @@ ENV PKG_CONFIG_PATH="/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PAT
 RUN R -e "install.packages(c('remotes'), repos='https://cloud.r-project.org')"
 RUN R -e "install.packages(c('devtools'), repos='https://cloud.r-project.org')"
 
-RUN R -e "install.packages(c('gdalcubes','plumber','useful','ids','R6','s2','sf','rstac','bfast','geojsonsf'), repos='https://cloud.r-project.org')"
+RUN R -e "options(warn=2, timeout=600); \
+  install.packages(c('gdalcubes','plumber','useful','ids','R6','s2','sf','rstac','bfast','geojsonsf','clue'), repos='https://cloud.r-project.org'); \
+  missing <- c('gdalcubes','plumber','useful','sf','rstac','clue'); \
+  if (length(missing <- missing[!sapply(missing, requireNamespace, quietly=TRUE)])) \
+    stop('Missing R packages after install: ', paste(missing, collapse=', '))"
 
 # Install missing required packages explicitly
 # Note: stats and tools are base R packages, no need to install
-RUN R -e "install.packages(c('kernlab','readr','reticulate','xgboost','randomForest','terra','abind','tidyr','httr','caret','torch','dplyr','base64enc','jsonlite','tibble','rlang'), repos='https://cloud.r-project.org')"
-RUN R -e "library(torch); if (!torch_is_installed()) install_torch(restart_session = FALSE)"
+RUN R -e "options(warn=2, timeout=600); \
+  install.packages(c('kernlab','readr','reticulate','xgboost','randomForest','terra','abind','tidyr','httr','caret','dplyr','base64enc','jsonlite','tibble','rlang'), repos='https://cloud.r-project.org')"
+RUN R -e "options(timeout = 600, download.file.method = 'libcurl'); \
+  Sys.setenv(TORCH_INSTALL = '1'); \
+  install.packages('torch', repos = 'https://cloud.r-project.org'); \
+  library(torch); \
+  if (!torch_is_installed()) install_torch(restart_session = FALSE); \
+  if (!torch_is_installed()) stop('torch Lantern install failed'); \
+  t <- torch_tensor(1L); \
+  stopifnot(as.numeric(t) == 1L); \
+  message('Lantern OK')"
 
 RUN mkdir -p /opt/dockerfiles/ /var/openeo/workspace/ /var/openeo/workspace/data/
 
 COPY ./ /opt/dockerfiles/
-RUN Rscript -e "options(warn=2); \
+RUN Rscript -e "options(warn=2, timeout = 600); \
   message('Installing openeocubes package...'); \
-  remotes::install_local('/opt/dockerfiles', dependencies = TRUE, force = TRUE, verbose = TRUE); \
+  remotes::install_local('/opt/dockerfiles', dependencies = FALSE, force = TRUE, verbose = TRUE); \
   message('Checking if package is installed:'); \
   if(!('openeocubes' %in% rownames(installed.packages()))) stop('openeocubes package not installed!')"
 
