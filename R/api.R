@@ -8,6 +8,7 @@
 #' @include process-graph-adapter.R
 #' @include api_job.R
 #' @include api_process_graphs.R
+#' @include api_ml.R
 NULL
 
 
@@ -439,6 +440,8 @@ Session$createEndpoint(
       })
     }
   )
+
+  addMlEndpoints()
 
   Session$createEndpoint(
   path = "/favicon.ico",

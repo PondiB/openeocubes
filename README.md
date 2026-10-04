@@ -278,6 +278,28 @@ Visualization of the output from the above process:
 ![bfast change detection](docs/change_over_period.png)
 
 
+## Machine Learning discovery endpoints
+
+openEOcubes serves the endpoints of the proposed openEO L3-ML API profile. They need no authentication. The contract is in [docs/openapi-ml.yaml](docs/openapi-ml.yaml).
+
+| Endpoint | Returns |
+|---|---|
+| `GET /ml_runtimes` | ML frameworks (`caret`, `xgboost`, `torch`) with, per version: training/inference support, loadable and savable `mlm:artifact_type` values, workflow types, training data formats and accelerators |
+| `GET /ml_models?limit=&offset=` | Models saved with `save_ml_model`, as STAC MLM Items with download links |
+| `GET /ml_models/{model_id}` | One stored model as a full STAC MLM Item |
+
+The runtimes are derived from the installed R packages. To declare them explicitly, set `config$ml_runtimes` to the response body before `createSessionInstance(config)`.
+
+A model id from `GET /ml_models` can be passed to `load_ml_model`:
+
+```r
+model = p$load_ml_model(url = "rf_demo")
+prediction = p$ml_predict(data = cube, model = model)
+```
+
+If the stored model does not match a runtime of the backend, `load_ml_model` fails with `ModelIncompatible` and names the STAC MLM field (`mlm:framework` or `mlm:artifact_type`).
+
+
 ## Citation:
 
 If you use this codebase, or otherwise found our work valuable, please cite:
