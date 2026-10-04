@@ -15,6 +15,8 @@ throwError <- function(code = "Internal", message = NULL, status = NULL) {
       code,
       "AuthenticationRequired" = 401L,
       "CredentialsInvalid"     = 401L,
+      "TokenInvalid"           = 403L,
+      "CollectionNotFound"     = 404L,
       "JobNotFound"            = 404L,
       "JobNotFinished"         = 400L,
       "JobFailed"              = 500L,
@@ -44,6 +46,23 @@ throwError <- function(code = "Internal", message = NULL, status = NULL) {
   stop(cond)
 }
 
+# Find the plumber response of the handler that is currently running.
+# The call stack is searched rather than the lexical scope: as a tryCatch()
+# handler, handleError() is called from base R frames, and a lexical lookup of
+# `res` reaches the search path and finds terra::res().
+.currentPlumberResponse <- function() {
+  for (i in rev(seq_len(sys.nframe()))) {
+    env <- sys.frame(i)
+    if (exists("res", envir = env, inherits = FALSE)) {
+      candidate <- get("res", envir = env, inherits = FALSE)
+      if (inherits(candidate, "PlumberResponse")) {
+        return(candidate)
+      }
+    }
+  }
+  NULL
+}
+
 #' Generischer Error-Handler für tryCatch(error = handleError)
 handleError <- function(e) {
   # Logging
@@ -61,12 +80,12 @@ handleError <- function(e) {
     text   <- msg
   }
   
-  # Versuche, die plumber-Response aus dem Eltern-Frame zu bekommen
-  pf  <- parent.frame()
-  res <- tryCatch(get("res", envir = pf), error = function(...) NULL)
+  # HTTP-Status auf der plumber-Response des aufrufenden Handlers setzen.
+  # Content-Type setzt der Serializer; ein zweiter setHeader() würde den
+  # Header duplizieren.
+  res <- .currentPlumberResponse()
   if (!is.null(res)) {
     res$status <- status
-    res$setHeader("Content-Type", "application/json; charset=utf-8")
   }
   
   # Genau das, worauf dein Test prüft:

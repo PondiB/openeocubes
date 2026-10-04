@@ -553,7 +553,6 @@ SessionInstance <- R6Class(
         method = "GET",
         handler = function(req, res, path) {
           res$status <- 404
-          res$setHeader("Content-Type", "application/json; charset=utf-8")
           list(
             code    = "NotFound",
             message = paste0("The requested resource '", req$PATH_INFO, "' does not exist.")
