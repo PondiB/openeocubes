@@ -39,10 +39,19 @@ RUN R -e "install.packages(c('remotes'), repos='https://cloud.r-project.org')"
 RUN R -e "install.packages(c('devtools'), repos='https://cloud.r-project.org')"
 
 RUN R -e "options(warn=2, timeout=600); \
-  install.packages(c('gdalcubes','plumber','useful','ids','R6','s2','sf','rstac','bfast','geojsonsf','clue'), repos='https://cloud.r-project.org'); \
-  missing <- c('gdalcubes','plumber','useful','sf','rstac','clue'); \
+  install.packages(c('plumber','useful','ids','R6','s2','sf','rstac','bfast','geojsonsf','clue'), repos='https://cloud.r-project.org'); \
+  missing <- c('plumber','useful','sf','rstac','clue'); \
   if (length(missing <- missing[!sapply(missing, requireNamespace, quietly=TRUE)])) \
     stop('Missing R packages after install: ', paste(missing, collapse=', '))"
+
+# gdalcubes was archived on CRAN on 2026-09-16. Pin the upstream 0.7.5 release
+# candidate (includes the filter_geom() segfault fix used by filter_spatial);
+# switch back to CRAN once 0.7.5 is published there.
+ARG GDALCUBES_REF=ed683314c2742d4f707bb5cddfc57c5e959765ef
+RUN R -e "options(timeout=600, repos='https://cloud.r-project.org'); \
+  remotes::install_url('https://github.com/appelmar/gdalcubes/archive/${GDALCUBES_REF}.tar.gz', upgrade = 'never'); \
+  if (!requireNamespace('gdalcubes', quietly = TRUE) || packageVersion('gdalcubes') < '0.7.5') \
+    stop('gdalcubes ${GDALCUBES_REF} install failed')"
 
 # Install missing required packages explicitly
 # Note: stats and tools are base R packages, no need to install
