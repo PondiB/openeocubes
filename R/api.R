@@ -8,14 +8,13 @@
 #' @include process-graph-adapter.R
 #' @include api_job.R
 #' @include api_process_graphs.R
+#' @include api_ml.R
 NULL
 
 
 
 
 .capabilities = function(req, res) {
-  
-  res$setHeader("Content-Type", "application/json; charset=utf-8")
   
   config    = Session$getConfig()
   endpoints = Session$getEndpoints()
@@ -99,7 +98,11 @@ NULL
 .collectionId <- function(req, res, collection_id) {
   tryCatch(
     {
-      return(Session$data[[collection_id]]$collectionInfoExtended())
+      collection <- Session$data[[collection_id]]
+      if (is.null(collection)) {
+        throwError("CollectionNotFound", sprintf("Collection '%s' does not exist.", collection_id))
+      }
+      return(collection$collectionInfoExtended())
     },
     error = handleError
   )
@@ -172,15 +175,15 @@ NULL
 
     auth <- req$HTTP_AUTHORIZATION
     if (is.null(auth) || !nzchar(auth)) {
-      throwError("AuthenticationRequired")
+      throwError("AuthenticationRequired", "Unauthorized. Authentication is required.")
     }
 
     sub <- substr(auth, 15, nchar(auth))
     token <- Session$getToken()
 
-    if (sub != token) {
-      res$status <- 403
-      return(list(error = "AuthenticationFailed"))
+    # No token is issued before the first login.
+    if (is.null(token) || !identical(sub, token)) {
+      throwError("TokenInvalid", "Authorization token has expired or is invalid. Please authenticate again.")
     }
 
     forward()
@@ -251,6 +254,8 @@ NULL
   )
   
   res$status <- 204
+  # Returning the response skips serialization, so a 204 has no body.
+  res
 }
 
 
@@ -435,6 +440,8 @@ Session$createEndpoint(
       })
     }
   )
+
+  addMlEndpoints()
 
   Session$createEndpoint(
   path = "/favicon.ico",

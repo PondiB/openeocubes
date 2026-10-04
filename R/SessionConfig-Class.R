@@ -83,7 +83,11 @@ SessionConfig = function(api.port = NULL, host = NULL, aws.ipv4 = NULL) {
       )
       ),
 
-    OGC_conformanceLink = "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core"
+    OGC_conformanceLink = "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core",
+
+    # Body of GET /ml_runtimes. NULL derives it from the installed R packages
+    # (see .ml_runtimes_default()); set a list to declare runtimes explicitly.
+    ml_runtimes = NULL
   )
 
   class(default) = "ServerConfig"

@@ -4505,7 +4505,8 @@ load_ml_model <- Process$new(
         "String, der entweder ist:",
         "- eine HTTP/HTTPS-URL oder ein lokaler Pfad zu .rds/.onnx/.pt, oder",
         "- eine YAML-Konfiguration (Pfad zu .yaml oder YAML-Text wie config_mt_crop_*.yaml), oder",
-        "- eine STAC-MLM-GeoJSON-Datei (lokal oder per HTTP/HTTPS).",
+        "- eine STAC-MLM-GeoJSON-Datei (lokal oder per HTTP/HTTPS), oder",
+        "- die ID eines unter GET /ml_models gelisteten Modells.",
         "Direkte .ckpt-Pfade/-URLs sind verboten – dafür bitte YAML oder STAC-MLM verwenden."
       ),
       schema = list(type = "string")
@@ -4778,6 +4779,16 @@ load_ml_model <- Process$new(
       stop("The ‘url’ parameter must not be empty.")
     }
     
+    # Model id from GET /ml_models: only consulted when 'url' is neither an
+    # existing file, a URL nor YAML text, so other inputs behave as before.
+    if (looks_like_path(url) && !file.exists(url) && !is_yaml_text(url)) {
+      stored_model <- .ml_resolve_stored_model(url)
+      if (!is.null(stored_model)) {
+        message("Resolved stored model id '", url, "' to ", stored_model)
+        url <- stored_model
+      }
+    }
+    
     
     use_yaml <- FALSE
     use_stac <- FALSE
@@ -4807,8 +4818,6 @@ load_ml_model <- Process$new(
       } else if (is_yaml_text(url)) {
         use_yaml <- TRUE
       }
-      
-      destfile
     }
     
     if (use_yaml) {
