@@ -9,6 +9,11 @@ Router = R6Class(
       } else {
         private$envir <- envir
       }
+
+      # plumber's own initialize() sets this; without it, routes registered
+      # without a serializer (OPTIONS, not-found handler) fail with
+      # "Serializers must be closures".
+      self$setSerializer(serializer_unboxed_json())
       
       private$errorHandler <- function(req, res, err) {
         handleError(err)  
