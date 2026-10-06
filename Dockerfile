@@ -36,7 +36,6 @@ RUN git clone --depth 1 --branch 20230802.1 https://github.com/abseil/abseil-cpp
 ENV PKG_CONFIG_PATH="/usr/local/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
 RUN R -e "install.packages(c('remotes'), repos='https://cloud.r-project.org')"
-RUN R -e "install.packages(c('devtools'), repos='https://cloud.r-project.org')"
 
 RUN R -e "options(warn=2, timeout=600); \
   install.packages(c('plumber','useful','ids','R6','s2','sf','rstac','bfast','geojsonsf','clue'), repos='https://cloud.r-project.org'); \
